@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 import swaggerUi from 'swagger-ui-express';
 import dotenv from 'dotenv';
 import { ModuleLoader } from './src/core/utils/module-loader.js';
-import { AuthModule, WalletModule, KYCModule, HomeModule, CountryModule, CryptoModule, DepositModule, ExchangeModule, ConversionModule, TransferModule, PaymentSettingsModule } from './src/modules/index.js';
+import { AuthModule, WalletModule, KYCModule, HomeModule, CountryModule, CryptoModule, DepositModule, ExchangeModule, ConversionModule, TransferModule, PaymentSettingsModule, P2PModule } from './src/modules/index.js';
 import { authMiddleware } from './src/core/middleware/auth.middleware.js';
 import ApiError from './src/core/utils/ApiError.js';
 import { swaggerSpec } from './src/core/config/swagger.js';
@@ -160,6 +160,10 @@ moduleLoader.registerMany([
   },
   {
     module: new PaymentSettingsModule(),
+    middleware: [authMiddleware],
+  },
+  {
+    module: new P2PModule(),
     middleware: [authMiddleware],
   },
 ]);

@@ -14,6 +14,7 @@ export { ExchangeModule } from './exchange/exchange.module.js';
 export { ConversionModule } from './conversion/conversion.module.js';
 export { TransferModule } from './transfer/transfer.module.js';
 export { PaymentSettingsModule } from './payment-settings/payment-settings.module.js';
+export { P2PModule } from './p2p/p2p.module.js';
 
 // Add more module exports here as you create them
 // export { TransactionModule } from './transaction/transaction.module.js';

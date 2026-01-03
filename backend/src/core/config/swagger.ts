@@ -135,6 +135,7 @@ const options: swaggerJsdoc.Options = {
       { name: 'Conversion', description: 'Currency conversion between fiat wallets' },
       { name: 'Transfer', description: 'Fiat transfers (RhionX user, bank account, mobile money)' },
       { name: 'Payment Settings', description: 'User payment method management (bank accounts, mobile money)' },
+      { name: 'P2P', description: 'P2P trading advertisements (buy/sell ads)' },
       { name: 'Health', description: 'Health check endpoints' },
     ],
   },
