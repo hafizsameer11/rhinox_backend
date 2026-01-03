@@ -1,0 +1,119 @@
+version: "3.9"
+
+services:
+  # ---------- DATABASE ----------
+  mysql:
+    image: mysql:8.0
+    container_name: rhinox_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: rhinox_pay
+      MYSQL_USER: rhinox
+      MYSQL_PASSWORD: rhinox
+    ports:
+      - "3307:3306"
+    command:
+      [
+        "--default-authentication-plugin=mysql_native_password",
+        "--character-set-server=utf8mb4",
+        "--collation-server=utf8mb4_unicode_ci"
+      ]
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - mysql_backups:/backups
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------- CACHE / QUEUE ----------
+  redis:
+    image: redis:7
+    container_name: rhinox_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------- DB GUI ----------
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: rhinox_phpmyadmin
+    restart: always
+    ports:
+      - "8080:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: root
+      PMA_PASSWORD: root
+    depends_on:
+      - mysql
+
+  # ---------- NODE BACKEND ----------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rhinox_backend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: mysql://rhinox:rhinox@mysql:3306/rhinox_pay
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ./backend:/app
+      # - /app/node_modules
+      - ./backend/uploads:/app/uploads  # File uploads directory
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ---------- BACKUP SERVICE ----------
+  mysql-backup:
+    image: mysql:8.0
+    container_name: rhinox_mysql_backup
+    restart: "no"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_HOST: mysql
+      MYSQL_DATABASE: rhinox_pay
+      MYSQL_USER: rhinox
+      MYSQL_PASSWORD: rhinox
+    volumes:
+      - mysql_backups:/backups
+      - ./scripts/backup.sh:/backup.sh:ro
+    entrypoint: /bin/bash
+    command: -c "chmod +x /backup.sh && /backup.sh"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    profiles:
+      - backup
+
+volumes:
+  mysql_data:
+    name: rhinox_mysql_data
+    driver: local
+  mysql_backups:
+    name: rhinox_mysql_backups
+    driver: local
+  redis_data:
+    name: rhinox_redis_data
+    driver: local
+
+networks:
+  default:
+    name: rhinox_network
