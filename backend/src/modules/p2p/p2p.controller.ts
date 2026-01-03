@@ -42,13 +42,17 @@ export class P2PController {
    *                 minLength: 2
    *                 maxLength: 10
    *                 example: "BTC"
-   *                 description: Cryptocurrency symbol to buy. Examples: BTC, USDT, ETH, BNB, SOL, etc.
+   *                 description: |
+   *                   Cryptocurrency symbol to buy.
+   *                   Examples: BTC, USDT, ETH, BNB, SOL, etc.
    *               fiatCurrency:
    *                 type: string
    *                 minLength: 3
    *                 maxLength: 3
    *                 example: "NGN"
-   *                 description: Fiat currency to receive payment in. Examples: NGN, USD, KES, GHS.
+   *                 description: |
+   *                   Fiat currency to receive payment in.
+   *                   Examples: NGN, USD, KES, GHS.
    *               price:
    *                 type: string
    *                 example: "1500.00"
@@ -101,7 +105,9 @@ export class P2PController {
    *                 minLength: 2
    *                 maxLength: 2
    *                 example: "NG"
-   *                 description: Optional. ISO country code (2 letters) for the ad. Examples: NG, KE, GH.
+   *                 description: |
+   *                   Optional. ISO country code (2 letters) for the ad.
+   *                   Examples: NG, KE, GH.
    *               description:
    *                 type: string
    *                 maxLength: 500
@@ -159,7 +165,8 @@ export class P2PController {
    *                       type: string
    *                       enum: [available]
    *                       example: "available"
-   *                       description: Ad status. Can be: available, unavailable, paused
+   *                       description: |
+   *                         Ad status. Can be: available, unavailable, paused
    *                     isOnline:
    *                       type: boolean
    *                       example: true

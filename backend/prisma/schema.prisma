@@ -337,6 +337,7 @@ model WalletCurrency {
   currency        String           @db.VarChar(50)
   symbol          String?          @db.VarChar(255)
   name            String           @db.VarChar(255)
+  icon            String?          // Path to icon image in uploads/wallet_symbols
   price           Decimal?         @db.Decimal(20, 8)
   nairaPrice      Decimal?         @map("naira_price") @db.Decimal(20, 8)
   tokenType       String?          @map("token_type") @db.VarChar(50)

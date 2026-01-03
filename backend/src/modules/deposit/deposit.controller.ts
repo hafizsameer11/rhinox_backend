@@ -216,19 +216,25 @@ export class DepositController {
    *               amount:
    *                 type: string
    *                 example: "2000000"
-   *                 description: Deposit amount as a string (to avoid precision issues). Must be greater than 0. Example: "2000000" for 2,000,000 NGN.
+   *                 description: |
+   *                   Deposit amount as a string (to avoid precision issues). Must be greater than 0.
+   *                   Example: "2000000" for 2,000,000 NGN.
    *               currency:
    *                 type: string
    *                 minLength: 3
    *                 maxLength: 3
    *                 example: "NGN"
-   *                 description: Currency code (ISO 4217). Must match the country's currency. Examples: NGN, KES, GHS, USD.
+   *                 description: |
+   *                   Currency code (ISO 4217). Must match the country's currency.
+   *                   Examples: NGN, KES, GHS, USD.
    *               countryCode:
    *                 type: string
    *                 minLength: 2
    *                 maxLength: 2
    *                 example: "NG"
-   *                 description: ISO country code (2 letters). Examples: NG (Nigeria), KE (Kenya), GH (Ghana).
+   *                 description: |
+   *                   ISO country code (2 letters).
+   *                   Examples: NG (Nigeria), KE (Kenya), GH (Ghana).
    *               channel:
    *                 type: string
    *                 enum: [bank_transfer, mobile_money]
@@ -325,7 +331,9 @@ export class DepositController {
    *                   example: false
    *                 message:
    *                   type: string
-   *                   example: "Amount, currency, country code, and channel are required" or "Provider ID is required for mobile money deposits"
+   *                   example: "Amount, currency, country code, and channel are required"
+   *                   description: |
+   *                     Error message. Examples: "Amount, currency, country code, and channel are required" or "Provider ID is required for mobile money deposits"
    *       401:
    *         description: Unauthorized - authentication required
    *         $ref: '#/components/schemas/Error'
@@ -477,7 +485,9 @@ export class DepositController {
    *                   example: false
    *                 message:
    *                   type: string
-   *                   example: "Invalid PIN" or "Transaction not found" or "Transaction already completed"
+   *                   example: "Invalid PIN"
+   *                   description: |
+   *                     Error message. Examples: "Invalid PIN" or "Transaction not found" or "Transaction already completed"
    *       401:
    *         description: Unauthorized - authentication required
    *         $ref: '#/components/schemas/Error'

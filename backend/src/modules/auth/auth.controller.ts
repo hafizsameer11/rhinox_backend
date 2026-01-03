@@ -126,7 +126,9 @@ export class AuthController {
    *                   example: false
    *                 message:
    *                   type: string
-   *                   example: "User with this email already exists" or "Email and password are required"
+   *                   example: "User with this email already exists"
+   *                   description: |
+   *                     Error message. Examples: "User with this email already exists" or "Email and password are required"
    *       500:
    *         description: Internal server error
    *         $ref: '#/components/schemas/Error'
@@ -509,7 +511,9 @@ export class AuthController {
    *                   example: false
    *                 message:
    *                   type: string
-   *                   example: "Invalid or expired OTP code" or "OTP code must be 5 digits"
+   *                   example: "Invalid or expired OTP code"
+   *                   description: |
+   *                     Error message. Examples: "Invalid or expired OTP code" or "OTP code must be 5 digits"
    *       401:
    *         description: Unauthorized or user ID missing
    *         $ref: '#/components/schemas/Error'

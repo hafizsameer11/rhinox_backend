@@ -226,6 +226,7 @@ export class CryptoService {
       currency: token.currency,
       symbol: token.symbol || 'USDT',
       name: token.name,
+      icon: this.getCurrencyIcon(token.icon, token.symbol || 'USDT', token.currency),
       contractAddress: token.contractAddress,
       decimals: token.decimals,
       isToken: token.isToken,
@@ -262,6 +263,7 @@ export class CryptoService {
       currency: token.currency,
       symbol: token.symbol || symbol.toUpperCase(),
       name: token.name,
+      icon: this.getCurrencyIcon(token.icon, token.symbol || symbol.toUpperCase(), token.currency),
       contractAddress: token.contractAddress,
       decimals: token.decimals,
       isToken: token.isToken,
@@ -318,6 +320,39 @@ export class CryptoService {
     }
     
     return `${symbol} (${blockchainName})`;
+  }
+
+  /**
+   * Get currency icon path
+   * Checks database icon field first, then falls back to uploads/wallet_symbols folder
+   */
+  private getCurrencyIcon(icon: string | null | undefined, symbol: string, currency: string): string | null {
+    // If icon is set in database, use it
+    if (icon) {
+      return `/uploads/wallet_symbols/${icon}`;
+    }
+
+    // Map common currency symbols to image filenames
+    const iconMap: { [key: string]: string } = {
+      'BTC': 'btc.png',
+      'ETH': 'ETH.png',
+      'USDT': 'TUSDT.png',
+      'TRX': 'trx.png',
+      'SOL': 'sol.png',
+      'MATIC': 'polygon-matic-logo.png',
+      'BNB': 'BSC.png',
+      'DOGE': 'dogecoin-doge-logo.png',
+      'XRP': 'xrp-xrp-logo.png',
+    };
+
+    // Try symbol first, then currency
+    const iconFile = iconMap[symbol.toUpperCase()] || iconMap[currency.toUpperCase()];
+    
+    if (iconFile) {
+      return `/uploads/wallet_symbols/${iconFile}`;
+    }
+
+    return null;
   }
 }
 

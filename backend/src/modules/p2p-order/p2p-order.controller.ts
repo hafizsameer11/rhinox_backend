@@ -12,10 +12,23 @@ export class P2POrderController {
    * @swagger
    * /api/p2p/ads/browse:
    *   get:
-   *     summary: Browse all available P2P ads (public)
+   *     summary: [PUBLIC] Browse P2P ads - Market listing
    *     description: |
+   *       **UI Flow: P2P Market → Browse Ads**
+   *       
    *       Get a list of all available P2P advertisements. This endpoint is public and does not require authentication.
    *       Users can filter ads by type (buy/sell), cryptocurrency, fiat currency, country, and price range.
+   *       
+   *       **Important - API Visibility:**
+   *       - When user filters by `type=buy`: Shows vendor SELL ads (user can buy from vendor)
+   *       - When user filters by `type=sell`: Shows vendor BUY ads (user can sell to vendor)
+   *       - Response includes `userAction` field showing what action user can take (buy/sell)
+   *       
+   *       **Response includes:**
+   *       - `type`: Original ad type (for internal use)
+   *       - `userAction`: What user sees (buy/sell) - use this for UI labels
+   *       - Vendor information, prices, limits, payment methods
+   *       
    *       Results are paginated and sorted by creation date (newest first).
    *     tags: [P2P Order]
    *     parameters:
@@ -24,7 +37,10 @@ export class P2POrderController {
    *         schema:
    *           type: string
    *           enum: [buy, sell]
-   *         description: Filter by ad type. 'buy' = vendor wants to buy crypto, 'sell' = vendor wants to sell crypto.
+   *         description: |
+   *           Filter by user action (what user wants to do).
+   *           - "buy": Show ads where user can BUY crypto (vendor SELL ads)
+   *           - "sell": Show ads where user can SELL crypto (vendor BUY ads)
    *       - in: query
    *         name: cryptoCurrency
    *         schema:
@@ -167,10 +183,23 @@ export class P2POrderController {
    * @swagger
    * /api/p2p/ads/{id}:
    *   get:
-   *     summary: Get ad details (public)
+   *     summary: [PUBLIC] Get ad details - View ad before creating order
    *     description: |
-   *       Get detailed information about a specific P2P ad, including vendor information and accepted payment methods.
+   *       **UI Flow: Browse Ads → Select Ad → View Details**
+   *       
+   *       Get detailed information about a specific P2P ad, including:
+   *       - Vendor information and reputation
+   *       - Accepted payment methods (with masked account details)
+   *       - Price, limits, available quantity
+   *       - Processing time and response time
+   *       
+   *       **Response includes:**
+   *       - `type`: Original ad type (for internal use)
+   *       - `userAction`: What user can do (buy/sell) - use this for UI labels
+   *       - `paymentMethods`: List of accepted payment methods with masked account numbers
+   *       
    *       This endpoint is public and does not require authentication.
+   *       Use this to display ad details before user creates an order.
    *     tags: [P2P Order]
    *     parameters:
    *       - in: path
@@ -182,7 +211,7 @@ export class P2POrderController {
    *         description: Ad ID
    *     responses:
    *       200:
-   *         description: Ad details with payment methods
+   *         description: Ad details with payment methods and userAction field
    *         content:
    *           application/json:
    *             schema:
@@ -262,11 +291,27 @@ export class P2POrderController {
    * @swagger
    * /api/p2p/orders:
    *   post:
-   *     summary: Create order from ad
+   *     summary: [USER] Create order from ad - Browse → Order Created
    *     description: |
-   *       Create a new P2P order from an ad. User selects an ad, specifies the amount (crypto for sell orders, fiat for buy orders),
-   *       and chooses a payment method. System validates ad availability, order limits, and balances.
-   *       A chat thread is automatically initialized for communication between buyer and vendor.
+   *       **UI Flow: User selects ad → Enters crypto amount → Creates order**
+   *       
+   *       User creates a new P2P order from an ad. User enters the crypto amount (quantity they want to buy/sell).
+   *       System validates ad availability, order limits, and balances.
+   *       
+   *       **Order Status After Creation:**
+   *       - `pending`: If vendor must manually accept (most common)
+   *       - `awaiting_payment`: If ad has auto-accept enabled
+   *       
+   *       **Next Steps:**
+   *       1. If `pending`: Vendor must call `/vendor/accept` to accept order
+   *       2. If `awaiting_payment`: Buyer can immediately call `/buyer/payment-made`
+   *       
+   *       **Role Resolution (Binance/Bybit style):**
+   *       - Vendor BUY ad → User sees as SELL action (User is SELLER, Vendor is BUYER)
+   *       - Vendor SELL ad → User sees as BUY action (User is BUYER, Vendor is SELLER)
+   *       - Crypto ALWAYS moves from SELLER → BUYER
+   *       
+   *       A chat thread is automatically initialized for communication.
    *     tags: [P2P Order]
    *     security:
    *       - bearerAuth: []
@@ -279,6 +324,7 @@ export class P2POrderController {
    *             type: object
    *             required:
    *               - adId
+   *               - cryptoAmount
    *               - paymentMethodId
    *             properties:
    *               adId:
@@ -290,14 +336,8 @@ export class P2POrderController {
    *                 type: string
    *                 example: "5.00"
    *                 description: |
-   *                   Required for sell orders. Amount of cryptocurrency to sell.
+   *                   Amount of cryptocurrency (quantity user wants to buy/sell).
    *                   Must be within ad's min/max order limits when converted to fiat.
-   *               fiatAmount:
-   *                 type: string
-   *                 example: "10000.00"
-   *                 description: |
-   *                   Required for buy orders. Amount of fiat currency to spend.
-   *                   Must be within ad's min/max order limits.
    *               paymentMethodId:
    *                 type: string
    *                 format: uuid
@@ -305,9 +345,10 @@ export class P2POrderController {
    *                 description: |
    *                   Payment method ID from the ad's accepted payment methods.
    *                   Use GET /api/p2p/ads/:id to see available payment methods.
+   *                   If 'rhinoxpay_id', payment confirmation is automatic.
    *     responses:
    *       201:
-   *         description: Order created successfully. Chat thread initialized.
+   *         description: Order created successfully. Status is 'pending' (vendor must accept) or 'awaiting_payment' (if auto-accept enabled).
    *         content:
    *           application/json:
    *             schema:
@@ -325,13 +366,20 @@ export class P2POrderController {
    *                     status:
    *                       type: string
    *                       enum: [pending, awaiting_payment]
-   *                       description: 'pending' if ad doesn't auto-accept, 'awaiting_payment' if auto-accept
+   *                       description: Order status. "pending" if vendor must accept, "awaiting_payment" if auto-accept enabled
+   *                     userAction:
+   *                       type: string
+   *                       enum: [buy, sell]
+   *                       description: User-facing action label (what user sees)
    *                     cryptoAmount:
    *                       type: string
    *                     fiatAmount:
    *                       type: string
    *                     price:
    *                       type: string
+   *                     paymentChannel:
+   *                       type: string
+   *                       enum: [rhinoxpay_id, offline]
    *                     buyer:
    *                       type: object
    *                     vendor:
@@ -343,12 +391,11 @@ export class P2POrderController {
    *           - "Ad is not available"
    *           - "Vendor is offline"
    *           - "Payment method not accepted for this ad"
-   *           - "Crypto amount is required for sell orders"
-   *           - "Fiat amount is required for buy orders"
+   *           - "Crypto amount is required"
    *           - "Order amount must be at least X"
    *           - "Order amount must not exceed X"
-   *           - "Vendor has insufficient crypto balance"
-   *           - "Insufficient fiat balance"
+   *           - "Insufficient crypto balance available"
+   *           - "Maximum order amount exceeds vendor's available balance"
    *         $ref: '#/components/schemas/Error'
    *       401:
    *         description: Unauthorized
@@ -357,7 +404,7 @@ export class P2POrderController {
   async createOrder(req: Request, res: Response) {
     try {
       const userId = (req as any).user?.userId;
-      const { adId, cryptoAmount, fiatAmount, paymentMethodId } = req.body;
+      const { adId, cryptoAmount, paymentMethodId } = req.body;
 
       if (!userId) {
         return res.status(401).json({
@@ -366,17 +413,16 @@ export class P2POrderController {
         });
       }
 
-      if (!adId || !paymentMethodId) {
+      if (!adId || !cryptoAmount || !paymentMethodId) {
         return res.status(400).json({
           success: false,
-          message: 'Ad ID and payment method ID are required',
+          message: 'Ad ID, crypto amount, and payment method ID are required',
         });
       }
 
       const order = await this.service.createOrder(userId, {
         adId,
         cryptoAmount,
-        fiatAmount,
         paymentMethodId,
       });
 
@@ -394,12 +440,180 @@ export class P2POrderController {
 
   /**
    * @swagger
+   * /api/p2p/orders/{id}/vendor/accept:
+   *   post:
+   *     summary: [VENDOR] Accept order - Order Received → Awaiting Payment
+   *     description: |
+   *       **UI State: "Order Received"**
+   *       
+   *       Vendor (ad owner) accepts a pending order. This action:
+   *       1. Freezes crypto from seller's VirtualAccount
+   *       2. Changes status: `pending` → `awaiting_payment`
+   *       3. Starts processing time countdown (from ad's processingTime)
+   *       4. Buyer can now make payment
+   *       
+   *       **Who can call:** Only vendor (ad owner)
+   *       **Required status:** `pending`
+   *       **Next step:** Buyer makes payment and calls `/buyer/payment-made`
+   *     tags: [P2P Order]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *           format: uuid
+   *         description: Order ID
+   *     responses:
+   *       200:
+   *         description: Order accepted. Status is now 'awaiting_payment'. Crypto frozen.
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     id:
+   *                       type: string
+   *                     status:
+   *                       type: string
+   *                       example: "awaiting_payment"
+   *                     acceptedAt:
+   *                       type: string
+   *                       format: date-time
+   *                     expiresAt:
+   *                       type: string
+   *                       format: date-time
+   *                       description: Order expiration time (acceptedAt + processingTime)
+   *       400:
+   *         description: |
+   *           Error. Common errors:
+   *           - "Only vendor can accept this order"
+   *           - "Cannot accept order. Current status: X"
+   *           - "Insufficient crypto balance available"
+   *         $ref: '#/components/schemas/Error'
+   *       401:
+   *         description: Unauthorized
+   *         $ref: '#/components/schemas/Error'
+   */
+  async acceptOrder(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      const { id } = req.params;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      const result = await this.service.acceptOrder(id, userId);
+
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to accept order',
+      });
+    }
+  }
+
+  /**
+   * @swagger
+   * /api/p2p/orders/{id}/vendor/decline:
+   *   post:
+   *     summary: [VENDOR] Decline order - Order Received → Cancelled
+   *     description: |
+   *       **UI State: "Order Received"**
+   *       
+   *       Vendor (ad owner) declines a pending order. Order is cancelled.
+   *       
+   *       **Who can call:** Only vendor (ad owner)
+   *       **Required status:** `pending`
+   *       **Result:** Status changes to `cancelled`
+   *     tags: [P2P Order]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *           format: uuid
+   *         description: Order ID
+   *     responses:
+   *       200:
+   *         description: Order declined. Status updated to 'cancelled'.
+   *       400:
+   *         description: |
+   *           Error. Common errors:
+   *           - "Only vendor can decline this order"
+   *           - "Cannot decline order. Current status: X"
+   *         $ref: '#/components/schemas/Error'
+   *       401:
+   *         description: Unauthorized
+   *         $ref: '#/components/schemas/Error'
+   */
+  async declineOrder(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      const { id } = req.params;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      const result = await this.service.declineOrder(id, userId);
+
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to decline order',
+      });
+    }
+  }
+
+  /**
+   * @swagger
    * /api/p2p/orders:
    *   get:
-   *     summary: Get user's orders
+   *     summary: [USER] Get my orders - All orders where user is buyer or vendor
    *     description: |
-   *       Get all orders for the authenticated user. Can filter by role (buyer or vendor) and status.
-   *       Returns orders where user is either the buyer or vendor.
+   *       Get all orders for the authenticated user. Returns orders where user is either:
+   *       - Buyer (order creator)
+   *       - Vendor (ad owner)
+   *       
+   *       **Use cases:**
+   *       - "My Orders" page showing all user's P2P transactions
+   *       - Filter by role to see only orders as buyer or vendor
+   *       - Filter by status to see pending, completed, cancelled orders
+   *       
+   *       **Response includes:**
+   *       - Order details (amounts, status, parties)
+   *       - `userAction`: What action user took (buy/sell) - for UI display
+   *       - `isUserBuyer`: Boolean indicating if user is buyer
+   *       - `isUserSeller`: Boolean indicating if user is seller
    *     tags: [P2P Order]
    *     security:
    *       - bearerAuth: []
@@ -410,25 +624,59 @@ export class P2POrderController {
    *         schema:
    *           type: string
    *           enum: [buyer, vendor]
-   *         description: Filter by user's role in the order. If not specified, returns all orders.
+   *         description: |
+   *           Filter by user's role in the order.
+   *           - "buyer": Only orders where user is the buyer
+   *           - "vendor": Only orders where user is the vendor (ad owner)
+   *           - If not specified: Returns all orders (buyer + vendor)
    *       - in: query
    *         name: status
    *         schema:
    *           type: string
+   *           enum: [pending, awaiting_payment, payment_made, awaiting_coin_release, completed, cancelled, disputed, refunded, expired]
    *         description: Filter by order status
    *       - in: query
    *         name: limit
    *         schema:
    *           type: integer
    *           default: 50
+   *         description: Maximum number of orders to return
    *       - in: query
    *         name: offset
    *         schema:
    *           type: integer
    *           default: 0
+   *         description: Number of orders to skip for pagination
    *     responses:
    *       200:
-   *         description: List of user's orders
+   *         description: List of user's orders with role indicators
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: array
+   *                   items:
+   *                     type: object
+   *                     properties:
+   *                       id:
+   *                         type: string
+   *                       status:
+   *                         type: string
+   *                       userAction:
+   *                         type: string
+   *                         enum: [buy, sell]
+   *                         description: User-facing action (what user sees in UI)
+   *                       isUserBuyer:
+   *                         type: boolean
+   *                         description: True if user is the buyer
+   *                       isUserSeller:
+   *                         type: boolean
+   *                         description: True if user is the seller
    *       401:
    *         description: Unauthorized
    *         $ref: '#/components/schemas/Error'
@@ -469,10 +717,24 @@ export class P2POrderController {
    * @swagger
    * /api/p2p/orders/{id}:
    *   get:
-   *     summary: Get order details
+   *     summary: [BUYER OR VENDOR] Get order details - Full order information
    *     description: |
-   *       Get detailed information about a specific order, including chat messages, payment method, and reviews.
-   *       Only the buyer or vendor can view their order details.
+   *       Get detailed information about a specific order. Includes:
+   *       - Order details (amounts, status, timestamps)
+   *       - Chat messages between buyer and vendor
+   *       - Payment method information
+   *       - Reviews (if order completed)
+   *       - Role indicators (`isUserBuyer`, `isUserSeller`)
+   *       
+   *       **Who can view:**
+   *       - Buyer (order creator)
+   *       - Vendor (ad owner)
+   *       
+   *       **Use this endpoint to:**
+   *       - Display order details page
+   *       - Show chat messages
+   *       - Display payment account information
+   *       - Show order status and next actions
    *     tags: [P2P Order]
    *     security:
    *       - bearerAuth: []
@@ -484,11 +746,43 @@ export class P2POrderController {
    *         schema:
    *           type: string
    *           format: uuid
+   *         description: Order ID
    *     responses:
    *       200:
-   *         description: Order details with chat and payment info
+   *         description: Order details with chat, payment info, and role indicators
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     id:
+   *                       type: string
+   *                     status:
+   *                       type: string
+   *                     userAction:
+   *                       type: string
+   *                       enum: [buy, sell]
+   *                     isUserBuyer:
+   *                       type: boolean
+   *                     isUserSeller:
+   *                       type: boolean
+   *                     paymentMethod:
+   *                       type: object
+   *                       description: Payment method details (account number masked)
+   *                     chatMessages:
+   *                       type: array
+   *                       items:
+   *                         type: object
    *       401:
    *         description: Unauthorized
+   *       403:
+   *         description: Forbidden - Not buyer or vendor of this order
    *       404:
    *         description: Order not found
    *         $ref: '#/components/schemas/Error'
@@ -522,13 +816,26 @@ export class P2POrderController {
 
   /**
    * @swagger
-   * /api/p2p/orders/{id}/confirm-payment:
+   * /api/p2p/orders/{id}/buyer/payment-made:
    *   post:
-   *     summary: Confirm payment made (buyer)
+   *     summary: [BUYER] Confirm payment made - Awaiting Payment → Payment Made
    *     description: |
-   *       Buyer confirms they have made the payment to the vendor's account.
-   *       Changes order status from 'awaiting_payment' to 'payment_made'.
-   *       A notification message is sent to the vendor.
+   *       **UI State: "Awaiting Payment"**
+   *       
+   *       Buyer confirms they have made the payment to vendor's account.
+   *       
+   *       **Payment Methods:**
+   *       - **RhinoxPay ID:** Payment is automatic. Fiat transferred immediately, crypto auto-released.
+   *         Status: `awaiting_payment` → `payment_made` → `awaiting_coin_release` → `completed`
+   *       - **Offline (Bank/Mobile Money):** Manual confirmation. Buyer confirms payment made.
+   *         Status: `awaiting_payment` → `payment_made`
+   *         Next: Vendor must call `/vendor/payment-received` to release crypto
+   *       
+   *       **Who can call:** Only buyer (order creator)
+   *       **Required status:** `awaiting_payment`
+   *       **Next step:** 
+   *         - RhinoxPay ID: Order automatically completes
+   *         - Offline: Vendor calls `/vendor/payment-received`
    *     tags: [P2P Order]
    *     security:
    *       - bearerAuth: []
@@ -540,14 +847,54 @@ export class P2POrderController {
    *         schema:
    *           type: string
    *           format: uuid
+   *         description: Order ID
+   *     requestBody:
+   *       required: false
+   *       description: |
+   *         Optional. For offline payments, you can include payment proof.
+   *         For RhinoxPay ID, no body needed (automatic).
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               paymentProof:
+   *                 type: string
+   *                 description: Optional payment proof (transaction reference, screenshot URL, etc.)
    *     responses:
    *       200:
-   *         description: Payment confirmed. Status updated to 'payment_made'.
+   *         description: |
+   *           Payment confirmed. 
+   *           - RhinoxPay ID: Order completed automatically
+   *           - Offline: Status is 'payment_made', waiting for vendor confirmation
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     id:
+   *                       type: string
+   *                     status:
+   *                       type: string
+   *                       enum: [payment_made, awaiting_coin_release, completed]
+   *                       description: |
+   *                         - "payment_made" for offline payments (vendor must confirm)
+   *                         - "completed" for RhinoxPay ID (automatic)
+   *                     paymentConfirmedAt:
+   *                       type: string
+   *                       format: date-time
    *       400:
    *         description: |
    *           Error. Common errors:
    *           - "Only buyer can confirm payment"
    *           - "Cannot confirm payment. Current status: X"
+   *           - "Insufficient fiat balance" (for RhinoxPay ID)
    *         $ref: '#/components/schemas/Error'
    *       401:
    *         description: Unauthorized
@@ -581,13 +928,26 @@ export class P2POrderController {
 
   /**
    * @swagger
-   * /api/p2p/orders/{id}/mark-paid:
+   * /api/p2p/orders/{id}/vendor/payment-received:
    *   post:
-   *     summary: Mark payment as received (vendor)
+   *     summary: [VENDOR] Mark payment received - Payment Made → Completed
    *     description: |
-   *       Vendor confirms they have received the payment from the buyer.
-   *       Changes order status from 'payment_made' to 'awaiting_coin_release', then automatically releases crypto to buyer.
-   *       For buy orders, crypto is transferred from vendor to buyer. For sell orders, order is marked as completed.
+   *       **UI State: "Payment Made"**
+   *       
+   *       Vendor (seller) confirms they have received payment from buyer.
+   *       This action:
+   *       1. Changes status: `payment_made` → `awaiting_coin_release`
+   *       2. Automatically releases crypto from seller to buyer
+   *       3. Changes status: `awaiting_coin_release` → `completed`
+   *       
+   *       **Crypto Release:**
+   *       - Crypto ALWAYS moves from SELLER → BUYER
+   *       - For SELL ads: Vendor is seller, User is buyer → Crypto: Vendor → User
+   *       - For BUY ads: User is seller, Vendor is buyer → Crypto: User → Vendor
+   *       
+   *       **Who can call:** Only seller (vendor for SELL ads, user for BUY ads)
+   *       **Required status:** `payment_made` (offline payments only)
+   *       **Note:** For RhinoxPay ID, this step is automatic and not needed
    *     tags: [P2P Order]
    *     security:
    *       - bearerAuth: []
@@ -599,15 +959,53 @@ export class P2POrderController {
    *         schema:
    *           type: string
    *           format: uuid
+   *         description: Order ID
+   *     requestBody:
+   *       required: false
+   *       description: Optional confirmation data
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               confirmed:
+   *                 type: boolean
+   *                 example: true
+   *                 description: Confirmation that payment was received
    *     responses:
    *       200:
-   *         description: Payment marked as received. Crypto released. Order completed.
+   *         description: Payment received confirmed. Crypto released. Order completed.
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     id:
+   *                       type: string
+   *                     status:
+   *                       type: string
+   *                       example: "completed"
+   *                     paymentReceivedAt:
+   *                       type: string
+   *                       format: date-time
+   *                     coinReleasedAt:
+   *                       type: string
+   *                       format: date-time
+   *                     completedAt:
+   *                       type: string
+   *                       format: date-time
    *       400:
    *         description: |
    *           Error. Common errors:
-   *           - "Only vendor can mark payment as received"
+   *           - "Only seller can mark payment as received"
    *           - "Cannot mark payment as received. Current status: X"
-   *           - "Vendor has insufficient crypto balance"
+   *           - "Insufficient frozen crypto balance"
    *         $ref: '#/components/schemas/Error'
    *       401:
    *         description: Unauthorized
