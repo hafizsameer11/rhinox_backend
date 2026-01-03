@@ -192,7 +192,11 @@ export class DepositController {
    * @swagger
    * /api/deposit/initiate:
    *   post:
-   *     summary: Initiate a deposit transaction
+   *     summary: Initiate a fiat wallet deposit transaction
+   *     description: |
+   *       Creates a pending deposit transaction and provides bank account details or mobile money instructions.
+   *       For bank transfers, returns bank account details to transfer to. For mobile money, returns provider details.
+   *       An email notification is sent with deposit instructions. User must confirm the deposit with PIN to complete.
    *     tags: [Deposit]
    *     security:
    *       - bearerAuth: []
@@ -212,24 +216,37 @@ export class DepositController {
    *               amount:
    *                 type: string
    *                 example: "2000000"
-   *                 description: Deposit amount
+   *                 description: Deposit amount as a string (to avoid precision issues). Must be greater than 0. Example: "2000000" for 2,000,000 NGN.
    *               currency:
    *                 type: string
+   *                 minLength: 3
+   *                 maxLength: 3
    *                 example: "NGN"
+   *                 description: Currency code (ISO 4217). Must match the country's currency. Examples: NGN, KES, GHS, USD.
    *               countryCode:
    *                 type: string
+   *                 minLength: 2
+   *                 maxLength: 2
    *                 example: "NG"
+   *                 description: ISO country code (2 letters). Examples: NG (Nigeria), KE (Kenya), GH (Ghana).
    *               channel:
    *                 type: string
-   *                 enum: [bank_transfer, mobile_money, conversion, p2p]
+   *                 enum: [bank_transfer, mobile_money]
    *                 example: "bank_transfer"
+   *                 description: |
+   *                   Deposit channel type:
+   *                   - bank_transfer: Transfer funds to provided bank account details
+   *                   - mobile_money: Deposit via mobile money provider (requires providerId)
    *               providerId:
    *                 type: string
-   *                 example: "provider-uuid"
-   *                 description: Required for mobile_money channel
+   *                 format: uuid
+   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 description: |
+   *                   Required for mobile_money channel. UUID of the mobile money provider.
+   *                   Use GET /api/deposit/mobile-money-providers to get available providers for your country/currency.
    *     responses:
    *       201:
-   *         description: Deposit initiated successfully
+   *         description: Deposit initiated successfully. Bank account details or mobile money instructions provided. Email sent with instructions.
    *         content:
    *           application/json:
    *             schema:
@@ -243,38 +260,74 @@ export class DepositController {
    *                   properties:
    *                     id:
    *                       type: string
+   *                       format: uuid
+   *                       example: "550e8400-e29b-41d4-a716-446655440000"
+   *                       description: Transaction ID. Use this to confirm the deposit.
    *                     reference:
    *                       type: string
-   *                       example: "ABC123XYZ"
+   *                       example: "DEP-NG-20241230-ABC123XYZ"
+   *                       description: Unique transaction reference. Use this when making bank transfer (for bank_transfer channel).
    *                     amount:
    *                       type: string
+   *                       example: "2000000.00"
+   *                       description: Deposit amount
    *                     currency:
    *                       type: string
+   *                       example: "NGN"
    *                     fee:
    *                       type: string
+   *                       example: "0.00"
+   *                       description: Transaction fee (if any)
    *                     status:
    *                       type: string
+   *                       enum: [pending]
    *                       example: "pending"
+   *                       description: Transaction status. Will be "completed" after PIN confirmation.
    *                     bankAccount:
    *                       type: object
    *                       nullable: true
+   *                       description: Bank account details (for bank_transfer channel)
    *                       properties:
    *                         bankName:
    *                           type: string
+   *                           example: "Gratuity Bank"
    *                         accountNumber:
    *                           type: string
+   *                           example: "1350131270"
+   *                           description: Bank account number to transfer funds to
    *                         accountName:
    *                           type: string
+   *                           example: "Yellow card financial"
    *                     provider:
    *                       type: object
    *                       nullable: true
+   *                       description: Mobile money provider details (for mobile_money channel)
    *                       properties:
    *                         name:
    *                           type: string
+   *                           example: "MTN Mobile Money"
    *                         code:
    *                           type: string
+   *                           example: "MTN"
+   *                     createdAt:
+   *                       type: string
+   *                       format: date-time
+   *                       example: "2024-12-30T10:30:00Z"
    *       400:
-   *         description: Validation error
+   *         description: Validation error - missing required fields, invalid amount, or missing providerId for mobile_money
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: "Amount, currency, country code, and channel are required" or "Provider ID is required for mobile money deposits"
+   *       401:
+   *         description: Unauthorized - authentication required
    *         $ref: '#/components/schemas/Error'
    */
   async initiateDeposit(req: Request, res: Response) {
@@ -335,7 +388,13 @@ export class DepositController {
    * @swagger
    * /api/deposit/confirm:
    *   post:
-   *     summary: Confirm deposit with PIN verification
+   *     summary: Confirm and complete deposit transaction with PIN
+   *     description: |
+   *       Confirms a pending deposit transaction by verifying the user's 5-digit PIN.
+   *       After confirmation, the deposit amount (minus fees) is credited to the user's wallet.
+   *       Transaction status is updated to "completed" and a success email is sent.
+   *       Note: For bank transfers, this marks the transaction as completed in the system.
+   *       For mobile money, this confirms the user has completed the mobile money payment.
    *     tags: [Deposit]
    *     security:
    *       - bearerAuth: []
@@ -352,15 +411,19 @@ export class DepositController {
    *             properties:
    *               transactionId:
    *                 type: string
-   *                 example: "transaction-uuid"
+   *                 format: uuid
+   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 description: Transaction ID returned from the initiate deposit endpoint
    *               pin:
    *                 type: string
    *                 pattern: '^\d{5}$'
+   *                 minLength: 5
+   *                 maxLength: 5
    *                 example: "12345"
-   *                 description: 5-digit PIN
+   *                 description: User's 5-digit transaction PIN. Must match the PIN set up in the account.
    *     responses:
    *       200:
-   *         description: Deposit confirmed and wallet credited
+   *         description: Deposit confirmed successfully. Wallet credited. Transaction marked as completed.
    *         content:
    *           application/json:
    *             schema:
@@ -374,19 +437,49 @@ export class DepositController {
    *                   properties:
    *                     id:
    *                       type: string
+   *                       format: uuid
+   *                       description: Transaction ID
    *                     reference:
    *                       type: string
+   *                       example: "DEP-NG-20241230-ABC123XYZ"
+   *                       description: Transaction reference number
    *                     amount:
    *                       type: string
+   *                       example: "2000000.00"
+   *                       description: Original deposit amount
    *                     creditedAmount:
    *                       type: string
+   *                       example: "2000000.00"
+   *                       description: Amount credited to wallet (amount minus fees)
    *                     fee:
    *                       type: string
+   *                       example: "0.00"
+   *                       description: Transaction fee deducted
    *                     status:
    *                       type: string
+   *                       enum: [completed]
    *                       example: "completed"
+   *                       description: Transaction status - now completed
+   *                     completedAt:
+   *                       type: string
+   *                       format: date-time
+   *                       example: "2024-12-30T10:35:00Z"
+   *                       description: Timestamp when transaction was completed
    *       400:
-   *         description: Invalid PIN or transaction error
+   *         description: Invalid PIN, transaction not found, or transaction already completed
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: "Invalid PIN" or "Transaction not found" or "Transaction already completed"
+   *       401:
+   *         description: Unauthorized - authentication required
    *         $ref: '#/components/schemas/Error'
    */
   async confirmDeposit(req: Request, res: Response) {

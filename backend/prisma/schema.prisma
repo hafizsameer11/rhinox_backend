@@ -33,16 +33,22 @@ model User {
   updatedAt       DateTime @updatedAt
 
   // Relations
-  country         Country?            @relation(fields: [countryId], references: [id])
-  wallets         Wallet[]
-  sessions        Session[]
-  refreshTokens   RefreshToken[]
-  otps            OTP[]
-  kyc             KYC?
-  userWallets     UserWallet[]
-  virtualAccounts VirtualAccount[]
-  paymentMethods  UserPaymentMethod[]
-  p2pAds          P2PAd[]
+  country               Country?            @relation(fields: [countryId], references: [id])
+  wallets               Wallet[]
+  sessions              Session[]
+  refreshTokens         RefreshToken[]
+  otps                  OTP[]
+  kyc                   KYC?
+  userWallets           UserWallet[]
+  virtualAccounts       VirtualAccount[]
+  paymentMethods        UserPaymentMethod[]
+  p2pAds                P2PAd[]
+  p2pOrdersAsBuyer      P2POrder[]          @relation("P2POrdersAsBuyer")
+  p2pOrdersAsVendor     P2POrder[]          @relation("P2POrdersAsVendor")
+  p2pMessagesAsSender   P2PChatMessage[]    @relation("P2PMessagesAsSender")
+  p2pMessagesAsReceiver P2PChatMessage[]    @relation("P2PMessagesAsReceiver")
+  p2pReviewsAsReviewer  P2PReview[]         @relation("P2PReviewsAsReviewer")
+  p2pReviewsAsReviewee  P2PReview[]         @relation("P2PReviewsAsReviewee")
 
   @@index([email])
   @@index([phone])
@@ -497,8 +503,9 @@ model UserPaymentMethod {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   // Relations
-  user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider MobileMoneyProvider? @relation(fields: [providerId], references: [id])
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider  MobileMoneyProvider? @relation(fields: [providerId], references: [id])
+  p2pOrders P2POrder[]
 
   @@index([userId])
   @@index([type])
@@ -530,6 +537,7 @@ model P2PAd {
   isOnline         Boolean  @default(true) @map("is_online") // Online/offline status
   ordersReceived   Int      @default(0) @map("orders_received") // Total orders received
   responseTime     Int?     @map("response_time") // Response time in minutes
+  processingTime   Int?     @map("processing_time") // Processing time in minutes (wait time after acceptance)
   score            Decimal? @db.Decimal(5, 2) // Vendor score (0-100)
   countryCode      String?  @map("country_code") @db.VarChar(10)
   description      String?  @db.Text // Optional ad description
@@ -537,7 +545,9 @@ model P2PAd {
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders  P2POrder[]
+  reviews P2PReview[]
 
   @@index([userId])
   @@index([type])
@@ -547,4 +557,109 @@ model P2PAd {
   @@index([isOnline])
   @@index([createdAt])
   @@map("p2p_ads")
+}
+
+// ============================================
+// MODULE: P2P ORDER
+// ============================================
+// P2P orders created from ads
+
+model P2POrder {
+  id                 String    @id @default(uuid())
+  adId               String    @map("ad_id")
+  buyerId            String    @map("buyer_id")
+  vendorId           String    @map("vendor_id")
+  type               String // 'buy' or 'sell' (from ad perspective)
+  cryptoCurrency     String    @map("crypto_currency") @db.VarChar(50)
+  fiatCurrency       String    @map("fiat_currency") @db.VarChar(10)
+  cryptoAmount       Decimal   @map("crypto_amount") @db.Decimal(20, 8)
+  fiatAmount         Decimal   @map("fiat_amount") @db.Decimal(20, 8)
+  price              Decimal   @db.Decimal(20, 8) // Price at time of order
+  paymentMethodId    String?   @map("payment_method_id")
+  status             String    @default("pending") // pending, awaiting_payment, payment_made, awaiting_coin_release, completed, cancelled, disputed, refunded, expired
+  acceptedAt         DateTime? @map("accepted_at") // When vendor accepted the order
+  processingTimeMinutes Int?   @map("processing_time_minutes") // Processing time from ad
+  expiresAt          DateTime? @map("expires_at") // Order expiration time (acceptedAt + processingTime)
+  paymentConfirmedAt DateTime? @map("payment_confirmed_at")
+  paymentReceivedAt  DateTime? @map("payment_received_at")
+  coinReleasedAt     DateTime? @map("coin_released_at")
+  completedAt        DateTime? @map("completed_at")
+  cancelledAt        DateTime? @map("cancelled_at")
+  txId               String?   @map("tx_id") @db.VarChar(255) // Transaction reference
+  paymentChannel     String?   @map("payment_channel") // 'rhinoxpay_id' or 'offline'
+  metadata           Json? // Additional data (payment proof, etc.)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  ad            P2PAd              @relation(fields: [adId], references: [id], onDelete: Cascade)
+  buyer         User               @relation("P2POrdersAsBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  vendor        User               @relation("P2POrdersAsVendor", fields: [vendorId], references: [id], onDelete: Cascade)
+  paymentMethod UserPaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  chatMessages  P2PChatMessage[]
+  reviews       P2PReview[]
+
+  @@index([adId])
+  @@index([buyerId])
+  @@index([vendorId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("p2p_orders")
+}
+
+// ============================================
+// MODULE: P2P CHAT MESSAGE
+// ============================================
+// Chat messages between buyer and vendor for orders
+
+model P2PChatMessage {
+  id         String    @id @default(uuid())
+  orderId    String    @map("order_id")
+  senderId   String    @map("sender_id")
+  receiverId String    @map("receiver_id")
+  message    String    @db.Text
+  isRead     Boolean   @default(false) @map("is_read")
+  readAt     DateTime? @map("read_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  order    P2POrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sender   User     @relation("P2PMessagesAsSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User     @relation("P2PMessagesAsReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([createdAt])
+  @@map("p2p_chat_messages")
+}
+
+// ============================================
+// MODULE: P2P REVIEW
+// ============================================
+// Reviews left by users after order completion
+
+model P2PReview {
+  id         String   @id @default(uuid())
+  orderId    String   @map("order_id")
+  reviewerId String   @map("reviewer_id")
+  revieweeId String   @map("reviewee_id") // Vendor being reviewed
+  adId       String   @map("ad_id")
+  type       String // 'positive' or 'negative' (thumbs up/down)
+  comment    String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  order    P2POrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reviewer User     @relation("P2PReviewsAsReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+  reviewee User     @relation("P2PReviewsAsReviewee", fields: [revieweeId], references: [id], onDelete: Cascade)
+  ad       P2PAd    @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId]) // One review per order
+  @@index([orderId])
+  @@index([revieweeId])
+  @@index([adId])
+  @@index([createdAt])
+  @@map("p2p_reviews")
 }

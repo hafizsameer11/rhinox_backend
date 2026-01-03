@@ -12,7 +12,11 @@ export class AuthController {
    * @swagger
    * /api/auth/register:
    *   post:
-   *     summary: Register a new user
+   *     summary: Register a new user account
+   *     description: |
+   *       Creates a new user account and sends a 5-digit OTP code to the provided email address for verification.
+   *       After registration, the user must verify their email using the OTP code before they can use the platform.
+   *       Auth tokens are returned immediately after registration for convenience.
    *     tags: [Auth]
    *     requestBody:
    *       required: true
@@ -31,29 +35,40 @@ export class AuthController {
    *               email:
    *                 type: string
    *                 format: email
-   *                 example: user@example.com
+   *                 example: "user@example.com"
+   *                 description: User's email address. Must be unique and valid email format. A verification OTP will be sent to this email.
    *               phone:
    *                 type: string
-   *                 example: "+1234567890"
+   *                 example: "+2348012345678"
+   *                 description: User's phone number in international format. Must be unique. Used for account recovery and notifications.
    *               password:
    *                 type: string
    *                 format: password
-   *                 example: "SecurePassword123"
+   *                 minLength: 8
+   *                 example: "SecurePassword123!"
+   *                 description: User's password. Must be at least 8 characters long. Will be hashed before storage.
    *               firstName:
    *                 type: string
+   *                 minLength: 1
    *                 example: "John"
+   *                 description: User's first name. Required for account identification and KYC.
    *               lastName:
    *                 type: string
+   *                 minLength: 1
    *                 example: "Doe"
+   *                 description: User's last name. Required for account identification and KYC.
    *               countryId:
    *                 type: string
-   *                 example: "uuid-of-country"
+   *                 format: uuid
+   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 description: Optional. UUID of the country selected by the user. Use GET /api/countries to get available countries.
    *               termsAccepted:
    *                 type: boolean
    *                 example: true
+   *                 description: Must be true. Indicates user has accepted Terms & Conditions and Privacy Policy.
    *     responses:
    *       201:
-   *         description: User registered successfully. OTP sent to email.
+   *         description: User registered successfully. OTP sent to email. Auth tokens returned for immediate use.
    *         content:
    *           application/json:
    *             schema:
@@ -66,12 +81,54 @@ export class AuthController {
    *                   type: object
    *                   properties:
    *                     user:
-   *                       $ref: '#/components/schemas/User'
+   *                       type: object
+   *                       properties:
+   *                         id:
+   *                           type: string
+   *                           format: uuid
+   *                           example: "550e8400-e29b-41d4-a716-446655440000"
+   *                         email:
+   *                           type: string
+   *                           example: "user@example.com"
+   *                         phone:
+   *                           type: string
+   *                           example: "+2348012345678"
+   *                         firstName:
+   *                           type: string
+   *                           example: "John"
+   *                         lastName:
+   *                           type: string
+   *                           example: "Doe"
+   *                         isEmailVerified:
+   *                           type: boolean
+   *                           example: false
+   *                           description: Will be true after email verification
+   *                     accessToken:
+   *                       type: string
+   *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+   *                       description: JWT access token for authentication. Include in Authorization header as "Bearer {token}"
+   *                     refreshToken:
+   *                       type: string
+   *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+   *                       description: JWT refresh token for obtaining new access tokens
    *                     message:
    *                       type: string
    *                       example: "Registration successful. Please verify your email with the OTP sent to your email."
    *       400:
-   *         description: Validation error
+   *         description: Validation error or user already exists
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: "User with this email already exists" or "Email and password are required"
+   *       500:
+   *         description: Internal server error
    *         $ref: '#/components/schemas/Error'
    */
   async register(req: Request, res: Response) {
@@ -370,7 +427,11 @@ export class AuthController {
    * @swagger
    * /api/auth/verify-email:
    *   post:
-   *     summary: Verify email with OTP code
+   *     summary: Verify email address with OTP code
+   *     description: |
+   *       Verifies the user's email address using the 5-digit OTP code sent to their email during registration.
+   *       After successful verification, the user's email is marked as verified and crypto wallets are automatically initialized.
+   *       Returns new authentication tokens after verification.
    *     tags: [Auth]
    *     requestBody:
    *       required: true
@@ -379,20 +440,23 @@ export class AuthController {
    *           schema:
    *             type: object
    *             required:
-   *               - userId
    *               - code
    *             properties:
    *               userId:
    *                 type: string
-   *                 example: "user-uuid"
+   *                 format: uuid
+   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 description: Optional. User ID (can be extracted from JWT token if authenticated). Required if not authenticated.
    *               code:
    *                 type: string
    *                 pattern: '^\d{5}$'
+   *                 minLength: 5
+   *                 maxLength: 5
    *                 example: "12345"
-   *                 description: 5-digit OTP code
+   *                 description: 5-digit OTP code sent to user's email. Code expires after 10 minutes.
    *     responses:
    *       200:
-   *         description: Email verified successfully
+   *         description: Email verified successfully. Crypto wallets initialized. New tokens returned.
    *         content:
    *           application/json:
    *             schema:
@@ -405,16 +469,49 @@ export class AuthController {
    *                   type: object
    *                   properties:
    *                     user:
-   *                       $ref: '#/components/schemas/User'
+   *                       type: object
+   *                       properties:
+   *                         id:
+   *                           type: string
+   *                           format: uuid
+   *                         email:
+   *                           type: string
+   *                         phone:
+   *                           type: string
+   *                         firstName:
+   *                           type: string
+   *                         lastName:
+   *                           type: string
+   *                         isEmailVerified:
+   *                           type: boolean
+   *                           example: true
+   *                           description: Email verification status (now true)
    *                     accessToken:
    *                       type: string
+   *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+   *                       description: New JWT access token after verification
    *                     refreshToken:
    *                       type: string
+   *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+   *                       description: New JWT refresh token after verification
    *                     message:
    *                       type: string
    *                       example: "Email verified successfully"
    *       400:
-   *         description: Invalid or expired OTP
+   *         description: Invalid or expired OTP code, or code format error
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: "Invalid or expired OTP code" or "OTP code must be 5 digits"
+   *       401:
+   *         description: Unauthorized or user ID missing
    *         $ref: '#/components/schemas/Error'
    */
   async verifyEmail(req: Request, res: Response) {
@@ -526,7 +623,11 @@ export class AuthController {
    * @swagger
    * /api/auth/setup-pin:
    *   post:
-   *     summary: Setup 5-digit PIN for transactions
+   *     summary: Setup 5-digit transaction PIN
+   *     description: |
+   *       Sets up a 5-digit PIN for the user's account. This PIN is required for all financial transactions
+   *       (deposits, transfers, conversions, etc.). The PIN is hashed before storage for security.
+   *       Can only be set once. To change an existing PIN, use the change-pin endpoint.
    *     tags: [Auth]
    *     security:
    *       - bearerAuth: []
@@ -543,11 +644,16 @@ export class AuthController {
    *               pin:
    *                 type: string
    *                 pattern: '^\d{5}$'
+   *                 minLength: 5
+   *                 maxLength: 5
    *                 example: "12345"
-   *                 description: 5-digit PIN
+   *                 description: |
+   *                   5-digit PIN code. Must be exactly 5 numeric digits.
+   *                   This PIN will be required for all financial transactions.
+   *                   Choose a PIN that is easy to remember but hard to guess.
    *     responses:
    *       200:
-   *         description: PIN setup successfully
+   *         description: PIN setup successfully. PIN is now active and required for transactions.
    *         content:
    *           application/json:
    *             schema:
@@ -562,11 +668,28 @@ export class AuthController {
    *                     message:
    *                       type: string
    *                       example: "PIN setup successfully"
+   *                     hasPin:
+   *                       type: boolean
+   *                       example: true
+   *                       description: Confirmation that PIN is now set
    *       400:
-   *         description: Invalid PIN or PIN already set
-   *         $ref: '#/components/schemas/Error'
+   *         description: |
+   *           Validation error. Common errors:
+   *           - "PIN is required"
+   *           - "PIN must be exactly 5 digits"
+   *           - "PIN already set. Use change-pin endpoint to update your PIN"
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
    *       401:
-   *         description: Unauthorized
+   *         description: Unauthorized - authentication required
    *         $ref: '#/components/schemas/Error'
    */
   async setupPIN(req: Request, res: Response) {

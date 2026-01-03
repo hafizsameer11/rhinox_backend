@@ -68,7 +68,12 @@ export class TransferController {
    * @swagger
    * /api/transfer/initiate:
    *   post:
-   *     summary: Initiate a transfer transaction
+   *     summary: Initiate a fiat transfer transaction
+   *     description: |
+   *       Creates a pending transfer transaction to send funds to another RhionX user, bank account, or mobile money.
+   *       User must have completed KYC verification to use this endpoint (check eligibility first).
+   *       An email OTP is sent for verification. User must verify with email code and PIN to complete the transfer.
+   *       For RhionX user transfers, recipient wallet is automatically credited upon verification.
    *     tags: [Transfer]
    *     security:
    *       - bearerAuth: []
@@ -88,41 +93,142 @@ export class TransferController {
    *               amount:
    *                 type: string
    *                 example: "200000"
+   *                 description: Transfer amount as a string. Must be greater than 0. Must not exceed available wallet balance (including fees).
    *               currency:
    *                 type: string
+   *                 minLength: 3
+   *                 maxLength: 3
    *                 example: "NGN"
+   *                 description: Currency code (ISO 4217). Must match the currency of the source wallet.
    *               countryCode:
    *                 type: string
+   *                 minLength: 2
+   *                 maxLength: 2
    *                 example: "NG"
+   *                 description: ISO country code (2 letters) for the transfer destination.
    *               channel:
    *                 type: string
    *                 enum: [rhionx_user, bank_account, mobile_money]
-   *                 example: "bank_account"
-   *               recipientUserId:
-   *                 type: string
-   *                 description: User ID for rhionx_user channel (optional if recipientEmail is provided)
+   *                 example: "rhionx_user"
+   *                 description: |
+   *                   Transfer channel type:
+   *                   - rhionx_user: Transfer to another RhionX user (requires recipientEmail or recipientUserId)
+   *                   - bank_account: Transfer to external bank account (requires accountNumber and bankName)
+   *                   - mobile_money: Transfer via mobile money (requires providerId and phoneNumber)
    *               recipientEmail:
    *                 type: string
    *                 format: email
-   *                 example: "user@example.com"
-   *                 description: Email for rhionx_user channel (from QR scan). Either recipientEmail or recipientUserId is required
+   *                 example: "recipient@example.com"
+   *                 description: |
+   *                   For rhionx_user channel. Recipient's email address (from QR code scan).
+   *                   Either recipientEmail or recipientUserId is required for rhionx_user transfers.
+   *               recipientUserId:
+   *                 type: string
+   *                 format: uuid
+   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 description: |
+   *                   For rhionx_user channel. Recipient's user ID.
+   *                   Either recipientEmail or recipientUserId is required for rhionx_user transfers.
    *               accountNumber:
    *                 type: string
-   *                 description: Required for bank_account channel
+   *                 minLength: 8
+   *                 example: "1234567890"
+   *                 description: |
+   *                   For bank_account channel. Recipient's bank account number. Must be at least 8 characters.
+   *                   Required for bank_account transfers.
    *               bankName:
    *                 type: string
-   *                 description: Required for bank_account channel
+   *                 example: "Access Bank"
+   *                 description: |
+   *                   For bank_account channel. Name of the recipient's bank.
+   *                   Required for bank_account transfers.
    *               providerId:
    *                 type: string
-   *                 description: Required for mobile_money channel
+   *                 format: uuid
+   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 description: |
+   *                   For mobile_money channel. UUID of the mobile money provider.
+   *                   Use GET /api/deposit/mobile-money-providers to get available providers.
+   *                   Required for mobile_money transfers.
    *               phoneNumber:
    *                 type: string
-   *                 description: Required for mobile_money channel
+   *                 minLength: 10
+   *                 example: "+2348012345678"
+   *                 description: |
+   *                   For mobile_money channel. Recipient's mobile money phone number.
+   *                   Must be at least 10 characters. Required for mobile_money transfers.
    *     responses:
    *       201:
-   *         description: Transfer initiated successfully
+   *         description: Transfer initiated successfully. Email OTP sent for verification.
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     id:
+   *                       type: string
+   *                       format: uuid
+   *                       description: Transaction ID. Use this to verify the transfer.
+   *                     reference:
+   *                       type: string
+   *                       example: "TRF-NG-20241230-XYZ789"
+   *                       description: Unique transaction reference
+   *                     amount:
+   *                       type: string
+   *                       example: "200000.00"
+   *                       description: Transfer amount
+   *                     currency:
+   *                       type: string
+   *                       example: "NGN"
+   *                     fee:
+   *                       type: string
+   *                       example: "200.00"
+   *                       description: Transfer fee (0.1% or minimum fee)
+   *                     totalDeduction:
+   *                       type: string
+   *                       example: "200200.00"
+   *                       description: Total amount to be deducted (amount + fee)
+   *                     status:
+   *                       type: string
+   *                       enum: [pending]
+   *                       example: "pending"
+   *                       description: Transaction status. Will be "completed" after verification.
+   *                     channel:
+   *                       type: string
+   *                       example: "rhionx_user"
+   *                     recipientInfo:
+   *                       type: object
+   *                       description: Recipient information (name, email, etc.)
+   *                     createdAt:
+   *                       type: string
+   *                       format: date-time
    *       400:
-   *         description: Validation error or KYC not complete
+   *         description: |
+   *           Validation error, KYC not complete, insufficient balance, or missing channel-specific fields.
+   *           Common errors:
+   *           - "You cannot complete your transaction because you are yet to complete your KYC"
+   *           - "Insufficient balance"
+   *           - "Recipient email or user ID is required for RhionX user transfers"
+   *           - "Account number and bank name are required for bank transfers"
+   *           - "Provider ID and phone number are required for mobile money transfers"
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *       401:
+   *         description: Unauthorized - authentication required
    *         $ref: '#/components/schemas/Error'
    */
   async initiateTransfer(req: Request, res: Response) {

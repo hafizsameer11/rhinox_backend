@@ -12,7 +12,12 @@ export class P2PController {
    * @swagger
    * /api/p2p/ads/buy:
    *   post:
-   *     summary: Create a buy ad
+   *     summary: Create a P2P buy advertisement
+   *     description: |
+   *       Creates a buy advertisement for purchasing cryptocurrency with fiat currency.
+   *       As a vendor, you can create buy ads to allow other users to sell crypto to you.
+   *       The ad will be visible to other users who want to sell the specified cryptocurrency.
+   *       Payment methods must be added to your account first (use Payment Settings endpoints).
    *     tags: [P2P]
    *     security:
    *       - bearerAuth: []
@@ -34,43 +39,160 @@ export class P2PController {
    *             properties:
    *               cryptoCurrency:
    *                 type: string
+   *                 minLength: 2
+   *                 maxLength: 10
    *                 example: "BTC"
+   *                 description: Cryptocurrency symbol to buy. Examples: BTC, USDT, ETH, BNB, SOL, etc.
    *               fiatCurrency:
    *                 type: string
+   *                 minLength: 3
+   *                 maxLength: 3
    *                 example: "NGN"
+   *                 description: Fiat currency to receive payment in. Examples: NGN, USD, KES, GHS.
    *               price:
    *                 type: string
    *                 example: "1500.00"
-   *                 description: Price per 1 unit of crypto
+   *                 description: |
+   *                   Price per 1 unit of cryptocurrency in fiat currency.
+   *                   Example: "1500.00" means 1 BTC = 1500 NGN (or 1 USDT = 1500 NGN).
+   *                   Must be greater than 0.
    *               volume:
    *                 type: string
    *                 example: "50.00"
-   *                 description: Total volume available
+   *                 description: |
+   *                   Total volume of cryptocurrency available to buy (in crypto units).
+   *                   Example: "50.00" means you want to buy up to 50 BTC (or 50 USDT).
+   *                   Must be greater than 0. Must be greater than or equal to minOrder.
    *               minOrder:
    *                 type: string
    *                 example: "1600.00"
+   *                 description: |
+   *                   Minimum order amount in fiat currency.
+   *                   Example: "1600.00" means minimum order is 1600 NGN.
+   *                   Must be greater than 0. Must be less than maxOrder. Cannot exceed volume converted to fiat.
    *               maxOrder:
    *                 type: string
    *                 example: "75000.00"
+   *                 description: |
+   *                   Maximum order amount in fiat currency.
+   *                   Example: "75000.00" means maximum order is 75,000 NGN.
+   *                   Must be greater than 0. Must be greater than minOrder.
    *               autoAccept:
    *                 type: boolean
+   *                 default: false
    *                 example: true
+   *                 description: |
+   *                   If true, orders will be automatically accepted without manual approval.
+   *                   If false, you must manually accept each order.
    *               paymentMethodIds:
    *                 type: array
+   *                 minItems: 1
    *                 items:
    *                   type: string
-   *                 example: ["payment-method-uuid-1", "payment-method-uuid-2"]
+   *                   format: uuid
+   *                 example: ["550e8400-e29b-41d4-a716-446655440000", "660e8400-e29b-41d4-a716-446655440001"]
+   *                 description: |
+   *                   Array of payment method UUIDs that you accept for this ad.
+   *                   Payment methods must be added to your account first via Payment Settings.
+   *                   At least one payment method is required.
+   *                   Examples: bank account IDs, mobile money account IDs.
    *               countryCode:
    *                 type: string
+   *                 minLength: 2
+   *                 maxLength: 2
    *                 example: "NG"
+   *                 description: Optional. ISO country code (2 letters) for the ad. Examples: NG, KE, GH.
    *               description:
    *                 type: string
-   *                 example: "Buy USDT at best rates"
+   *                 maxLength: 500
+   *                 example: "Buy USDT at best rates. Fast and secure transactions."
+   *                 description: Optional. Ad description or terms for buyers to see.
    *     responses:
    *       201:
-   *         description: Buy ad created successfully
+   *         description: Buy ad created successfully. Ad is now active and visible to sellers.
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     id:
+   *                       type: string
+   *                       format: uuid
+   *                       description: Ad ID. Use this to update or manage the ad.
+   *                     type:
+   *                       type: string
+   *                       enum: [buy]
+   *                       example: "buy"
+   *                     cryptoCurrency:
+   *                       type: string
+   *                       example: "BTC"
+   *                     fiatCurrency:
+   *                       type: string
+   *                       example: "NGN"
+   *                     price:
+   *                       type: string
+   *                       example: "1500.00"
+   *                       description: Price per 1 unit of crypto
+   *                     volume:
+   *                       type: string
+   *                       example: "50.00"
+   *                     minOrder:
+   *                       type: string
+   *                       example: "1600.00"
+   *                     maxOrder:
+   *                       type: string
+   *                       example: "75000.00"
+   *                     autoAccept:
+   *                       type: boolean
+   *                       example: true
+   *                     paymentMethodIds:
+   *                       type: array
+   *                       items:
+   *                         type: string
+   *                     status:
+   *                       type: string
+   *                       enum: [available]
+   *                       example: "available"
+   *                       description: Ad status. Can be: available, unavailable, paused
+   *                     isOnline:
+   *                       type: boolean
+   *                       example: true
+   *                       description: Online/offline status
+   *                     ordersReceived:
+   *                       type: integer
+   *                       example: 0
+   *                       description: Number of orders received (starts at 0)
+   *                     message:
+   *                       type: string
+   *                       example: "Buy ad created successfully"
    *       400:
-   *         description: Validation error
+   *         description: |
+   *           Validation error. Common errors:
+   *           - "Crypto currency, fiat currency, price, and volume are required"
+   *           - "Min order and max order are required"
+   *           - "At least one payment method is required"
+   *           - "Price, volume, and order limits must be greater than 0"
+   *           - "Min order must be less than max order"
+   *           - "Min order cannot be greater than volume"
+   *           - "One or more payment methods are invalid or not found"
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *       401:
+   *         description: Unauthorized - authentication required
    *         $ref: '#/components/schemas/Error'
    */
   async createBuyAd(req: Request, res: Response) {
