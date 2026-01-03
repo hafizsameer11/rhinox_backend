@@ -1,39 +1,59 @@
 import jwt from 'jsonwebtoken';
 
 /**
- * Verify JWT Token
- * @param token - JWT token to verify
+ * Verify JWT Access Token
+ * @param token - JWT access token to verify
  * @returns Decoded token payload or null if invalid
+ * @note This function ONLY accepts access tokens (signed with JWT_SECRET)
+ *       Refresh tokens should NOT be used for API authentication
  */
 export const verifyToken = async (token: string): Promise<{ id: string; userId?: string } | null> => {
   try {
-    // Try with JWT_SECRET first (for access tokens)
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as {
-        userId: string;
-        id?: string;
-      };
+    // ONLY verify with JWT_SECRET (access tokens only)
+    // Refresh tokens should NOT be accepted here for security
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as {
+      userId: string;
+      id?: string;
+      type?: string; // Check if it's a refresh token (should be rejected)
+    };
 
-      return {
-        id: decoded.userId || decoded.id || '',
-        userId: decoded.userId || decoded.id,
-      };
-    } catch (error) {
-      // If that fails, try with REFRESH_TOKEN_SECRET (for refresh tokens)
-      try {
-        const decoded = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET || 'your-refresh-secret') as {
-          userId: string;
-          id?: string;
-        };
-
-        return {
-          id: decoded.userId || decoded.id || '',
-          userId: decoded.userId || decoded.id,
-        };
-      } catch (refreshError) {
-        return null;
-      }
+    // Reject refresh tokens even if they're signed with JWT_SECRET
+    if (decoded.type === 'refresh') {
+      return null;
     }
+
+    return {
+      id: decoded.userId || decoded.id || '',
+      userId: decoded.userId || decoded.id,
+    };
+  } catch (error) {
+    // Token is invalid or expired
+    return null;
+  }
+};
+
+/**
+ * Verify Refresh Token (separate function for refresh endpoint only)
+ * @param token - JWT refresh token to verify
+ * @returns Decoded token payload or null if invalid
+ */
+export const verifyRefreshToken = async (token: string): Promise<{ id: string; userId?: string } | null> => {
+  try {
+    const decoded = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET || 'your-refresh-secret') as {
+      userId: string;
+      id?: string;
+      type?: string;
+    };
+
+    // Ensure it's actually a refresh token
+    if (decoded.type !== 'refresh') {
+      return null;
+    }
+
+    return {
+      id: decoded.userId || decoded.id || '',
+      userId: decoded.userId || decoded.id,
+    };
   } catch (error) {
     return null;
   }

@@ -16,7 +16,7 @@ datasource db {
 // Authentication and user management models
 
 model User {
-  id              String   @id @default(uuid())
+  id              Int      @id @default(autoincrement())
   email           String   @unique
   phone           String?  @unique
   passwordHash    String
@@ -24,7 +24,7 @@ model User {
   firstName       String?
   lastName        String?
   middleName      String? // Middle name for KYC
-  countryId       String? // Country selection from form
+  countryId       Int? // Country selection from form
   termsAccepted   Boolean  @default(false) // Terms & Conditions acceptance
   isEmailVerified Boolean  @default(false)
   isPhoneVerified Boolean  @default(false)
@@ -57,8 +57,8 @@ model User {
 }
 
 model Session {
-  id        String   @id @default(uuid())
-  userId    String
+  id        Int      @id @default(autoincrement())
+  userId    Int
   token     String   @unique
   ipAddress String?
   userAgent String?
@@ -73,8 +73,8 @@ model Session {
 }
 
 model RefreshToken {
-  id        String   @id @default(uuid())
-  userId    String
+  id        Int      @id @default(autoincrement())
+  userId    Int
   token     String   @unique
   expiresAt DateTime
   createdAt DateTime @default(now())
@@ -87,8 +87,8 @@ model RefreshToken {
 }
 
 model KYC {
-  id                         String    @id @default(uuid())
-  userId                     String    @unique
+  id                         Int       @id @default(autoincrement())
+  userId                     Int       @unique
   tier                       Int       @default(1) // 1 = Basic, 2 = Intermediate, 3 = Advanced
   status                     String    @default("pending") // pending, verified, rejected
   firstName                  String?
@@ -118,8 +118,8 @@ model KYC {
 // OTP verification models
 
 model OTP {
-  id        String   @id @default(uuid())
-  userId    String
+  id        Int      @id @default(autoincrement())
+  userId    Int
   code      String // 5-digit code
   type      String // email, phone
   expiresAt DateTime
@@ -141,9 +141,9 @@ model OTP {
 // Wallet and balance management models
 
 model Wallet {
-  id            String   @id @default(uuid())
-  userId        String
-  currencyId    String? // Reference to Currency model
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  currencyId    Int? // Reference to Currency model
   currency      String // NGN, USD, EUR, GBP, BTC, ETH, USDT, etc. (code)
   currencyName  String? // Nigerian Naira, US Dollar, etc.
   type          String   @default("fiat") // fiat, crypto
@@ -171,8 +171,8 @@ model Wallet {
 // Transaction and payment models
 
 model Transaction {
-  id            String    @id @default(uuid())
-  walletId      String
+  id            Int       @id @default(autoincrement())
+  walletId      Int
   type          String // deposit, withdrawal, transfer, p2p, bill_payment
   status        String    @default("pending") // pending, processing, completed, failed, cancelled
   amount        Decimal   @db.Decimal(20, 8)
@@ -182,9 +182,9 @@ model Transaction {
   description   String?
   channel       String? // bank_transfer, mobile_money, conversion, p2p
   country       String? // Country code (NG, KE, etc.)
-  bankAccountId String?   @map("bank_account_id") // Reference to bank account used
+  bankAccountId Int?      @map("bank_account_id") // Reference to bank account used
   paymentMethod String?   @map("payment_method") // Bank Transfer, Mobile Money, etc.
-  providerId    String?   @map("provider_id") // Reference to mobile money provider
+  providerId    Int?      @map("provider_id") // Reference to mobile money provider
   metadata      Json? // Additional transaction data
   completedAt   DateTime? @map("completed_at")
   createdAt     DateTime  @default(now())
@@ -210,7 +210,7 @@ model Transaction {
 // Bank account details for deposits
 
 model BankAccount {
-  id            String   @id @default(uuid())
+  id            Int      @id @default(autoincrement())
   countryCode   String   @map("country_code") @db.VarChar(10) // NG, KE, etc.
   currency      String   @db.VarChar(10) // NGN, KES, etc.
   bankName      String   @map("bank_name") @db.VarChar(255)
@@ -222,10 +222,10 @@ model BankAccount {
 
   transactions Transaction[]
 
-  @@unique([countryCode, currency])
   @@index([countryCode])
   @@index([currency])
   @@index([isActive])
+  @@index([countryCode, currency])
   @@map("bank_accounts")
 }
 
@@ -235,7 +235,7 @@ model BankAccount {
 // Mobile money provider details for deposits
 
 model MobileMoneyProvider {
-  id          String   @id @default(uuid())
+  id          Int      @id @default(autoincrement())
   name        String   @db.VarChar(100) // MTN, Vodafone, M-Pesa, etc.
   code        String   @db.VarChar(50) // MTN, VODAFONE, MPESA, etc.
   countryCode String   @map("country_code") @db.VarChar(10) // NG, KE, GH, etc.
@@ -262,7 +262,7 @@ model MobileMoneyProvider {
 // Country model
 
 model Country {
-  id        String   @id @default(uuid())
+  id        Int      @id @default(autoincrement())
   name      String?
   code      String?  @unique // ISO country code (NG, KE, GH, etc.)
   flag      String? // Path to flag image in uploads/flags
@@ -283,11 +283,11 @@ model Country {
 // Currency model
 
 model Currency {
-  id           String   @id @default(uuid())
+  id           Int      @id @default(autoincrement())
   code         String   @unique // NGN, USD, EUR, KSH, etc.
   name         String? // Nigerian Naira, US Dollar, etc.
   symbol       String? // ₦, $, €, etc.
-  countryId    String? // Primary country for this currency
+  countryId    Int? // Primary country for this currency
   type         String   @default("fiat") // fiat, crypto
   flag         String? // Path to flag/icon in uploads/flags
   exchangeRate Decimal? @db.Decimal(20, 8) // Exchange rate to base currency (USD)
@@ -310,7 +310,7 @@ model Currency {
 // Currency exchange rates
 
 model ExchangeRate {
-  id           String   @id @default(uuid())
+  id           Int      @id @default(autoincrement())
   fromCurrency String   @map("from_currency") @db.VarChar(10)
   toCurrency   String   @map("to_currency") @db.VarChar(10)
   rate         Decimal  @db.Decimal(20, 8) // Rate to convert fromCurrency to toCurrency
@@ -332,12 +332,12 @@ model ExchangeRate {
 // Tatum virtual account and crypto wallet models
 
 model WalletCurrency {
-  id              String           @id @default(uuid())
+  id              Int              @id @default(autoincrement())
   blockchain      String           @db.VarChar(255)
   currency        String           @db.VarChar(50)
   symbol          String?          @db.VarChar(255)
   name            String           @db.VarChar(255)
-  icon            String?          // Path to icon image in uploads/wallet_symbols
+  icon            String? // Path to icon image in uploads/wallet_symbols
   price           Decimal?         @db.Decimal(20, 8)
   nairaPrice      Decimal?         @map("naira_price") @db.Decimal(20, 8)
   tokenType       String?          @map("token_type") @db.VarChar(50)
@@ -357,8 +357,8 @@ model WalletCurrency {
 }
 
 model UserWallet {
-  id               String           @id @default(uuid())
-  userId           String           @map("user_id")
+  id               Int              @id @default(autoincrement())
+  userId           Int              @map("user_id")
   blockchain       String           @db.VarChar(255)
   mnemonic         String?          @db.Text // Encrypted mnemonic/secret/privateKey
   xpub             String?          @db.VarChar(500) // Extended public key (or address for Solana/XRP)
@@ -375,8 +375,8 @@ model UserWallet {
 }
 
 model VirtualAccount {
-  id                 String           @id @default(uuid())
-  userId             String           @map("user_id")
+  id                 Int              @id @default(autoincrement())
+  userId             Int              @map("user_id")
   blockchain         String           @db.VarChar(255)
   currency           String           @db.VarChar(50)
   customerId         String?          @map("customer_id") @db.VarChar(255)
@@ -388,7 +388,7 @@ model VirtualAccount {
   availableBalance   String           @default("0") @map("available_balance") @db.VarChar(255)
   xpub               String?          @db.VarChar(500)
   accountingCurrency String?          @map("accounting_currency") @db.VarChar(50)
-  currencyId         String?          @map("currency_id")
+  currencyId         Int?             @map("currency_id")
   createdAt          DateTime         @default(now()) @map("created_at")
   updatedAt          DateTime         @updatedAt @map("updated_at")
   user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -405,9 +405,9 @@ model VirtualAccount {
 }
 
 model DepositAddress {
-  id               String         @id @default(uuid())
-  virtualAccountId String         @map("virtual_account_id")
-  userWalletId     String?        @map("user_wallet_id")
+  id               Int            @id @default(autoincrement())
+  virtualAccountId Int            @map("virtual_account_id")
+  userWalletId     Int?           @map("user_wallet_id")
   blockchain       String?        @db.VarChar(255)
   currency         String?        @db.VarChar(50)
   address          String         @db.VarChar(255)
@@ -426,7 +426,7 @@ model DepositAddress {
 }
 
 model MasterWallet {
-  id         String   @id @default(uuid())
+  id         Int      @id @default(autoincrement())
   blockchain String   @unique @db.VarChar(255)
   xpub       String?  @db.VarChar(500)
   address    String?  @db.VarChar(255)
@@ -440,7 +440,7 @@ model MasterWallet {
 }
 
 model WebhookResponse {
-  id               String    @id @default(uuid())
+  id               Int       @id @default(autoincrement())
   accountId        String?   @map("account_id") @db.VarChar(255)
   subscriptionType String?   @map("subscription_type") @db.VarChar(255)
   amount           Decimal?  @db.Decimal(20, 8)
@@ -465,7 +465,7 @@ model WebhookResponse {
 }
 
 model TatumRawWebhook {
-  id           String    @id @default(uuid())
+  id           Int       @id @default(autoincrement())
   rawData      String    @map("raw_data") @db.LongText
   headers      String?   @db.Text
   ipAddress    String?   @map("ip_address") @db.VarChar(255)
@@ -487,14 +487,14 @@ model TatumRawWebhook {
 // User's saved payment methods (bank accounts, mobile money)
 
 model UserPaymentMethod {
-  id            String   @id @default(uuid())
-  userId        String   @map("user_id")
+  id            Int      @id @default(autoincrement())
+  userId        Int      @map("user_id")
   type          String // bank_account, mobile_money
   accountType   String?  @map("account_type") // For bank: savings, current, etc.
   bankName      String?  @map("bank_name") // For bank accounts
   accountNumber String?  @map("account_number") // For bank accounts (encrypted)
   accountName   String?  @map("account_name") // Account holder name
-  providerId    String?  @map("provider_id") // For mobile money (reference to MobileMoneyProvider)
+  providerId    Int?     @map("provider_id") // For mobile money (reference to MobileMoneyProvider)
   phoneNumber   String?  @map("phone_number") // For mobile money
   countryCode   String   @map("country_code") @db.VarChar(10)
   currency      String   @db.VarChar(10)
@@ -523,8 +523,8 @@ model UserPaymentMethod {
 // P2P trading advertisements (buy/sell ads)
 
 model P2PAd {
-  id               String   @id @default(uuid())
-  userId           String   @map("user_id")
+  id               Int      @id @default(autoincrement())
+  userId           Int      @map("user_id")
   type             String // buy, sell
   cryptoCurrency   String   @map("crypto_currency") @db.VarChar(50) // BTC, USDT, ETH, etc.
   fiatCurrency     String   @map("fiat_currency") @db.VarChar(10) // NGN, USD, etc.
@@ -566,31 +566,31 @@ model P2PAd {
 // P2P orders created from ads
 
 model P2POrder {
-  id                 String    @id @default(uuid())
-  adId               String    @map("ad_id")
-  buyerId            String    @map("buyer_id")
-  vendorId           String    @map("vendor_id")
-  type               String // 'buy' or 'sell' (from ad perspective)
-  cryptoCurrency     String    @map("crypto_currency") @db.VarChar(50)
-  fiatCurrency       String    @map("fiat_currency") @db.VarChar(10)
-  cryptoAmount       Decimal   @map("crypto_amount") @db.Decimal(20, 8)
-  fiatAmount         Decimal   @map("fiat_amount") @db.Decimal(20, 8)
-  price              Decimal   @db.Decimal(20, 8) // Price at time of order
-  paymentMethodId    String?   @map("payment_method_id")
-  status             String    @default("pending") // pending, awaiting_payment, payment_made, awaiting_coin_release, completed, cancelled, disputed, refunded, expired
-  acceptedAt         DateTime? @map("accepted_at") // When vendor accepted the order
-  processingTimeMinutes Int?   @map("processing_time_minutes") // Processing time from ad
-  expiresAt          DateTime? @map("expires_at") // Order expiration time (acceptedAt + processingTime)
-  paymentConfirmedAt DateTime? @map("payment_confirmed_at")
-  paymentReceivedAt  DateTime? @map("payment_received_at")
-  coinReleasedAt     DateTime? @map("coin_released_at")
-  completedAt        DateTime? @map("completed_at")
-  cancelledAt        DateTime? @map("cancelled_at")
-  txId               String?   @map("tx_id") @db.VarChar(255) // Transaction reference
-  paymentChannel     String?   @map("payment_channel") // 'rhinoxpay_id' or 'offline'
-  metadata           Json? // Additional data (payment proof, etc.)
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  id                    Int       @id @default(autoincrement())
+  adId                  Int       @map("ad_id")
+  buyerId               Int       @map("buyer_id")
+  vendorId              Int       @map("vendor_id")
+  type                  String // 'buy' or 'sell' (from ad perspective)
+  cryptoCurrency        String    @map("crypto_currency") @db.VarChar(50)
+  fiatCurrency          String    @map("fiat_currency") @db.VarChar(10)
+  cryptoAmount          Decimal   @map("crypto_amount") @db.Decimal(20, 8)
+  fiatAmount            Decimal   @map("fiat_amount") @db.Decimal(20, 8)
+  price                 Decimal   @db.Decimal(20, 8) // Price at time of order
+  paymentMethodId       Int?      @map("payment_method_id")
+  status                String    @default("pending") // pending, awaiting_payment, payment_made, awaiting_coin_release, completed, cancelled, disputed, refunded, expired
+  acceptedAt            DateTime? @map("accepted_at") // When vendor accepted the order
+  processingTimeMinutes Int?      @map("processing_time_minutes") // Processing time from ad
+  expiresAt             DateTime? @map("expires_at") // Order expiration time (acceptedAt + processingTime)
+  paymentConfirmedAt    DateTime? @map("payment_confirmed_at")
+  paymentReceivedAt     DateTime? @map("payment_received_at")
+  coinReleasedAt        DateTime? @map("coin_released_at")
+  completedAt           DateTime? @map("completed_at")
+  cancelledAt           DateTime? @map("cancelled_at")
+  txId                  String?   @map("tx_id") @db.VarChar(255) // Transaction reference
+  paymentChannel        String?   @map("payment_channel") // 'rhinoxpay_id' or 'offline'
+  metadata              Json? // Additional data (payment proof, etc.)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
   // Relations
   ad            P2PAd              @relation(fields: [adId], references: [id], onDelete: Cascade)
@@ -614,10 +614,10 @@ model P2POrder {
 // Chat messages between buyer and vendor for orders
 
 model P2PChatMessage {
-  id         String    @id @default(uuid())
-  orderId    String    @map("order_id")
-  senderId   String    @map("sender_id")
-  receiverId String    @map("receiver_id")
+  id         Int       @id @default(autoincrement())
+  orderId    Int       @map("order_id")
+  senderId   Int       @map("sender_id")
+  receiverId Int       @map("receiver_id")
   message    String    @db.Text
   isRead     Boolean   @default(false) @map("is_read")
   readAt     DateTime? @map("read_at")
@@ -641,11 +641,11 @@ model P2PChatMessage {
 // Reviews left by users after order completion
 
 model P2PReview {
-  id         String   @id @default(uuid())
-  orderId    String   @map("order_id")
-  reviewerId String   @map("reviewer_id")
-  revieweeId String   @map("reviewee_id") // Vendor being reviewed
-  adId       String   @map("ad_id")
+  id         Int      @id @default(autoincrement())
+  orderId    Int      @map("order_id")
+  reviewerId Int      @map("reviewer_id")
+  revieweeId Int      @map("reviewee_id") // Vendor being reviewed
+  adId       Int      @map("ad_id")
   type       String // 'positive' or 'negative' (thumbs up/down)
   comment    String?  @db.Text
   createdAt  DateTime @default(now()) @map("created_at")

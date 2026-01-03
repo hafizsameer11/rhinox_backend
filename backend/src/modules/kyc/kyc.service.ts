@@ -1,4 +1,5 @@
 import prisma from '../../core/config/database.js';
+import { parseOptionalId, parseId } from '../../core/utils/idParser.js';
 
 /**
  * KYC Service
@@ -18,20 +19,25 @@ export class KYCService {
     idDocumentUrl?: string;
     countryId?: string;
   }) {
-    // Check if KYC already exists
+    // Check if KYC already exists (parse userId to integer)
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
     const existingKYC = await prisma.kYC.findUnique({
-      where: { userId },
+      where: { userId: parsedUserId },
     });
 
     // Update user basic info if provided
     if (data.firstName || data.lastName || data.middleName || data.countryId) {
+      const parsedCountryId = data.countryId ? parseOptionalId(data.countryId, 'countryId') : undefined;
       await prisma.user.update({
-        where: { id: userId },
+        where: { id: typeof userId === 'string' ? parseInt(userId, 10) : userId },
         data: {
           ...(data.firstName && { firstName: data.firstName }),
           ...(data.lastName && { lastName: data.lastName }),
           ...(data.middleName && { middleName: data.middleName }),
-          ...(data.countryId && { countryId: data.countryId }),
+          ...(parsedCountryId && { countryId: parsedCountryId }),
         },
       });
     }
@@ -39,7 +45,7 @@ export class KYCService {
     if (existingKYC) {
       // Update existing KYC
       const kyc = await prisma.kYC.update({
-        where: { userId },
+        where: { userId: parsedUserId },
         data: {
           ...(data.firstName && { firstName: data.firstName }),
           ...(data.lastName && { lastName: data.lastName }),
@@ -106,8 +112,9 @@ export class KYCService {
    * Get user KYC status
    */
   async getKYCStatus(userId: string) {
+    const parsedUserId = parseId(userId, 'userId');
     const kyc = await prisma.kYC.findUnique({
-      where: { userId },
+      where: { userId: parsedUserId },
     });
 
     if (!kyc) {
@@ -140,8 +147,9 @@ export class KYCService {
    * Submit face verification
    */
   async submitFaceVerification(userId: string, imageUrl: string, isSuccessful: boolean) {
+    const parsedUserId = parseId(userId, 'userId');
     const kyc = await prisma.kYC.findUnique({
-      where: { userId },
+      where: { userId: parsedUserId },
     });
 
     if (!kyc) {
@@ -149,7 +157,7 @@ export class KYCService {
     }
 
     const updatedKYC = await prisma.kYC.update({
-      where: { userId },
+      where: { userId: parsedUserId },
       data: {
         faceVerificationImageUrl: imageUrl,
         faceVerificationSuccessful: isSuccessful,
@@ -169,8 +177,9 @@ export class KYCService {
    * Upload ID document
    */
   async uploadIDDocument(userId: string, documentUrl: string, idType: string, idNumber: string) {
+    const parsedUserId = parseId(userId, 'userId');
     const kyc = await prisma.kYC.findUnique({
-      where: { userId },
+      where: { userId: parsedUserId },
     });
 
     if (!kyc) {
@@ -178,7 +187,7 @@ export class KYCService {
     }
 
     const updatedKYC = await prisma.kYC.update({
-      where: { userId },
+      where: { userId: parsedUserId },
       data: {
         idDocumentUrl: documentUrl,
         idType,
@@ -200,8 +209,9 @@ export class KYCService {
    * Admin: Approve KYC
    */
   async approveKYC(userId: string, adminUserId?: string) {
+    const parsedUserId = parseId(userId, 'userId');
     const kyc = await prisma.kYC.findUnique({
-      where: { userId },
+      where: { userId: parsedUserId },
       include: {
         user: {
           select: {
@@ -224,7 +234,7 @@ export class KYCService {
 
     // Update KYC status to verified
     const updatedKYC = await prisma.kYC.update({
-      where: { userId },
+      where: { userId: parsedUserId },
       data: {
         status: 'verified',
         verifiedAt: new Date(),
@@ -255,8 +265,9 @@ export class KYCService {
    * Admin: Reject KYC
    */
   async rejectKYC(userId: string, reason?: string) {
+    const parsedUserId = parseId(userId, 'userId');
     const kyc = await prisma.kYC.findUnique({
-      where: { userId },
+      where: { userId: parsedUserId },
     });
 
     if (!kyc) {
@@ -269,7 +280,7 @@ export class KYCService {
 
     // Update KYC status to rejected
     const updatedKYC = await prisma.kYC.update({
-      where: { userId },
+      where: { userId: parsedUserId },
       data: {
         status: 'rejected',
       },

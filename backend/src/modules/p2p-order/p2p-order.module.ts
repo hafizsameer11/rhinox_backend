@@ -27,29 +27,52 @@ export class P2POrderModule implements IModule {
   }
 
   private setupRoutes(): void {
-    // Public routes (no auth required)
+    // ============================================
+    // PUBLIC ROUTES (No auth required)
+    // ============================================
     this.router.get('/ads/browse', this.controller.browseAds.bind(this.controller));
     this.router.get('/ads/:id', this.controller.getAdDetails.bind(this.controller));
 
-    // Protected routes (auth required)
+    // ============================================
+    // USER ROUTES (Order creators - buyers/sellers)
+    // ============================================
     
-    // Order creation and listing
+    // User browsing ads (separate buy/sell)
+    this.router.get('/user/ads/buy', authMiddleware, this.controller.browseAdsToBuy.bind(this.controller));
+    this.router.get('/user/ads/sell', authMiddleware, this.controller.browseAdsToSell.bind(this.controller));
+    
+    // User order management
+    this.router.post('/user/orders', authMiddleware, this.controller.createOrder.bind(this.controller));
+    this.router.get('/user/orders', authMiddleware, this.controller.getUserOrders.bind(this.controller));
+    this.router.get('/user/orders/:id', authMiddleware, this.controller.getOrderDetails.bind(this.controller));
+    this.router.post('/user/orders/:id/payment-made', authMiddleware, this.controller.confirmPayment.bind(this.controller));
+    this.router.post('/user/orders/:id/payment-received', authMiddleware, this.controller.markPaymentReceivedUser.bind(this.controller));
+    this.router.post('/user/orders/:id/cancel', authMiddleware, this.controller.cancelOrderUser.bind(this.controller));
+
+    // ============================================
+    // VENDOR ROUTES (Ad owners)
+    // ============================================
+    
+    // Vendor order management
+    this.router.get('/vendor/orders', authMiddleware, this.controller.getVendorOrders.bind(this.controller));
+    this.router.get('/vendor/orders/:id', authMiddleware, this.controller.getOrderDetails.bind(this.controller));
+    this.router.post('/vendor/orders/:id/accept', authMiddleware, this.controller.acceptOrder.bind(this.controller));
+    this.router.post('/vendor/orders/:id/decline', authMiddleware, this.controller.declineOrder.bind(this.controller));
+    this.router.post('/vendor/orders/:id/payment-received', authMiddleware, this.controller.markPaymentReceived.bind(this.controller));
+    this.router.post('/vendor/orders/:id/payment-made', authMiddleware, this.controller.markPaymentMade.bind(this.controller));
+    this.router.post('/vendor/orders/:id/cancel', authMiddleware, this.controller.cancelOrderVendor.bind(this.controller));
+
+    // ============================================
+    // LEGACY ROUTES (Backward compatibility)
+    // ============================================
     this.router.post('/orders', authMiddleware, this.controller.createOrder.bind(this.controller));
     this.router.get('/orders', authMiddleware, this.controller.getUserOrders.bind(this.controller));
     this.router.get('/orders/:id', authMiddleware, this.controller.getOrderDetails.bind(this.controller));
-    
-    // Vendor actions (ad owner)
     this.router.post('/orders/:id/vendor/accept', authMiddleware, this.controller.acceptOrder.bind(this.controller));
     this.router.post('/orders/:id/vendor/decline', authMiddleware, this.controller.declineOrder.bind(this.controller));
     this.router.post('/orders/:id/vendor/payment-received', authMiddleware, this.controller.markPaymentReceived.bind(this.controller));
-    
-    // Buyer actions (order creator)
     this.router.post('/orders/:id/buyer/payment-made', authMiddleware, this.controller.confirmPayment.bind(this.controller));
-    
-    // Either party can cancel
     this.router.post('/orders/:id/cancel', authMiddleware, this.controller.cancelOrder.bind(this.controller));
-    
-    // Legacy endpoints (for backward compatibility)
     this.router.post('/orders/:id/accept', authMiddleware, this.controller.acceptOrder.bind(this.controller));
     this.router.post('/orders/:id/decline', authMiddleware, this.controller.declineOrder.bind(this.controller));
     this.router.post('/orders/:id/confirm-payment', authMiddleware, this.controller.confirmPayment.bind(this.controller));

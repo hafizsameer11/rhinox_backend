@@ -3,6 +3,7 @@ import jwt, { type SignOptions } from 'jsonwebtoken';
 import prisma from '../../core/config/database.js';
 import { generateOTP, sendOTPEmail } from '../../core/utils/email.service.js';
 import { CryptoService } from '../crypto/crypto.service.js';
+import { parseOptionalId } from '../../core/utils/idParser.js';
 
 /**
  * Auth Service
@@ -38,13 +39,17 @@ export class AuthService {
       throw new Error('User with this phone number already exists');
     }
 
-    // Validate country if provided
+    // Validate country if provided and parse ID
+    let parsedCountryId: number | undefined;
     if (data.countryId) {
-      const country = await prisma.country.findUnique({
-        where: { id: data.countryId },
-      });
-      if (!country) {
-        throw new Error('Invalid country selected');
+      parsedCountryId = parseOptionalId(data.countryId, 'countryId');
+      if (parsedCountryId) {
+        const country = await prisma.country.findUnique({
+          where: { id: parsedCountryId },
+        });
+        if (!country) {
+          throw new Error('Invalid country selected');
+        }
       }
     }
 
@@ -60,11 +65,8 @@ export class AuthService {
       lastName: data.lastName,
       termsAccepted: data.termsAccepted,
       isEmailVerified: false, // Will be verified after OTP
+      ...(parsedCountryId && { countryId: parsedCountryId }),
     };
-    
-    if (data.countryId) {
-      userData.countryId = data.countryId;
-    }
     
     const user = await prisma.user.create({
       data: userData,

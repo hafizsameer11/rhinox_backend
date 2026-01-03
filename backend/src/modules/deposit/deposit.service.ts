@@ -105,9 +105,13 @@ export class DepositService {
         throw new Error('Provider ID is required for mobile money deposits');
       }
 
-      // Verify provider exists and is active
+      // Verify provider exists and is active (parse ID to integer)
+      const providerId = typeof data.providerId === 'string' ? parseInt(data.providerId, 10) : data.providerId;
+      if (isNaN(providerId) || providerId <= 0) {
+        throw new Error('Invalid provider ID format');
+      }
       const provider = await prisma.mobileMoneyProvider.findUnique({
-        where: { id: data.providerId },
+        where: { id: providerId },
       });
 
       if (!provider || !provider.isActive) {

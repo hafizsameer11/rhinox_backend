@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { type IModule } from '../../core/types/module.types.js';
+import { authMiddleware } from '../../core/middleware/auth.middleware.js';
 import { P2PController } from './p2p.controller.js';
 import { P2PService } from './p2p.service.js';
 
@@ -26,19 +27,23 @@ export class P2PModule implements IModule {
   }
 
   private setupRoutes(): void {
-    // Create ads
-    this.router.post('/ads/buy', this.controller.createBuyAd.bind(this.controller));
-    this.router.post('/ads/sell', this.controller.createSellAd.bind(this.controller));
+    // ============================================
+    // VENDOR ROUTES (Ad Management) - All require auth
+    // ============================================
     
-    // Get ads
-    this.router.get('/ads', this.controller.getUserAds.bind(this.controller));
-    this.router.get('/ads/:id', this.controller.getAd.bind(this.controller));
+    // Create ads
+    this.router.post('/ads/buy', authMiddleware, this.controller.createBuyAd.bind(this.controller));
+    this.router.post('/ads/sell', authMiddleware, this.controller.createSellAd.bind(this.controller));
+    
+    // Get my ads
+    this.router.get('/ads', authMiddleware, this.controller.getUserAds.bind(this.controller));
+    this.router.get('/ads/:id', authMiddleware, this.controller.getAd.bind(this.controller));
     
     // Update ad status
-    this.router.put('/ads/:id/status', this.controller.updateAdStatus.bind(this.controller));
+    this.router.put('/ads/:id/status', authMiddleware, this.controller.updateAdStatus.bind(this.controller));
     
     // Update/edit ad
-    this.router.put('/ads/:id', this.controller.updateAd.bind(this.controller));
+    this.router.put('/ads/:id', authMiddleware, this.controller.updateAd.bind(this.controller));
   }
 }
 

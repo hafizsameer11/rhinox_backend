@@ -12,13 +12,13 @@ export class P2PController {
    * @swagger
    * /api/p2p/ads/buy:
    *   post:
-   *     summary: Create a P2P buy advertisement
+   *     summary: "[VENDOR] Create BUY ad - I want to BUY crypto"
    *     description: |
    *       Creates a buy advertisement for purchasing cryptocurrency with fiat currency.
    *       As a vendor, you can create buy ads to allow other users to sell crypto to you.
    *       The ad will be visible to other users who want to sell the specified cryptocurrency.
    *       Payment methods must be added to your account first (use Payment Settings endpoints).
-   *     tags: [P2P]
+     *     tags: ["P2P - VENDOR (Ad Creation)"]
    *     security:
    *       - bearerAuth: []
    *       - cookieAuth: []
@@ -254,8 +254,8 @@ export class P2PController {
    * @swagger
    * /api/p2p/ads/sell:
    *   post:
-   *     summary: Create a sell ad
-   *     tags: [P2P]
+   *     summary: "[VENDOR] Create SELL ad - I want to SELL crypto"
+     *     tags: ["P2P - VENDOR (Ad Creation)"]
    *     security:
    *       - bearerAuth: []
    *       - cookieAuth: []
@@ -364,8 +364,8 @@ export class P2PController {
    * @swagger
    * /api/p2p/ads:
    *   get:
-   *     summary: Get user's ads
-   *     tags: [P2P]
+   *     summary: "[VENDOR] Get my ads - View all my buy and sell ads"
+     *     tags: ["P2P - VENDOR (Ad Management)"]
    *     security:
    *       - bearerAuth: []
    *       - cookieAuth: []
@@ -468,8 +468,8 @@ export class P2PController {
    * @swagger
    * /api/p2p/ads/{id}:
    *   get:
-   *     summary: Get a single ad by ID
-   *     tags: [P2P]
+   *     summary: "[VENDOR] Get ad details - View one of my ads"
+     *     tags: ["P2P - VENDOR (Ad Management)"]
    *     security:
    *       - bearerAuth: []
    *       - cookieAuth: []
@@ -516,8 +516,8 @@ export class P2PController {
    * @swagger
    * /api/p2p/ads/{id}/status:
    *   put:
-   *     summary: Update ad status
-   *     tags: [P2P]
+   *     summary: "[VENDOR] Update ad status - Toggle available/unavailable"
+     *     tags: ["P2P - VENDOR (Ad Management)"]
    *     security:
    *       - bearerAuth: []
    *       - cookieAuth: []
@@ -595,8 +595,8 @@ export class P2PController {
    * @swagger
    * /api/p2p/ads/{id}:
    *   put:
-   *     summary: Update/edit an ad
-   *     tags: [P2P]
+   *     summary: "[VENDOR] Edit ad - Update ad details"
+     *     tags: ["P2P - VENDOR (Ad Management)"]
    *     security:
    *       - bearerAuth: []
    *       - cookieAuth: []

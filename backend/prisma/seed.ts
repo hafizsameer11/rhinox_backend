@@ -229,18 +229,27 @@ async function main() {
   // Seed Countries
   console.log('📌 Seeding countries...');
   for (const country of countries) {
-    await prisma.country.upsert({
+    const existing = await prisma.country.findUnique({
       where: { code: country.code },
-      update: {
-        name: country.name,
-        flag: country.flag,
-      },
-      create: {
-        name: country.name,
-        code: country.code,
-        flag: country.flag,
-      },
     });
+
+    if (existing) {
+      await prisma.country.update({
+        where: { id: existing.id },
+        data: {
+          name: country.name,
+          flag: country.flag,
+        },
+      });
+    } else {
+      await prisma.country.create({
+        data: {
+          name: country.name,
+          code: country.code,
+          flag: country.flag,
+        },
+      });
+    }
   }
   console.log(`✅ Seeded ${countries.length} countries`);
 
@@ -248,7 +257,7 @@ async function main() {
   console.log('💰 Seeding currencies...');
   for (const currency of currencies) {
     // Find country by code if countryCode is provided
-    let countryId: string | undefined;
+    let countryId: number | undefined;
     if (currency.countryCode) {
       const country = await prisma.country.findUnique({
         where: { code: currency.countryCode },
@@ -256,26 +265,35 @@ async function main() {
       countryId = country?.id;
     }
 
-    await prisma.currency.upsert({
+    const existingCurrency = await prisma.currency.findUnique({
       where: { code: currency.code },
-      update: {
-        name: currency.name,
-        symbol: currency.symbol,
-        countryId,
-        type: currency.type,
-        flag: currency.flag,
-        exchangeRate: currency.exchangeRate,
-      },
-      create: {
-        code: currency.code,
-        name: currency.name,
-        symbol: currency.symbol,
-        countryId,
-        type: currency.type,
-        flag: currency.flag,
-        exchangeRate: currency.exchangeRate,
-      },
     });
+
+    if (existingCurrency) {
+      await prisma.currency.update({
+        where: { id: existingCurrency.id },
+        data: {
+          name: currency.name,
+          symbol: currency.symbol,
+          ...(countryId !== undefined && { countryId }),
+          type: currency.type,
+          flag: currency.flag,
+          exchangeRate: currency.exchangeRate,
+        },
+      });
+    } else {
+      await prisma.currency.create({
+        data: {
+          code: currency.code,
+          name: currency.name,
+          symbol: currency.symbol,
+          ...(countryId !== undefined && { countryId }),
+          type: currency.type,
+          flag: currency.flag,
+          exchangeRate: currency.exchangeRate,
+        },
+      });
+    }
   }
   console.log(`✅ Seeded ${currencies.length} currencies`);
 
@@ -317,43 +335,117 @@ async function main() {
   ];
 
   for (const wc of walletCurrencies) {
-    await prisma.walletCurrency.upsert({
+    const existing = await prisma.walletCurrency.findUnique({
       where: {
         blockchain_currency: {
           blockchain: wc.blockchain,
           currency: wc.currency,
         },
       },
-      update: {
-        name: wc.name,
-        symbol: wc.symbol,
-        isToken: wc.isToken,
-        contractAddress: wc.contractAddress,
-        decimals: wc.decimals,
-      },
-      create: {
-        blockchain: wc.blockchain,
-        currency: wc.currency,
-        name: wc.name,
-        symbol: wc.symbol,
-        isToken: wc.isToken,
-        contractAddress: wc.contractAddress,
-        decimals: wc.decimals,
-      },
     });
+
+    if (existing) {
+      await prisma.walletCurrency.update({
+        where: { id: existing.id },
+        data: {
+          name: wc.name,
+          symbol: wc.symbol,
+          isToken: wc.isToken,
+          ...(wc.contractAddress !== undefined && { contractAddress: wc.contractAddress }),
+          decimals: wc.decimals,
+        },
+      });
+    } else {
+      await prisma.walletCurrency.create({
+        data: {
+          blockchain: wc.blockchain,
+          currency: wc.currency,
+          name: wc.name,
+          symbol: wc.symbol,
+          isToken: wc.isToken,
+          ...(wc.contractAddress !== undefined && { contractAddress: wc.contractAddress }),
+          decimals: wc.decimals,
+        },
+      });
+    }
   }
   console.log(`✅ Seeded ${walletCurrencies.length} wallet currencies`);
 
   // Seed Bank Accounts
   console.log('🏦 Seeding bank accounts...');
   const bankAccounts = [
+    // Nigeria (NGN) - Multiple bank accounts
     {
       countryCode: 'NG',
       currency: 'NGN',
-      bankName: 'Gratuity Bank',
-      accountNumber: '1350131270',
-      accountName: 'Yellow card financial',
+      bankName: 'Access Bank',
+      accountNumber: '0012345678',
+      accountName: 'Rhinox Pay Limited',
     },
+    {
+      countryCode: 'NG',
+      currency: 'NGN',
+      bankName: 'GTBank',
+      accountNumber: '0023456789',
+      accountName: 'Rhinox Pay Limited',
+    },
+    {
+      countryCode: 'NG',
+      currency: 'NGN',
+      bankName: 'First Bank of Nigeria',
+      accountNumber: '0034567890',
+      accountName: 'Rhinox Pay Limited',
+    },
+    {
+      countryCode: 'NG',
+      currency: 'NGN',
+      bankName: 'Zenith Bank',
+      accountNumber: '0045678901',
+      accountName: 'Rhinox Pay Limited',
+    },
+    {
+      countryCode: 'NG',
+      currency: 'NGN',
+      bankName: 'UBA',
+      accountNumber: '0056789012',
+      accountName: 'Rhinox Pay Limited',
+    },
+    {
+      countryCode: 'NG',
+      currency: 'NGN',
+      bankName: 'Fidelity Bank',
+      accountNumber: '0067890123',
+      accountName: 'Rhinox Pay Limited',
+    },
+    {
+      countryCode: 'NG',
+      currency: 'NGN',
+      bankName: 'Stanbic IBTC',
+      accountNumber: '0078901234',
+      accountName: 'Rhinox Pay Limited',
+    },
+    {
+      countryCode: 'NG',
+      currency: 'NGN',
+      bankName: 'Ecobank',
+      accountNumber: '0089012345',
+      accountName: 'Rhinox Pay Limited',
+    },
+    {
+      countryCode: 'NG',
+      currency: 'NGN',
+      bankName: 'Union Bank',
+      accountNumber: '0090123456',
+      accountName: 'Rhinox Pay Limited',
+    },
+    {
+      countryCode: 'NG',
+      currency: 'NGN',
+      bankName: 'Sterling Bank',
+      accountNumber: '0101234567',
+      accountName: 'Rhinox Pay Limited',
+    },
+    // Other countries
     {
       countryCode: 'KE',
       currency: 'KES',
@@ -378,28 +470,38 @@ async function main() {
   ];
 
   for (const bank of bankAccounts) {
-    await prisma.bankAccount.upsert({
+    // Check if bank account with same details exists
+    const existing = await prisma.bankAccount.findFirst({
       where: {
-        countryCode_currency: {
-          countryCode: bank.countryCode,
-          currency: bank.currency,
-        },
-      },
-      update: {
-        bankName: bank.bankName,
-        accountNumber: bank.accountNumber,
-        accountName: bank.accountName,
-        isActive: true,
-      },
-      create: {
         countryCode: bank.countryCode,
         currency: bank.currency,
         bankName: bank.bankName,
         accountNumber: bank.accountNumber,
-        accountName: bank.accountName,
-        isActive: true,
       },
     });
+
+    if (!existing) {
+      await prisma.bankAccount.create({
+        data: {
+          countryCode: bank.countryCode,
+          currency: bank.currency,
+          bankName: bank.bankName,
+          accountNumber: bank.accountNumber,
+          accountName: bank.accountName,
+          isActive: true,
+        },
+      });
+    } else {
+      await prisma.bankAccount.update({
+        where: { id: existing.id },
+        data: {
+          bankName: bank.bankName,
+          accountNumber: bank.accountNumber,
+          accountName: bank.accountName,
+          isActive: true,
+        },
+      });
+    }
   }
   console.log(`✅ Seeded ${bankAccounts.length} bank accounts`);
 
@@ -436,36 +538,14 @@ async function main() {
   ];
 
   for (const provider of mobileMoneyProviders) {
-    // Find existing provider by unique constraint
-    const existing = await prisma.mobileMoneyProvider.findFirst({
+    await prisma.mobileMoneyProvider.upsert({
       where: {
-        code: provider.code,
-        countryCode: provider.countryCode,
-        currency: provider.currency,
-      },
-    });
-
-    if (existing) {
-      await prisma.mobileMoneyProvider.update({
-        where: { id: existing.id },
-        data: {
-          name: provider.name,
-          logoUrl: provider.logoUrl,
-          isActive: true,
-        },
-      });
-    } else {
-      await prisma.mobileMoneyProvider.create({
-        data: {
-          name: provider.name,
+        code_countryCode_currency: {
           code: provider.code,
           countryCode: provider.countryCode,
           currency: provider.currency,
-          logoUrl: provider.logoUrl,
-          isActive: true,
         },
-      });
-    }
+      },
       update: {
         name: provider.name,
         logoUrl: provider.logoUrl,

@@ -74,19 +74,22 @@ export class TransferService {
       },
     });
 
-    // If not found by email, try by userId
+    // If not found by email, try by userId (parse to integer)
     if (!user) {
-      user = await prisma.user.findUnique({
-        where: { id: recipientIdentifier },
-        select: {
-          id: true,
-          email: true,
-          firstName: true,
-          lastName: true,
-          phone: true,
-          isActive: true,
-        },
-      });
+      const userId = typeof recipientIdentifier === 'string' ? parseInt(recipientIdentifier, 10) : recipientIdentifier;
+      if (!isNaN(userId) && userId > 0) {
+        user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+            isActive: true,
+          },
+        });
+      }
     }
 
     if (!user) {
@@ -221,9 +224,13 @@ export class TransferService {
       if (!data.providerId || !data.phoneNumber) {
         throw new Error('Provider ID and phone number are required for mobile money transfers');
       }
-      // Validate provider
+      // Validate provider (parse ID to integer)
+      const providerId = typeof data.providerId === 'string' ? parseInt(data.providerId, 10) : data.providerId;
+      if (isNaN(providerId) || providerId <= 0) {
+        throw new Error('Invalid provider ID format');
+      }
       const provider = await prisma.mobileMoneyProvider.findUnique({
-        where: { id: data.providerId },
+        where: { id: providerId },
       });
       if (!provider || !provider.isActive) {
         throw new Error('Invalid or inactive mobile money provider');
