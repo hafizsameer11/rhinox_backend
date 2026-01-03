@@ -1,3 +1,9 @@
+/* 
+ * TATUM VIRTUAL ACCOUNT SERVICE - COMMENTED OUT FOR MOCK TESTING
+ * This service will be used when Tatum account is available
+ */
+
+/*
 import { randomUUID } from 'crypto';
 import prisma from '../../core/config/database.js';
 
@@ -131,4 +137,5 @@ export class VirtualAccountService {
     });
   }
 }
+*/
 

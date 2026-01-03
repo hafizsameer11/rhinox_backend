@@ -1,25 +1,64 @@
 import prisma from '../../core/config/database.js';
-import { VirtualAccountService } from '../../services/tatum/virtual-account.service.js';
-import { DepositAddressService } from '../../services/tatum/deposit-address.service.js';
+// TATUM SERVICES COMMENTED OUT - Using local wallet generation instead
+// import { VirtualAccountService } from '../../services/tatum/virtual-account.service.js';
+// import { DepositAddressService } from '../../services/tatum/deposit-address.service.js';
+import { WalletGeneratorService } from '../../services/crypto/wallet-generator.service.js';
 
 /**
  * Crypto Service
  * Business logic for crypto operations
  */
 export class CryptoService {
-  private virtualAccountService: VirtualAccountService;
-  private depositAddressService: DepositAddressService;
+  // TATUM SERVICES COMMENTED OUT
+  // private virtualAccountService: VirtualAccountService;
+  // private depositAddressService: DepositAddressService;
+  private walletGenerator: WalletGeneratorService;
 
   constructor() {
-    this.virtualAccountService = new VirtualAccountService();
-    this.depositAddressService = new DepositAddressService();
+    // this.virtualAccountService = new VirtualAccountService();
+    // this.depositAddressService = new DepositAddressService();
+    this.walletGenerator = new WalletGeneratorService();
   }
 
   /**
-   * Get user's virtual accounts
+   * Get user's virtual accounts (from database)
    */
   async getUserVirtualAccounts(userId: string) {
-    return this.virtualAccountService.getUserVirtualAccounts(userId);
+    const virtualAccounts = await prisma.virtualAccount.findMany({
+      where: { userId },
+      include: {
+        walletCurrency: {
+          select: {
+            id: true,
+            blockchain: true,
+            currency: true,
+            symbol: true,
+            name: true,
+            isToken: true,
+            contractAddress: true,
+            decimals: true,
+          },
+        },
+      },
+      orderBy: [
+        { blockchain: 'asc' },
+        { currency: 'asc' },
+      ],
+    });
+
+    return virtualAccounts.map(va => ({
+      id: va.id,
+      userId: va.userId,
+      blockchain: va.blockchain,
+      currency: va.currency,
+      accountId: va.accountId,
+      accountCode: va.accountCode,
+      active: va.active,
+      frozen: va.frozen,
+      accountBalance: va.accountBalance,
+      availableBalance: va.availableBalance,
+      walletCurrency: va.walletCurrency,
+    }));
   }
 
   /**
@@ -27,19 +66,24 @@ export class CryptoService {
    */
   async getDepositAddress(userId: string, currency: string, blockchain: string) {
     // Get or create virtual account
-    const virtualAccounts = await this.virtualAccountService.getUserVirtualAccounts(userId);
-    
-    let virtualAccount = virtualAccounts.find(
-      va => va.currency === currency && va.blockchain.toLowerCase() === blockchain.toLowerCase()
-    );
+    let virtualAccount = await prisma.virtualAccount.findFirst({
+      where: {
+        userId,
+        currency,
+        blockchain: blockchain.toLowerCase(),
+      },
+    });
 
     if (!virtualAccount) {
       // Create virtual accounts if they don't exist
-      await this.virtualAccountService.createVirtualAccountsForUser(userId);
-      const updatedAccounts = await this.virtualAccountService.getUserVirtualAccounts(userId);
-      virtualAccount = updatedAccounts.find(
-        va => va.currency === currency && va.blockchain.toLowerCase() === blockchain.toLowerCase()
-      );
+      await this.initializeUserCryptoWallets(userId);
+      virtualAccount = await prisma.virtualAccount.findFirst({
+        where: {
+          userId,
+          currency,
+          blockchain: blockchain.toLowerCase(),
+        },
+      });
 
       if (!virtualAccount) {
         throw new Error(`Virtual account not found for ${currency} on ${blockchain}`);
@@ -47,10 +91,25 @@ export class CryptoService {
     }
 
     // Get or create deposit address
-    let depositAddress = await this.depositAddressService.getDepositAddress(virtualAccount.id);
+    let depositAddress = await prisma.depositAddress.findFirst({
+      where: {
+        virtualAccountId: virtualAccount.id,
+        currency,
+        blockchain: blockchain.toLowerCase(),
+      },
+    });
 
     if (!depositAddress) {
-      depositAddress = await this.depositAddressService.generateAndAssignToVirtualAccount(virtualAccount.id);
+      // Get or create user wallet
+      const userWallet = await this.walletGenerator.getOrCreateUserWallet(userId, blockchain);
+      
+      // Generate deposit address
+      depositAddress = await this.walletGenerator.generateDepositAddress(
+        virtualAccount.id,
+        userWallet.id,
+        blockchain,
+        currency
+      );
     }
 
     return {
@@ -63,22 +122,81 @@ export class CryptoService {
 
   /**
    * Create virtual accounts for user (triggered after email verification)
+   * All generated in database - no external API calls
    */
   async initializeUserCryptoWallets(userId: string) {
-    // Create virtual accounts
-    const virtualAccounts = await this.virtualAccountService.createVirtualAccountsForUser(userId);
+    // Get all wallet currencies from database
+    const walletCurrencies = await prisma.walletCurrency.findMany({
+      where: { isActive: true },
+      orderBy: [
+        { blockchain: 'asc' },
+        { currency: 'asc' },
+      ],
+    });
 
-    // Generate deposit addresses for each virtual account
-    for (const virtualAccount of virtualAccounts) {
+    const createdVirtualAccounts = [];
+
+    // Create virtual accounts for each wallet currency
+    for (const wc of walletCurrencies) {
       try {
-        await this.depositAddressService.generateAndAssignToVirtualAccount(virtualAccount.id);
+        // Check if virtual account already exists
+        const existing = await prisma.virtualAccount.findFirst({
+          where: {
+            userId,
+            blockchain: wc.blockchain.toLowerCase(),
+            currency: wc.currency,
+          },
+        });
+
+        if (existing) {
+          createdVirtualAccounts.push(existing);
+          continue;
+        }
+
+        // Generate unique account ID
+        const accountId = `va_${userId}_${wc.blockchain}_${wc.currency}_${Date.now()}`;
+
+        // Get or create user wallet for this blockchain
+        const userWallet = await this.walletGenerator.getOrCreateUserWallet(userId, wc.blockchain);
+
+        // Create virtual account
+        const virtualAccount = await prisma.virtualAccount.create({
+          data: {
+            userId,
+            blockchain: wc.blockchain.toLowerCase(),
+            currency: wc.currency,
+            accountId,
+            accountCode: wc.currency,
+            active: true,
+            frozen: false,
+            accountBalance: '0',
+            availableBalance: '0',
+            xpub: userWallet.xpub,
+            currencyId: wc.id,
+          },
+        });
+
+        // Generate deposit address
+        try {
+          await this.walletGenerator.generateDepositAddress(
+            virtualAccount.id,
+            userWallet.id,
+            wc.blockchain,
+            wc.currency
+          );
+        } catch (error) {
+          console.error(`Failed to generate deposit address for ${wc.currency}:`, error);
+          // Continue with other currencies
+        }
+
+        createdVirtualAccounts.push(virtualAccount);
       } catch (error) {
-        console.error(`Failed to generate deposit address for ${virtualAccount.currency}:`, error);
+        console.error(`Failed to create virtual account for ${wc.currency}:`, error);
         // Continue with other currencies
       }
     }
 
-    return virtualAccounts;
+    return createdVirtualAccounts;
   }
 
   /**

@@ -1,3 +1,10 @@
+/* 
+ * TATUM SERVICE - COMMENTED OUT FOR MOCK TESTING
+ * This service will be used when Tatum account is available
+ * For now, using local database wallet generation
+ */
+
+/*
 import axios from 'axios';
 import type { AxiosInstance } from 'axios';
 
@@ -160,4 +167,5 @@ export class TatumService {
     return chainMap[normalized] || 'ethereum-mainnet';
   }
 }
+*/
 

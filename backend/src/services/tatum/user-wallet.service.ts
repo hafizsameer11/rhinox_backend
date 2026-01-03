@@ -1,3 +1,9 @@
+/* 
+ * TATUM USER WALLET SERVICE - COMMENTED OUT FOR MOCK TESTING
+ * This service will be used when Tatum account is available
+ */
+
+/*
 import prisma from '../../core/config/database.js';
 import { encryptPrivateKey } from '../../core/utils/encryption.js';
 import { TatumService } from './tatum.service.js';
@@ -106,4 +112,5 @@ export class UserWalletService {
     return paths[blockchain.toLowerCase()] || null;
   }
 }
+*/
 

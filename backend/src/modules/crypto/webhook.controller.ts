@@ -1,20 +1,22 @@
 import { type Request, type Response } from 'express';
 import { Prisma } from '@prisma/client';
 import prisma from '../../core/config/database.js';
-import { DepositAddressService } from '../../services/tatum/deposit-address.service.js';
-import { VirtualAccountService } from '../../services/tatum/virtual-account.service.js';
+// TATUM SERVICES COMMENTED OUT - Using database-only approach
+// import { DepositAddressService } from '../../services/tatum/deposit-address.service.js';
+// import { VirtualAccountService } from '../../services/tatum/virtual-account.service.js';
 
 /**
  * Webhook Controller
- * Handles Tatum webhook events
+ * Handles crypto deposit webhook events (Tatum webhooks commented out - using database-only)
  */
 export class WebhookController {
-  private depositAddressService: DepositAddressService;
-  private virtualAccountService: VirtualAccountService;
+  // TATUM SERVICES COMMENTED OUT
+  // private depositAddressService: DepositAddressService;
+  // private virtualAccountService: VirtualAccountService;
 
   constructor() {
-    this.depositAddressService = new DepositAddressService();
-    this.virtualAccountService = new VirtualAccountService();
+    // this.depositAddressService = new DepositAddressService();
+    // this.virtualAccountService = new VirtualAccountService();
   }
 
   /**
@@ -129,7 +131,7 @@ export class WebhookController {
         },
       });
 
-      // Handle address-based webhooks
+      // Handle address-based webhooks (using database lookup)
       const isAddressWebhook = webhookData.subscriptionType === 'INCOMING_NATIVE_TX' ||
                               webhookData.subscriptionType === 'INCOMING_FUNGIBLE_TX';
 
@@ -140,8 +142,15 @@ export class WebhookController {
           throw new Error('No address found in webhook');
         }
 
-        // Find deposit address
-        const depositAddress = await this.depositAddressService.getDepositAddressByAddress(webhookAddr);
+        // Find deposit address in database
+        const depositAddress = await prisma.depositAddress.findFirst({
+          where: {
+            address: { equals: webhookAddr, mode: 'insensitive' },
+          },
+          include: {
+            virtualAccount: true,
+          },
+        });
 
         if (!depositAddress) {
           throw new Error('Deposit address not found');
@@ -167,24 +176,32 @@ export class WebhookController {
         }
       }
 
-      // Get virtual account
+      // Get virtual account from database
       if (!webhookData.accountId) {
         throw new Error('Account ID not found in webhook');
       }
 
-      const virtualAccount = await this.virtualAccountService.getVirtualAccountByAccountId(webhookData.accountId);
+      const virtualAccount = await prisma.virtualAccount.findUnique({
+        where: { accountId: webhookData.accountId },
+      });
 
       if (!virtualAccount) {
         throw new Error('Virtual account not found');
       }
 
-      // Update balance
+      // Update balance in database
       if (webhookData.amount) {
-        await this.virtualAccountService.updateBalance(
-          virtualAccount.accountId,
-          webhookData.amount.toString(),
-          'add'
-        );
+        const currentBalance = new Prisma.Decimal(virtualAccount.accountBalance || '0');
+        const depositAmount = new Prisma.Decimal(webhookData.amount);
+        const newBalance = currentBalance.plus(depositAmount);
+
+        await prisma.virtualAccount.update({
+          where: { id: virtualAccount.id },
+          data: {
+            accountBalance: newBalance.toString(),
+            availableBalance: newBalance.toString(),
+          },
+        });
       }
 
       // Mark as processed

@@ -1,3 +1,9 @@
+/* 
+ * TATUM DEPOSIT ADDRESS SERVICE - COMMENTED OUT FOR MOCK TESTING
+ * This service will be used when Tatum account is available
+ */
+
+/*
 import prisma from '../../core/config/database.js';
 import { encryptPrivateKey, decryptPrivateKey } from '../../core/utils/encryption.js';
 import { TatumService } from './tatum.service.js';
@@ -209,4 +215,5 @@ export class DepositAddressService {
     return blockchainMap[normalized] || normalized;
   }
 }
+*/
 

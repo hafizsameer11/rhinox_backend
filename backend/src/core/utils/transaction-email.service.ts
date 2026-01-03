@@ -1,3 +1,5 @@
+import { sendEmail } from './email.service.js';
+
 /**
  * Transaction Email Service
  * Sends email notifications for transactions
@@ -60,24 +62,7 @@ export const sendDepositInitiatedEmail = async (
     </div>
   `;
 
-  // In development: Log to console
-  if (process.env.NODE_ENV === 'development') {
-    console.log('📧 Deposit Initiated Email:');
-    console.log('To:', email);
-    console.log('Subject:', subject);
-    console.log('Amount:', data.amount, data.currency);
-    console.log('Reference:', data.reference);
-    if (isMobileMoney) {
-      console.log('Provider:', data.providerName);
-    } else {
-      console.log('Bank:', data.bankName);
-    }
-    console.log('---');
-    return;
-  }
-
-  // In production: Use actual email service
-  console.log('📧 Deposit initiated email sent to:', email);
+  await sendEmail(email, subject, message);
 };
 
 /**
@@ -128,21 +113,6 @@ export const sendDepositSuccessEmail = async (
     </div>
   `;
 
-  // In development: Log to console
-  if (process.env.NODE_ENV === 'development') {
-    console.log('📧 Deposit Success Email:');
-    console.log('To:', email);
-    console.log('Subject:', subject);
-    console.log('Amount:', data.amount, data.currency);
-    console.log('Transaction ID:', data.transactionId);
-    if (data.provider) {
-      console.log('Provider:', data.provider);
-    }
-    console.log('---');
-    return;
-  }
-
-  // In production: Use actual email service
-  console.log('📧 Deposit success email sent to:', email);
+  await sendEmail(email, subject, message);
 };
 
