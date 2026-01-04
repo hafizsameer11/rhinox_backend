@@ -9,9 +9,15 @@ export class PaymentSettingsService {
   /**
    * Get all payment methods for a user
    */
-  async getUserPaymentMethods(userId: string, type?: 'bank_account' | 'mobile_money') {
+  async getUserPaymentMethods(userId: string, type?: 'bank_account' | 'mobile_money' | 'rhinoxpay_id') {
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const where: any = {
-      userId,
+      userId: parsedUserId,
       isActive: true,
     };
 
@@ -60,10 +66,21 @@ export class PaymentSettingsService {
    * Get a single payment method by ID
    */
   async getPaymentMethod(userId: string, paymentMethodId: string) {
+    // Parse IDs to integers
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const parsedPaymentMethodId = typeof paymentMethodId === 'string' ? parseInt(paymentMethodId, 10) : paymentMethodId;
+    
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+    if (isNaN(parsedPaymentMethodId) || parsedPaymentMethodId <= 0) {
+      throw new Error('Invalid payment method ID format');
+    }
+
     const paymentMethod = await prisma.userPaymentMethod.findFirst({
       where: {
-        id: paymentMethodId,
-        userId,
+        id: parsedPaymentMethodId,
+        userId: parsedUserId,
         isActive: true,
       },
       include: {
@@ -115,6 +132,12 @@ export class PaymentSettingsService {
       isDefault?: boolean;
     }
   ) {
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Validate account number
     if (!data.accountNumber || data.accountNumber.length < 8) {
       throw new Error('Invalid account number');
@@ -127,7 +150,7 @@ export class PaymentSettingsService {
     if (data.isDefault) {
       await prisma.userPaymentMethod.updateMany({
         where: {
-          userId,
+          userId: parsedUserId,
           type: 'bank_account',
           isDefault: true,
         },
@@ -140,7 +163,7 @@ export class PaymentSettingsService {
     // Create payment method
     const paymentMethod = await prisma.userPaymentMethod.create({
       data: {
-        userId,
+        userId: parsedUserId,
         type: 'bank_account',
         accountType: data.accountType,
         bankName: data.bankName,
@@ -179,9 +202,21 @@ export class PaymentSettingsService {
       isDefault?: boolean;
     }
   ) {
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    // Parse providerId to integer
+    const parsedProviderId = typeof data.providerId === 'string' ? parseInt(data.providerId, 10) : data.providerId;
+    if (isNaN(parsedProviderId) || parsedProviderId <= 0) {
+      throw new Error('Invalid provider ID format');
+    }
+
     // Validate provider
     const provider = await prisma.mobileMoneyProvider.findUnique({
-      where: { id: data.providerId },
+      where: { id: parsedProviderId },
     });
 
     if (!provider || !provider.isActive) {
@@ -196,10 +231,10 @@ export class PaymentSettingsService {
     // Check if this phone number already exists for this user
     const existing = await prisma.userPaymentMethod.findFirst({
       where: {
-        userId,
+        userId: parsedUserId,
         type: 'mobile_money',
         phoneNumber: data.phoneNumber,
-        providerId: data.providerId,
+        providerId: parsedProviderId,
         isActive: true,
       },
     });
@@ -212,7 +247,7 @@ export class PaymentSettingsService {
     if (data.isDefault) {
       await prisma.userPaymentMethod.updateMany({
         where: {
-          userId,
+          userId: parsedUserId,
           type: 'mobile_money',
           isDefault: true,
         },
@@ -225,7 +260,9 @@ export class PaymentSettingsService {
     // Create payment method
     const paymentMethod = await prisma.userPaymentMethod.create({
       data: {
-        userId,
+        userId: parsedUserId,
+        type: 'mobile_money',
+        providerId: parsedProviderId,
         type: 'mobile_money',
         providerId: data.providerId,
         phoneNumber: data.phoneNumber,
@@ -258,6 +295,86 @@ export class PaymentSettingsService {
   }
 
   /**
+   * Add Rhinox Pay ID as a payment method
+   * Rhinox Pay ID allows users to receive payments directly to their Rhinox Pay wallet
+   */
+  async addRhinoxPayID(
+    userId: string,
+    data: {
+      countryCode: string;
+      currency: string;
+      isDefault?: boolean;
+    }
+  ) {
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    // Check if user already has a Rhinox Pay ID payment method for this currency
+    const existing = await prisma.userPaymentMethod.findFirst({
+      where: {
+        userId: parsedUserId,
+        type: 'rhinoxpay_id',
+        countryCode: data.countryCode,
+        currency: data.currency,
+        isActive: true,
+      },
+    });
+
+    if (existing) {
+      throw new Error('Rhinox Pay ID payment method already exists for this currency');
+    }
+
+    // Get user email for display
+    const user = await prisma.user.findUnique({
+      where: { id: parsedUserId },
+      select: { email: true, firstName: true, lastName: true },
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // If this is set as default, unset other defaults for the same type
+    if (data.isDefault) {
+      await prisma.userPaymentMethod.updateMany({
+        where: {
+          userId: parsedUserId,
+          type: 'rhinoxpay_id',
+          isDefault: true,
+        },
+        data: {
+          isDefault: false,
+        },
+      });
+    }
+
+    // Create payment method
+    const paymentMethod = await prisma.userPaymentMethod.create({
+      data: {
+        userId: parsedUserId,
+        type: 'rhinoxpay_id',
+        accountName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
+        countryCode: data.countryCode,
+        currency: data.currency,
+        isDefault: data.isDefault || false,
+      },
+    });
+
+    return {
+      id: paymentMethod.id,
+      type: paymentMethod.type,
+      accountName: paymentMethod.accountName,
+      countryCode: paymentMethod.countryCode,
+      currency: paymentMethod.currency,
+      isDefault: paymentMethod.isDefault,
+      message: 'Rhinox Pay ID added successfully',
+    };
+  }
+
+  /**
    * Update a payment method
    */
   async updatePaymentMethod(
@@ -272,10 +389,21 @@ export class PaymentSettingsService {
       isDefault?: boolean;
     }
   ) {
+    // Parse IDs to integers
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const parsedPaymentMethodId = typeof paymentMethodId === 'string' ? parseInt(paymentMethodId, 10) : paymentMethodId;
+    
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+    if (isNaN(parsedPaymentMethodId) || parsedPaymentMethodId <= 0) {
+      throw new Error('Invalid payment method ID format');
+    }
+
     const paymentMethod = await prisma.userPaymentMethod.findFirst({
       where: {
-        id: paymentMethodId,
-        userId,
+        id: parsedPaymentMethodId,
+        userId: parsedUserId,
         isActive: true,
       },
     });
@@ -304,9 +432,9 @@ export class PaymentSettingsService {
       // Unset other defaults for the same type
       await prisma.userPaymentMethod.updateMany({
         where: {
-          userId,
+          userId: parsedUserId,
           type: paymentMethod.type,
-          id: { not: paymentMethodId },
+          id: { not: parsedPaymentMethodId },
           isDefault: true,
         },
         data: {
@@ -319,7 +447,7 @@ export class PaymentSettingsService {
     }
 
     const updated = await prisma.userPaymentMethod.update({
-      where: { id: paymentMethodId },
+      where: { id: parsedPaymentMethodId },
       data: updateData,
       include: {
         provider: {
@@ -353,10 +481,21 @@ export class PaymentSettingsService {
    * Set a payment method as default
    */
   async setDefaultPaymentMethod(userId: string, paymentMethodId: string) {
+    // Parse IDs to integers
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const parsedPaymentMethodId = typeof paymentMethodId === 'string' ? parseInt(paymentMethodId, 10) : paymentMethodId;
+    
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+    if (isNaN(parsedPaymentMethodId) || parsedPaymentMethodId <= 0) {
+      throw new Error('Invalid payment method ID format');
+    }
+
     const paymentMethod = await prisma.userPaymentMethod.findFirst({
       where: {
-        id: paymentMethodId,
-        userId,
+        id: parsedPaymentMethodId,
+        userId: parsedUserId,
         isActive: true,
       },
     });
@@ -368,9 +507,9 @@ export class PaymentSettingsService {
     // Unset other defaults for the same type
     await prisma.userPaymentMethod.updateMany({
       where: {
-        userId,
+        userId: parsedUserId,
         type: paymentMethod.type,
-        id: { not: paymentMethodId },
+        id: { not: parsedPaymentMethodId },
         isDefault: true,
       },
       data: {
@@ -380,7 +519,7 @@ export class PaymentSettingsService {
 
     // Set this as default
     const updated = await prisma.userPaymentMethod.update({
-      where: { id: paymentMethodId },
+      where: { id: parsedPaymentMethodId },
       data: { isDefault: true },
     });
 
@@ -395,10 +534,21 @@ export class PaymentSettingsService {
    * Delete (soft delete) a payment method
    */
   async deletePaymentMethod(userId: string, paymentMethodId: string) {
+    // Parse IDs to integers
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const parsedPaymentMethodId = typeof paymentMethodId === 'string' ? parseInt(paymentMethodId, 10) : paymentMethodId;
+    
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+    if (isNaN(parsedPaymentMethodId) || parsedPaymentMethodId <= 0) {
+      throw new Error('Invalid payment method ID format');
+    }
+
     const paymentMethod = await prisma.userPaymentMethod.findFirst({
       where: {
-        id: paymentMethodId,
-        userId,
+        id: parsedPaymentMethodId,
+        userId: parsedUserId,
         isActive: true,
       },
     });
@@ -409,7 +559,7 @@ export class PaymentSettingsService {
 
     // Soft delete
     await prisma.userPaymentMethod.update({
-      where: { id: paymentMethodId },
+      where: { id: parsedPaymentMethodId },
       data: { isActive: false },
     });
 
@@ -449,6 +599,54 @@ export class PaymentSettingsService {
       currency: provider.currency,
       logoUrl: provider.logoUrl,
     }));
+  }
+
+  /**
+   * Get available banks for a country/currency
+   * Returns unique bank names from BankAccount table
+   */
+  async getBanks(countryCode?: string, currency?: string) {
+    const where: any = {
+      isActive: true,
+    };
+
+    if (countryCode) {
+      where.countryCode = countryCode;
+    }
+
+    if (currency) {
+      where.currency = currency;
+    }
+
+    // Get all bank accounts matching the filters
+    const bankAccounts = await prisma.bankAccount.findMany({
+      where,
+      select: {
+        bankName: true,
+        countryCode: true,
+        currency: true,
+      },
+      orderBy: [
+        { bankName: 'asc' },
+      ],
+    });
+
+    // Deduplicate banks by creating a Set of unique combinations
+    const uniqueBanks = new Map<string, { name: string; countryCode: string; currency: string }>();
+    
+    bankAccounts.forEach(account => {
+      const key = `${account.bankName}-${account.countryCode}-${account.currency}`;
+      if (!uniqueBanks.has(key)) {
+        uniqueBanks.set(key, {
+          name: account.bankName,
+          countryCode: account.countryCode,
+          currency: account.currency,
+        });
+      }
+    });
+
+    // Return unique banks as an array
+    return Array.from(uniqueBanks.values());
   }
 
   /**

@@ -49,6 +49,7 @@ model User {
   p2pMessagesAsReceiver P2PChatMessage[]    @relation("P2PMessagesAsReceiver")
   p2pReviewsAsReviewer  P2PReview[]         @relation("P2PReviewsAsReviewer")
   p2pReviewsAsReviewee  P2PReview[]         @relation("P2PReviewsAsReviewee")
+  beneficiaries         Beneficiary[]
 
   @@index([email])
   @@index([phone])
@@ -489,7 +490,7 @@ model TatumRawWebhook {
 model UserPaymentMethod {
   id            Int      @id @default(autoincrement())
   userId        Int      @map("user_id")
-  type          String // bank_account, mobile_money
+  type          String // bank_account, mobile_money, rhinoxpay_id
   accountType   String?  @map("account_type") // For bank: savings, current, etc.
   bankName      String?  @map("bank_name") // For bank accounts
   accountNumber String?  @map("account_number") // For bank accounts (encrypted)
@@ -663,4 +664,96 @@ model P2PReview {
   @@index([adId])
   @@index([createdAt])
   @@map("p2p_reviews")
+}
+
+// ============================================
+// MODULE: BILL PAYMENT
+// ============================================
+// Bill payment categories, providers, plans, and beneficiaries
+
+model BillPaymentCategory {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique @db.VarChar(50) // airtime, data, electricity, cable_tv, betting, internet
+  name        String   @db.VarChar(100) // Airtime, Data, Electricity, Cable TV, Betting, Internet
+  description String?  @db.Text
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  providers     BillPaymentProvider[]
+  beneficiaries Beneficiary[]
+
+  @@index([code])
+  @@index([isActive])
+  @@map("bill_payment_categories")
+}
+
+model BillPaymentProvider {
+  id          Int      @id @default(autoincrement())
+  categoryId  Int      @map("category_id")
+  code        String   @db.VarChar(50) // MTN, GLO, AIRTEL, DSTV, etc.
+  name        String   @db.VarChar(100) // MTN, GLO, Airtel, DSTV, etc.
+  logoUrl     String?  @map("logo_url") // Path to logo image
+  countryCode String   @default("NG") @map("country_code") @db.VarChar(10)
+  currency    String   @default("NGN") @db.VarChar(10)
+  isActive    Boolean  @default(true) @map("is_active")
+  metadata    Json? // Additional provider-specific data (meter types for electricity, etc.)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  category      BillPaymentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  plans         BillPaymentPlan[]
+  beneficiaries Beneficiary[]
+
+  @@unique([categoryId, code])
+  @@index([categoryId])
+  @@index([code])
+  @@index([isActive])
+  @@index([countryCode])
+  @@map("bill_payment_providers")
+}
+
+model BillPaymentPlan {
+  id          Int      @id @default(autoincrement())
+  providerId  Int      @map("provider_id")
+  code        String   @db.VarChar(100) // Unique plan code
+  name        String   @db.VarChar(255) // Plan name
+  amount      Decimal  @db.Decimal(20, 8) // Plan price
+  currency    String   @default("NGN") @db.VarChar(10)
+  dataAmount  String?  @map("data_amount") @db.VarChar(50) // For data plans: "1GB", "2GB", etc.
+  validity    String?  @db.VarChar(50) // Validity period: "30 days", "1 month", etc.
+  description String?  @db.Text
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  provider BillPaymentProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@index([code])
+  @@index([isActive])
+  @@map("bill_payment_plans")
+}
+
+model Beneficiary {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @map("user_id")
+  categoryId    Int      @map("category_id")
+  providerId    Int      @map("provider_id")
+  name          String?  @db.VarChar(255) // Beneficiary name (for airtime/data)
+  accountNumber String   @map("account_number") @db.VarChar(255) // Phone number, meter number, account number, etc.
+  accountType   String?  @map("account_type") @db.VarChar(50) // prepaid, postpaid (for electricity)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category BillPaymentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  provider BillPaymentProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([categoryId])
+  @@index([providerId])
+  @@index([isActive])
+  @@map("beneficiaries")
 }

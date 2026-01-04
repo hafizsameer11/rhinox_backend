@@ -354,14 +354,16 @@ export class P2POrderService {
     const { buyerId, sellerId } = this.resolveRoles(ad.type, ad.userId, userId);
 
     // Validate payment method belongs to ad
-    const paymentMethodIds = ad.paymentMethodIds as string[];
-    if (!paymentMethodIds.includes(data.paymentMethodId)) {
+    const paymentMethodIds = (ad.paymentMethodIds as number[]).map(id => id.toString());
+    const parsedPaymentMethodId = typeof data.paymentMethodId === 'string' ? parseInt(data.paymentMethodId, 10) : data.paymentMethodId;
+    
+    if (!paymentMethodIds.includes(parsedPaymentMethodId.toString())) {
       throw new Error('Payment method not accepted for this ad');
     }
 
     // Get payment method
     const paymentMethod = await prisma.userPaymentMethod.findUnique({
-      where: { id: data.paymentMethodId },
+      where: { id: parsedPaymentMethodId },
     });
 
     if (!paymentMethod || !paymentMethod.isActive) {
@@ -369,7 +371,7 @@ export class P2POrderService {
     }
 
     // Check if payment method is RhinoxPay ID
-    const isRhinoxPayID = paymentMethod.type === 'rhinoxpay_id' || paymentMethodIds.includes('rhinoxpay_id');
+    const isRhinoxPayID = paymentMethod.type === 'rhinoxpay_id';
 
     // Calculate amounts
     const price = new Decimal(ad.price);

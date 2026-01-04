@@ -95,8 +95,10 @@ export class P2PController {
    *                   type: integer
    *                 example: [1, 2]
    *                 description: |
-   *                   Array of payment method UUIDs that you accept for this ad.
+   *                   Array of payment method IDs that you accept for this ad.
    *                   Payment methods must be added to your account first via Payment Settings.
+   *                   Can include bank accounts, mobile money accounts, or Rhinox Pay ID.
+   *                   To add Rhinox Pay ID, use POST /api/payment-settings/rhinoxpay-id.
    *                   At least one payment method is required.
    *                   Examples: bank account IDs, mobile money account IDs.
    *               countryCode:

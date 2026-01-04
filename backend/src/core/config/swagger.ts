@@ -143,6 +143,8 @@ const options: swaggerJsdoc.Options = {
       { name: 'P2P Chat', description: 'Chat messages between buyer and vendor for orders' },
       { name: 'P2P Review', description: 'Reviews left by users after order completion' },
       { name: 'Bank Accounts', description: 'Public bank account information for deposits' },
+      { name: 'Transaction History', description: 'Transaction history with chart data and filtering' },
+      { name: 'Bill Payment', description: 'Bill payments (airtime, data, electricity, cable TV, betting, internet)' },
       { name: 'Health', description: 'Health check endpoints' },
     ],
   },
