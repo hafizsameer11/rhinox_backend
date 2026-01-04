@@ -85,7 +85,7 @@ export class HomeController {
    */
   async getUserHome(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -139,7 +139,7 @@ export class HomeController {
    */
   async getWalletBalances(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
 
       if (!userId) {
         return res.status(401).json({

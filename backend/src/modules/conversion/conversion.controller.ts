@@ -72,7 +72,7 @@ export class ConversionController {
    */
   async calculateConversion(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { fromCurrency, toCurrency, amount } = req.query;
 
       if (!userId) {
@@ -174,7 +174,7 @@ export class ConversionController {
    */
   async initiateConversion(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { fromCurrency, toCurrency, amount } = req.body;
 
       if (!userId) {
@@ -278,7 +278,7 @@ export class ConversionController {
    */
   async confirmConversion(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { conversionReference, pin } = req.body;
 
       if (!userId) {
@@ -365,7 +365,7 @@ export class ConversionController {
    */
   async getReceipt(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { conversionReference } = req.params;
 
       if (!userId) {

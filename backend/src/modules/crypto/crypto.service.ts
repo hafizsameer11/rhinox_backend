@@ -23,9 +23,15 @@ export class CryptoService {
   /**
    * Get user's virtual accounts (from database)
    */
-  async getUserVirtualAccounts(userId: string) {
+  async getUserVirtualAccounts(userId: string | number) {
+    // Parse userId to integer for Prisma queries
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(userIdNum) || userIdNum <= 0) {
+      throw new Error(`Invalid userId: ${userId}`);
+    }
+
     const virtualAccounts = await prisma.virtualAccount.findMany({
-      where: { userId },
+      where: { userId: userIdNum },
       include: {
         walletCurrency: {
           select: {
@@ -38,6 +44,18 @@ export class CryptoService {
             contractAddress: true,
             decimals: true,
           },
+        },
+        depositAddresses: {
+          select: {
+            id: true,
+            address: true,
+            currency: true,
+            blockchain: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1, // Get the most recent deposit address
         },
       },
       orderBy: [
@@ -58,17 +76,24 @@ export class CryptoService {
       accountBalance: va.accountBalance,
       availableBalance: va.availableBalance,
       walletCurrency: va.walletCurrency,
+      depositAddresses: va.depositAddresses || [],
     }));
   }
 
   /**
    * Get deposit address for a currency and blockchain
    */
-  async getDepositAddress(userId: string, currency: string, blockchain: string) {
+  async getDepositAddress(userId: string | number, currency: string, blockchain: string) {
+    // Parse userId to integer for Prisma queries
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(userIdNum) || userIdNum <= 0) {
+      throw new Error(`Invalid userId: ${userId}`);
+    }
+
     // Get or create virtual account
     let virtualAccount = await prisma.virtualAccount.findFirst({
       where: {
-        userId,
+        userId: userIdNum,
         currency,
         blockchain: blockchain.toLowerCase(),
       },
@@ -76,10 +101,10 @@ export class CryptoService {
 
     if (!virtualAccount) {
       // Create virtual accounts if they don't exist
-      await this.initializeUserCryptoWallets(userId);
+      await this.initializeUserCryptoWallets(userIdNum);
       virtualAccount = await prisma.virtualAccount.findFirst({
         where: {
-          userId,
+          userId: userIdNum,
           currency,
           blockchain: blockchain.toLowerCase(),
         },
@@ -101,7 +126,7 @@ export class CryptoService {
 
     if (!depositAddress) {
       // Get or create user wallet
-      const userWallet = await this.walletGenerator.getOrCreateUserWallet(userId, blockchain);
+      const userWallet = await this.walletGenerator.getOrCreateUserWallet(String(userIdNum), blockchain);
       
       // Generate deposit address
       depositAddress = await this.walletGenerator.generateDepositAddress(
@@ -124,15 +149,28 @@ export class CryptoService {
    * Create virtual accounts for user (triggered after email verification)
    * All generated in database - no external API calls
    */
-  async initializeUserCryptoWallets(userId: string) {
+  async initializeUserCryptoWallets(userId: string | number) {
+    // Parse userId to integer for Prisma queries
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(userIdNum) || userIdNum <= 0) {
+      throw new Error(`Invalid userId: ${userId}`);
+    }
+
     // Get all wallet currencies from database
+    // Note: WalletCurrency model doesn't have isActive field, so we get all
     const walletCurrencies = await prisma.walletCurrency.findMany({
-      where: { isActive: true },
       orderBy: [
         { blockchain: 'asc' },
         { currency: 'asc' },
       ],
     });
+
+    if (walletCurrencies.length === 0) {
+      console.log(`No active wallet currencies found in database for user ${userIdNum}`);
+      return [];
+    }
+
+    console.log(`Creating ${walletCurrencies.length} crypto virtual accounts for user ${userIdNum}...`);
 
     const createdVirtualAccounts = [];
 
@@ -142,7 +180,7 @@ export class CryptoService {
         // Check if virtual account already exists
         const existing = await prisma.virtualAccount.findFirst({
           where: {
-            userId,
+            userId: userIdNum,
             blockchain: wc.blockchain.toLowerCase(),
             currency: wc.currency,
           },
@@ -154,15 +192,15 @@ export class CryptoService {
         }
 
         // Generate unique account ID
-        const accountId = `va_${userId}_${wc.blockchain}_${wc.currency}_${Date.now()}`;
+        const accountId = `va_${userIdNum}_${wc.blockchain}_${wc.currency}_${Date.now()}`;
 
         // Get or create user wallet for this blockchain
-        const userWallet = await this.walletGenerator.getOrCreateUserWallet(userId, wc.blockchain);
+        const userWallet = await this.walletGenerator.getOrCreateUserWallet(String(userIdNum), wc.blockchain);
 
         // Create virtual account
         const virtualAccount = await prisma.virtualAccount.create({
           data: {
-            userId,
+            userId: userIdNum,
             blockchain: wc.blockchain.toLowerCase(),
             currency: wc.currency,
             accountId,
@@ -190,12 +228,14 @@ export class CryptoService {
         }
 
         createdVirtualAccounts.push(virtualAccount);
-      } catch (error) {
-        console.error(`Failed to create virtual account for ${wc.currency}:`, error);
+        console.log(`✅ Created virtual account for ${wc.currency} on ${wc.blockchain} for user ${userIdNum}`);
+      } catch (error: any) {
+        console.error(`❌ Failed to create virtual account for ${wc.currency} on ${wc.blockchain}:`, error.message || error);
         // Continue with other currencies
       }
     }
 
+    console.log(`✅ Completed crypto wallet initialization: ${createdVirtualAccounts.length}/${walletCurrencies.length} virtual accounts created for user ${userIdNum}`);
     return createdVirtualAccounts;
   }
 

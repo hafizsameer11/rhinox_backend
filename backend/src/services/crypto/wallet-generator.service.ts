@@ -93,12 +93,18 @@ export class WalletGeneratorService {
   /**
    * Get or create user wallet for a blockchain
    */
-  async getOrCreateUserWallet(userId: string, blockchain: string) {
+  async getOrCreateUserWallet(userId: string | number, blockchain: string) {
+    // Parse userId to integer for Prisma queries
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(userIdNum) || userIdNum <= 0) {
+      throw new Error(`Invalid userId: ${userId}`);
+    }
+
     // Check if wallet exists
     let userWallet = await prisma.userWallet.findUnique({
       where: {
         userId_blockchain: {
-          userId,
+          userId: userIdNum,
           blockchain: blockchain.toLowerCase(),
         },
       },
@@ -134,7 +140,7 @@ export class WalletGeneratorService {
     // Create wallet
     userWallet = await prisma.userWallet.create({
       data: {
-        userId,
+        userId: userIdNum,
         blockchain: blockchain.toLowerCase(),
         mnemonic: encryptedMnemonic,
         xpub: isNoXpub ? (walletData.address || '') : (walletData.xpub || ''),

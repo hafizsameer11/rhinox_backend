@@ -27,6 +27,7 @@ export class WalletModule implements IModule {
 
   private setupRoutes(): void {
     // Wallet routes
+    this.router.get('/balances', this.controller.getAllBalances.bind(this.controller));
     this.router.get('/', this.controller.getUserWallets.bind(this.controller));
     this.router.get('/:currency', this.controller.getWalletByCurrency.bind(this.controller));
     this.router.post('/create', this.controller.createWallet.bind(this.controller));

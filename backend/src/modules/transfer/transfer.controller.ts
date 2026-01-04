@@ -41,7 +41,7 @@ export class TransferController {
    */
   async checkEligibility(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -233,7 +233,7 @@ export class TransferController {
    */
   async initiateTransfer(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const {
         amount,
         currency,
@@ -357,7 +357,7 @@ export class TransferController {
    */
   async verifyTransfer(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { transactionId, emailCode, pin } = req.body;
 
       if (!userId) {
@@ -455,7 +455,7 @@ export class TransferController {
    */
   async getReceipt(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { transactionId } = req.params;
 
       if (!userId) {

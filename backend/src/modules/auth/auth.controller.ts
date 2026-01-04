@@ -106,11 +106,7 @@ export class AuthController {
    *                     accessToken:
    *                       type: string
    *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-   *                       description: JWT access token for authentication. Include in Authorization header as "Bearer {token}"
-   *                     refreshToken:
-   *                       type: string
-   *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-   *                       description: JWT refresh token for obtaining new access tokens
+   *                       description: JWT access token for authentication. Include in Authorization header as "Bearer {token}". Token is long-lived (365 days).
    *                     message:
    *                       type: string
    *                       example: "Registration successful. Please verify your email with the OTP sent to your email."
@@ -239,9 +235,7 @@ export class AuthController {
    *                     accessToken:
    *                       type: string
    *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-   *                     refreshToken:
-   *                       type: string
-   *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+   *                       description: JWT access token for authentication. Include in Authorization header as "Bearer {token}". Token is long-lived (365 days).
    *       401:
    *         description: Invalid credentials
    *         $ref: '#/components/schemas/Error'
@@ -317,62 +311,6 @@ export class AuthController {
     }
   }
 
-  /**
-   * @swagger
-   * /api/auth/refresh:
-   *   post:
-   *     summary: Refresh access token
-   *     tags: [Auth]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             required:
-   *               - refreshToken
-   *             properties:
-   *               refreshToken:
-   *                 type: string
-   *                 example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-   *     responses:
-   *       200:
-   *         description: Token refreshed successfully
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 success:
-   *                   type: boolean
-   *                   example: true
-   *                 data:
-   *                   type: object
-   *                   properties:
-   *                     accessToken:
-   *                       type: string
-   *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-   *                     refreshToken:
-   *                       type: string
-   *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-   *       401:
-   *         description: Invalid or expired refresh token
-   *         $ref: '#/components/schemas/Error'
-   */
-  async refreshToken(req: Request, res: Response) {
-    try {
-      // TODO: Implement refresh token logic
-      return res.json({
-        success: true,
-        message: 'Token refreshed',
-      });
-    } catch (error: any) {
-      return res.status(401).json({
-        success: false,
-        message: error.message || 'Token refresh failed',
-      });
-    }
-  }
 
   /**
    * @swagger
@@ -403,7 +341,7 @@ export class AuthController {
   async getCurrentUser(req: Request, res: Response) {
     try {
       // TODO: Extract userId from JWT token
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.id;
       if (!userId) {
         return res.status(401).json({
           success: false,
@@ -491,11 +429,7 @@ export class AuthController {
    *                     accessToken:
    *                       type: string
    *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-   *                       description: New JWT access token after verification
-   *                     refreshToken:
-   *                       type: string
-   *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-   *                       description: New JWT refresh token after verification
+   *                       description: JWT access token for authentication. Include in Authorization header as "Bearer {token}". Token is long-lived (365 days).
    *                     message:
    *                       type: string
    *                       example: "Email verified successfully"
@@ -520,7 +454,7 @@ export class AuthController {
    */
   async verifyEmail(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId || req.body.userId;
+      const userId = (req as any).userId || (req as any).user?.id || req.body.userId;
       const { code } = req.body;
 
       if (!userId) {
@@ -600,7 +534,7 @@ export class AuthController {
    */
   async resendVerification(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId || req.body.userId;
+      const userId = (req as any).userId || (req as any).user?.id || req.body.userId;
 
       if (!userId) {
         return res.status(401).json({
@@ -698,7 +632,8 @@ export class AuthController {
    */
   async setupPIN(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      // Get userId from middleware (set by authMiddleware)
+      const userId = (req as any).userId || (req as any).user?.id;
       const { pin } = req.body;
 
       if (!userId) {
@@ -743,7 +678,7 @@ export class AuthController {
    */
   async changePIN(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.id;
       const { oldPin, newPin } = req.body;
 
       if (!userId) {
@@ -820,7 +755,7 @@ export class AuthController {
    */
   async markFaceVerified(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -829,6 +764,7 @@ export class AuthController {
         });
       }
 
+      // Service accepts both string and number
       const result = await this.service.markFaceVerified(userId);
 
       return res.json({

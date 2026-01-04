@@ -63,7 +63,7 @@ export class DepositController {
    */
   async getMobileMoneyProviders(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { countryCode, currency } = req.query;
 
       if (!userId) {
@@ -154,7 +154,7 @@ export class DepositController {
    */
   async getBankDetails(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { countryCode, currency } = req.query;
 
       if (!userId) {
@@ -340,7 +340,7 @@ export class DepositController {
    */
   async initiateDeposit(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { amount, currency, countryCode, channel } = req.body;
 
       if (!userId) {
@@ -494,7 +494,7 @@ export class DepositController {
    */
   async confirmDeposit(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { transactionId, pin } = req.body;
 
       if (!userId) {
@@ -600,7 +600,7 @@ export class DepositController {
    */
   async getReceipt(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { transactionId } = req.params;
 
       if (!userId) {

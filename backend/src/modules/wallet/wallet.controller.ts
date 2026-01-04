@@ -38,7 +38,7 @@ export class WalletController {
    */
   async getUserWallets(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       if (!userId) {
         return res.status(401).json({
           success: false,
@@ -99,7 +99,7 @@ export class WalletController {
    */
   async getWalletByCurrency(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { currency } = req.params;
 
       if (!userId) {
@@ -179,7 +179,7 @@ export class WalletController {
    */
   async createWallet(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { currency, type } = req.body;
 
       if (!userId) {
@@ -262,7 +262,7 @@ export class WalletController {
    */
   async getBalance(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { walletId } = req.params;
 
       if (!userId) {
@@ -365,7 +365,7 @@ export class WalletController {
    */
   async getTransactions(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { walletId } = req.params;
       const limit = parseInt(req.query.limit as string) || 50;
       const offset = parseInt(req.query.offset as string) || 0;
@@ -394,6 +394,116 @@ export class WalletController {
       return res.status(404).json({
         success: false,
         message: error.message || 'Failed to get transactions',
+      });
+    }
+  }
+
+  /**
+   * @swagger
+   * /api/wallets/balances:
+   *   get:
+   *     summary: Get all wallet balances (fiat + crypto) with USDT conversion
+   *     tags: [Wallet]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     description: |
+   *       Returns all fiat and crypto wallet balances.
+   *       Crypto balances are converted to USDT using prices from wallet_currencies table.
+   *       Total crypto balance in USDT and NGN (if rate exists) is also provided.
+   *     responses:
+   *       200:
+   *         description: All wallet balances with USDT conversion
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     fiat:
+   *                       type: array
+   *                       items:
+   *                         type: object
+   *                         properties:
+   *                           id:
+   *                             type: integer
+   *                           type:
+   *                             type: string
+   *                             example: "fiat"
+   *                           currency:
+   *                             type: string
+   *                             example: "NGN"
+   *                           balance:
+   *                             type: string
+   *                           availableBalance:
+   *                             type: string
+   *                     crypto:
+   *                       type: array
+   *                       items:
+   *                         type: object
+   *                         properties:
+   *                           id:
+   *                             type: integer
+   *                           type:
+   *                             type: string
+   *                             example: "crypto"
+   *                           currency:
+   *                             type: string
+   *                             example: "USDT"
+   *                           blockchain:
+   *                             type: string
+   *                             example: "ethereum"
+   *                           balance:
+   *                             type: string
+   *                           balanceInUSDT:
+   *                             type: string
+   *                             description: Balance converted to USDT
+   *                           priceInUSDT:
+   *                             type: string
+   *                             description: Price of 1 unit in USDT
+   *                     totals:
+   *                       type: object
+   *                       properties:
+   *                         cryptoInUSDT:
+   *                           type: string
+   *                           description: Total crypto balance in USDT
+   *                         cryptoInNGN:
+   *                           type: string
+   *                           nullable: true
+   *                           description: Total crypto balance in NGN (if USDT to NGN rate exists)
+   *                         usdtToNgnRate:
+   *                           type: string
+   *                           nullable: true
+   *                           description: USDT to NGN exchange rate
+   *       401:
+   *         description: Unauthorized
+   *         $ref: '#/components/schemas/Error'
+   */
+  async getAllBalances(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      const balances = await this.service.getAllBalances(userId);
+
+      return res.json({
+        success: true,
+        data: balances,
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to get balances',
       });
     }
   }

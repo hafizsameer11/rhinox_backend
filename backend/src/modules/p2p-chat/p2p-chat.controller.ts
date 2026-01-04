@@ -96,7 +96,7 @@ export class P2PChatController {
    */
   async sendMessage(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { orderId } = req.params;
       const { message } = req.body;
 
@@ -204,7 +204,7 @@ export class P2PChatController {
    */
   async getChatMessages(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { orderId } = req.params;
 
       if (!userId) {
@@ -263,7 +263,7 @@ export class P2PChatController {
    */
   async markAsRead(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { orderId } = req.params;
 
       if (!userId) {
@@ -322,7 +322,7 @@ export class P2PChatController {
    */
   async getUnreadCount(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
 
       if (!userId) {
         return res.status(401).json({

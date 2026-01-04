@@ -7,14 +7,17 @@ import jwt from 'jsonwebtoken';
  * @note This function ONLY accepts access tokens (signed with JWT_SECRET)
  *       Refresh tokens should NOT be used for API authentication
  */
-export const verifyToken = async (token: string): Promise<{ id: string; userId?: string } | null> => {
+export const verifyToken = async (token: string): Promise<{ id: string | number; userId?: string | number } | null> => {
   try {
     // ONLY verify with JWT_SECRET (access tokens only)
     // Refresh tokens should NOT be accepted here for security
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as {
-      userId: string;
-      id?: string;
+    const secret = process.env.JWT_SECRET || 'your-secret-key';
+    const decoded = jwt.verify(token, secret) as {
+      userId?: string | number;
+      id?: string | number;
       type?: string; // Check if it's a refresh token (should be rejected)
+      iat?: number;
+      exp?: number;
     };
 
     // Reject refresh tokens even if they're signed with JWT_SECRET
@@ -22,42 +25,27 @@ export const verifyToken = async (token: string): Promise<{ id: string; userId?:
       return null;
     }
 
-    return {
-      id: decoded.userId || decoded.id || '',
-      userId: decoded.userId || decoded.id,
-    };
-  } catch (error) {
-    // Token is invalid or expired
-    return null;
-  }
-};
-
-/**
- * Verify Refresh Token (separate function for refresh endpoint only)
- * @param token - JWT refresh token to verify
- * @returns Decoded token payload or null if invalid
- */
-export const verifyRefreshToken = async (token: string): Promise<{ id: string; userId?: string } | null> => {
-  try {
-    const decoded = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET || 'your-refresh-secret') as {
-      userId: string;
-      id?: string;
-      type?: string;
-    };
-
-    // Ensure it's actually a refresh token
-    if (decoded.type !== 'refresh') {
+    // Extract userId - it could be in userId or id field
+    const userId = decoded.userId ?? decoded.id;
+    if (!userId && userId !== 0) {
       return null;
     }
 
     return {
-      id: decoded.userId || decoded.id || '',
-      userId: decoded.userId || decoded.id,
+      id: userId,
+      userId: userId,
     };
-  } catch (error) {
+  } catch (error: any) {
+    // Token is invalid or expired
+    // Log the error in development for debugging
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[verifyToken] Error:', error.message);
+      console.error('[verifyToken] Using secret:', secret.substring(0, 10) + '...');
+    }
     return null;
   }
 };
+
 
 /**
  * Generate Access Token
@@ -72,16 +60,4 @@ export const generateAccessToken = (userId: string): string => {
   );
 };
 
-/**
- * Generate Refresh Token
- * @param userId - User ID to encode in token
- * @returns JWT refresh token
- */
-export const generateRefreshToken = (userId: string): string => {
-  return jwt.sign(
-    { userId, type: 'refresh' },
-    process.env.REFRESH_TOKEN_SECRET || 'your-refresh-secret',
-    { expiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || '30d' }
-  );
-};
 

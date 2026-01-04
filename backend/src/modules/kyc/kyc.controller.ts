@@ -104,7 +104,7 @@ export class KYCController {
    */
   async submitKYC(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.id;
       const {
         firstName,
         lastName,
@@ -195,7 +195,7 @@ export class KYCController {
    */
   async getKYCStatus(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -280,7 +280,7 @@ export class KYCController {
    */
   async submitFaceVerification(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.id;
       const { imageUrl, isSuccessful } = req.body;
 
       if (!userId) {
@@ -381,7 +381,7 @@ export class KYCController {
    */
   async uploadIDDocument(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.id;
       const { documentUrl, idType, idNumber } = req.body;
 
       if (!userId) {

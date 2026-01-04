@@ -17,18 +17,21 @@ export class DepositService {
 
   /**
    * Get bank account details for deposit
+   * Returns the first active bank account for the given country and currency
    */
   async getBankAccountDetails(countryCode: string, currency: string) {
-    const bankAccount = await prisma.bankAccount.findUnique({
+    const bankAccount = await prisma.bankAccount.findFirst({
       where: {
-        countryCode_currency: {
-          countryCode,
-          currency,
-        },
+        countryCode,
+        currency,
+        isActive: true,
+      },
+      orderBy: {
+        createdAt: 'asc', // Get the first created account
       },
     });
 
-    if (!bankAccount || !bankAccount.isActive) {
+    if (!bankAccount) {
       throw new Error(`Bank account not available for ${currency} in ${countryCode}`);
     }
 

@@ -49,7 +49,7 @@ export class CryptoController {
    */
   async getVirtualAccounts(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -138,7 +138,7 @@ export class CryptoController {
    */
   async getDepositAddress(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { currency, blockchain } = req.params;
 
       if (!userId) {

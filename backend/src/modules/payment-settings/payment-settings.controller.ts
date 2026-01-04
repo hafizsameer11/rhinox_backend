@@ -72,7 +72,7 @@ export class PaymentSettingsController {
    */
   async getPaymentMethods(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { type } = req.query;
 
       if (!userId) {
@@ -124,7 +124,7 @@ export class PaymentSettingsController {
    */
   async getPaymentMethod(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
@@ -202,7 +202,7 @@ export class PaymentSettingsController {
    */
   async addBankAccount(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const {
         accountType,
         bankName,
@@ -295,7 +295,7 @@ export class PaymentSettingsController {
    */
   async addMobileMoney(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const {
         providerId,
         phoneNumber,
@@ -381,7 +381,7 @@ export class PaymentSettingsController {
    */
   async updatePaymentMethod(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
       const {
         accountType,
@@ -444,7 +444,7 @@ export class PaymentSettingsController {
    */
   async setDefaultPaymentMethod(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
@@ -492,7 +492,7 @@ export class PaymentSettingsController {
    */
   async deletePaymentMethod(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {

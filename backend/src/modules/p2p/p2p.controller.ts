@@ -204,7 +204,7 @@ export class P2PController {
    */
   async createBuyAd(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const {
         cryptoCurrency,
         fiatCurrency,
@@ -314,7 +314,7 @@ export class P2PController {
    */
   async createSellAd(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const {
         cryptoCurrency,
         fiatCurrency,
@@ -436,7 +436,7 @@ export class P2PController {
    */
   async getUserAds(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { type, status } = req.query;
 
       if (!userId) {
@@ -488,7 +488,7 @@ export class P2PController {
    */
   async getAd(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
@@ -552,7 +552,7 @@ export class P2PController {
    */
   async updateAdStatus(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
       const { status, isOnline } = req.body;
 
@@ -640,7 +640,7 @@ export class P2PController {
    */
   async updateAd(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
       const {
         price,

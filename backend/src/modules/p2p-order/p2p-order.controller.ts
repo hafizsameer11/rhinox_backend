@@ -571,7 +571,7 @@ export class P2POrderController {
    */
   async createOrder(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { adId, cryptoAmount, paymentMethodId } = req.body;
 
       if (!userId) {
@@ -674,7 +674,7 @@ export class P2POrderController {
    */
   async acceptOrder(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
@@ -738,7 +738,7 @@ export class P2POrderController {
    */
   async declineOrder(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
@@ -851,7 +851,7 @@ export class P2POrderController {
    */
   async getUserOrders(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -918,7 +918,7 @@ export class P2POrderController {
    */
   async getVendorOrders(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -1024,7 +1024,7 @@ export class P2POrderController {
    */
   async getOrderDetails(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
@@ -1137,7 +1137,7 @@ export class P2POrderController {
    */
   async confirmPayment(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
@@ -1257,7 +1257,7 @@ export class P2POrderController {
    */
   async markPaymentReceivedUser(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
@@ -1368,7 +1368,7 @@ export class P2POrderController {
    */
   async markPaymentReceived(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
@@ -1429,7 +1429,7 @@ export class P2POrderController {
    */
   async cancelOrder(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
@@ -1490,7 +1490,7 @@ export class P2POrderController {
    */
   async getVendorOrders(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -1647,7 +1647,7 @@ export class P2POrderController {
    */
   async markPaymentMade(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {

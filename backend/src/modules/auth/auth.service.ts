@@ -3,6 +3,7 @@ import jwt, { type SignOptions } from 'jsonwebtoken';
 import prisma from '../../core/config/database.js';
 import { generateOTP, sendOTPEmail } from '../../core/utils/email.service.js';
 import { CryptoService } from '../crypto/crypto.service.js';
+import { WalletService } from '../wallet/wallet.service.js';
 import { parseOptionalId } from '../../core/utils/idParser.js';
 
 /**
@@ -101,15 +102,6 @@ export class AuthService {
       },
     });
 
-    // Create refresh token
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        token: tokens.refreshToken,
-        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
-      },
-    });
-
     // Return user with tokens (email verification still required but user can use app)
     return {
       user: {
@@ -170,15 +162,6 @@ export class AuthService {
       data: sessionData,
     });
 
-    // Create refresh token
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        token: tokens.refreshToken,
-        expiresAt: new Date(Date.now() + 2592000000), // 30 days
-      },
-    });
-
     return {
       user: {
         id: user.id,
@@ -192,12 +175,11 @@ export class AuthService {
   }
 
   /**
-   * Generate JWT tokens
-   * Access token doesn't expire (or very long expiration)
+   * Generate JWT access token
+   * Token doesn't expire (or very long expiration)
    */
   private generateTokens(userId: string) {
     const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
-    const refreshSecret = process.env.REFRESH_TOKEN_SECRET || 'your-refresh-secret';
     const expiresInValue: string = process.env.JWT_EXPIRES_IN || '365d';
     
     // Use type assertion to satisfy TypeScript strict types
@@ -207,13 +189,7 @@ export class AuthService {
       { expiresIn: expiresInValue as any }
     ) as string;
 
-    const refreshToken = jwt.sign(
-      { userId, type: 'refresh' },
-      refreshSecret,
-      { expiresIn: expiresInValue as any }
-    ) as string;
-
-    return { accessToken, refreshToken };
+    return { accessToken };
   }
 
   /**
@@ -282,6 +258,11 @@ export class AuthService {
       console.error('Failed to initialize crypto wallets:', error);
     });
 
+    // Initialize fiat wallets after email verification (async, don't wait)
+    this.initializeFiatWallets(user.id).catch(error => {
+      console.error('Failed to initialize fiat wallets:', error);
+    });
+
     // Generate tokens after verification
     const tokens = this.generateTokens(user.id);
 
@@ -291,15 +272,6 @@ export class AuthService {
         userId: user.id,
         token: tokens.accessToken,
         expiresAt: new Date(Date.now() + 3600000), // 1 hour
-      },
-    });
-
-    // Create refresh token
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        token: tokens.refreshToken,
-        expiresAt: new Date(Date.now() + 2592000000), // 30 days
       },
     });
 
@@ -446,10 +418,16 @@ export class AuthService {
   /**
    * Mark face as verified
    */
-  async markFaceVerified(userId: string) {
+  async markFaceVerified(userId: string | number) {
+    // Convert userId to number for database query (KYC uses integer userId)
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : Number(userId);
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID');
+    }
+
     // Check if KYC exists
     const kyc = await prisma.kYC.findUnique({
-      where: { userId },
+      where: { userId: parsedUserId },
     });
 
     if (!kyc) {
@@ -458,7 +436,7 @@ export class AuthService {
 
     // Update face verification status
     const updatedKYC = await prisma.kYC.update({
-      where: { userId },
+      where: { userId: parsedUserId },
       data: {
         faceVerificationSuccessful: true,
       },
@@ -473,12 +451,87 @@ export class AuthService {
   /**
    * Initialize crypto wallets for user (called after email verification)
    */
-  private async initializeCryptoWallets(userId: string) {
+  private async initializeCryptoWallets(userId: string | number) {
     try {
+      console.log(`🚀 Starting crypto wallet initialization for user ${userId}...`);
       const cryptoService = new CryptoService();
-      await cryptoService.initializeUserCryptoWallets(userId);
+      const result = await cryptoService.initializeUserCryptoWallets(userId);
+      console.log(`✅ Successfully initialized ${result.length} crypto virtual accounts for user ${userId}`);
+    } catch (error: any) {
+      console.error(`❌ Failed to initialize crypto wallets for user ${userId}:`, error.message || error);
+      // Don't throw - this is a background operation
+    }
+  }
+
+  /**
+   * Initialize fiat wallets for user (called after email verification)
+   * Creates wallets for ALL active fiat currencies in the database
+   */
+  private async initializeFiatWallets(userId: number | string) {
+    try {
+      const walletService = new WalletService();
+      const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+
+      // Get user to verify they exist
+      const user = await prisma.user.findUnique({
+        where: { id: userIdNum },
+      });
+
+      if (!user) {
+        console.error(`User ${userId} not found for fiat wallet initialization`);
+        return;
+      }
+
+      // Get ALL active fiat currencies from database
+      const fiatCurrencies = await prisma.currency.findMany({
+        where: {
+          type: 'fiat',
+          isActive: true,
+        },
+        orderBy: {
+          code: 'asc',
+        },
+      });
+
+      if (fiatCurrencies.length === 0) {
+        console.log('No active fiat currencies found in database');
+        return;
+      }
+
+      console.log(`Creating ${fiatCurrencies.length} fiat wallets for user ${userId}`);
+
+      // Create wallets for each fiat currency
+      for (const currency of fiatCurrencies) {
+        try {
+          // Check if wallet already exists
+          const existingWallet = await prisma.wallet.findUnique({
+            where: {
+              userId_currency: {
+                userId: userIdNum,
+                currency: currency.code,
+              },
+            },
+          });
+
+          if (existingWallet) {
+            console.log(`Wallet for ${currency.code} already exists for user ${userId}`);
+            continue;
+          }
+
+          // Create wallet
+          await walletService.createWallet(String(userIdNum), currency.code, 'fiat');
+          console.log(`✅ Created fiat wallet for ${currency.code} (${currency.name}) for user ${userId}`);
+        } catch (error: any) {
+          // If wallet already exists, that's fine - continue
+          if (error.message?.includes('already exists')) {
+            console.log(`Wallet for ${currency.code} already exists for user ${userId}`);
+            continue;
+          }
+          console.error(`❌ Failed to create wallet for ${currency.code}:`, error.message || error);
+        }
+      }
     } catch (error) {
-      console.error(`Failed to initialize crypto wallets for user ${userId}:`, error);
+      console.error(`Failed to initialize fiat wallets for user ${userId}:`, error);
       // Don't throw - this is a background operation
     }
   }

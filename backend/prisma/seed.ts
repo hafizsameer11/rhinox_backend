@@ -618,6 +618,12 @@ async function main() {
     { from: 'TZS', to: 'USD', rate: 0.00043 }, // 1 TZS = 0.00043 USD
     { from: 'UGX', to: 'USD', rate: 0.00027 }, // 1 UGX = 0.00027 USD
     { from: 'BWP', to: 'USD', rate: 0.074 }, // 1 BWP = 0.074 USD
+    
+    // USDT (Tether) rates - USDT is pegged to USD (1 USDT ≈ 1 USD)
+    { from: 'USDT', to: 'NGN', rate: 833.33 }, // 1 USDT = 833.33 NGN (same as USD)
+    { from: 'USDT', to: 'USD', rate: 1.0 }, // 1 USDT = 1 USD (pegged)
+    { from: 'NGN', to: 'USDT', rate: 0.0012 }, // 1 NGN = 0.0012 USDT (same as USD)
+    { from: 'USD', to: 'USDT', rate: 1.0 }, // 1 USD = 1 USDT
   ];
 
   for (const rate of exchangeRates) {

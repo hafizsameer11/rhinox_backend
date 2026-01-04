@@ -295,7 +295,7 @@ export class ExchangeController {
    */
   async setRate(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { fromCurrency, toCurrency, rate, inverseRate } = req.body;
 
       if (!userId) {

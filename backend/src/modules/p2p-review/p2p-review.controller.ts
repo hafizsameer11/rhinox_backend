@@ -93,7 +93,7 @@ export class P2PReviewController {
    */
   async createReview(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { orderId } = req.params;
       const { type, comment } = req.body;
 
@@ -370,7 +370,7 @@ export class P2PReviewController {
    */
   async updateReview(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
       const { type, comment } = req.body;
 
@@ -448,7 +448,7 @@ export class P2PReviewController {
    */
   async deleteReview(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
 
       if (!userId) {
