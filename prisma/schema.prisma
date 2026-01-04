@@ -1,0 +1,666 @@
+// This is your Prisma schema file,
+// Organized in a modular way - each module's models are grouped together
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MODULE: AUTH
+// ============================================
+// Authentication and user management models
+
+model User {
+  id              Int      @id @default(autoincrement())
+  email           String   @unique
+  phone           String?  @unique
+  passwordHash    String
+  pinHash         String? // 5-digit PIN for transactions
+  firstName       String?
+  lastName        String?
+  middleName      String? // Middle name for KYC
+  countryId       Int? // Country selection from form
+  termsAccepted   Boolean  @default(false) // Terms & Conditions acceptance
+  isEmailVerified Boolean  @default(false)
+  isPhoneVerified Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  country               Country?            @relation(fields: [countryId], references: [id])
+  wallets               Wallet[]
+  sessions              Session[]
+  refreshTokens         RefreshToken[]
+  otps                  OTP[]
+  kyc                   KYC?
+  userWallets           UserWallet[]
+  virtualAccounts       VirtualAccount[]
+  paymentMethods        UserPaymentMethod[]
+  p2pAds                P2PAd[]
+  p2pOrdersAsBuyer      P2POrder[]          @relation("P2POrdersAsBuyer")
+  p2pOrdersAsVendor     P2POrder[]          @relation("P2POrdersAsVendor")
+  p2pMessagesAsSender   P2PChatMessage[]    @relation("P2PMessagesAsSender")
+  p2pMessagesAsReceiver P2PChatMessage[]    @relation("P2PMessagesAsReceiver")
+  p2pReviewsAsReviewer  P2PReview[]         @relation("P2PReviewsAsReviewer")
+  p2pReviewsAsReviewee  P2PReview[]         @relation("P2PReviewsAsReviewee")
+
+  @@index([email])
+  @@index([phone])
+  @@index([countryId])
+  @@map("users")
+}
+
+model Session {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+model KYC {
+  id                         Int       @id @default(autoincrement())
+  userId                     Int       @unique
+  tier                       Int       @default(1) // 1 = Basic, 2 = Intermediate, 3 = Advanced
+  status                     String    @default("pending") // pending, verified, rejected
+  firstName                  String?
+  lastName                   String?
+  middleName                 String?
+  dateOfBirth                DateTime?
+  idType                     String? // passport, national_id, drivers_license, etc.
+  idNumber                   String?
+  idDocumentUrl              String? // Uploaded ID document
+  faceVerificationSuccessful Boolean   @default(false) // Face verification status
+  faceVerificationImageUrl   String? // Face verification image
+  verifiedAt                 DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([tier])
+  @@map("kyc_verifications")
+}
+
+// ============================================
+// MODULE: OTP
+// ============================================
+// OTP verification models
+
+model OTP {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  code      String // 5-digit code
+  type      String // email, phone
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([code])
+  @@index([type])
+  @@index([expiresAt])
+  @@map("otps")
+}
+
+// ============================================
+// MODULE: WALLET
+// ============================================
+// Wallet and balance management models
+
+model Wallet {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  currencyId    Int? // Reference to Currency model
+  currency      String // NGN, USD, EUR, GBP, BTC, ETH, USDT, etc. (code)
+  currencyName  String? // Nigerian Naira, US Dollar, etc.
+  type          String   @default("fiat") // fiat, crypto
+  balance       Decimal  @default(0) @db.Decimal(20, 8)
+  lockedBalance Decimal  @default(0) @db.Decimal(20, 8) // For escrow, pending transactions
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currencyRef Currency? @relation(fields: [currencyId], references: [id])
+
+  transactions Transaction[]
+
+  @@unique([userId, currency])
+  @@index([userId])
+  @@index([currency])
+  @@index([currencyId])
+  @@map("wallets")
+}
+
+// ============================================
+// MODULE: TRANSACTION
+// ============================================
+// Transaction and payment models
+
+model Transaction {
+  id            Int       @id @default(autoincrement())
+  walletId      Int
+  type          String // deposit, withdrawal, transfer, p2p, bill_payment
+  status        String    @default("pending") // pending, processing, completed, failed, cancelled
+  amount        Decimal   @db.Decimal(20, 8)
+  currency      String
+  fee           Decimal   @default(0) @db.Decimal(20, 8)
+  reference     String    @unique
+  description   String?
+  channel       String? // bank_transfer, mobile_money, conversion, p2p
+  country       String? // Country code (NG, KE, etc.)
+  bankAccountId Int?      @map("bank_account_id") // Reference to bank account used
+  paymentMethod String?   @map("payment_method") // Bank Transfer, Mobile Money, etc.
+  providerId    Int?      @map("provider_id") // Reference to mobile money provider
+  metadata      Json? // Additional transaction data
+  completedAt   DateTime? @map("completed_at")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  wallet      Wallet               @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  bankAccount BankAccount?         @relation(fields: [bankAccountId], references: [id])
+  provider    MobileMoneyProvider? @relation(fields: [providerId], references: [id])
+
+  @@index([walletId])
+  @@index([reference])
+  @@index([status])
+  @@index([type])
+  @@index([channel])
+  @@index([providerId])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+// ============================================
+// MODULE: BANK ACCOUNT
+// ============================================
+// Bank account details for deposits
+
+model BankAccount {
+  id            Int      @id @default(autoincrement())
+  countryCode   String   @map("country_code") @db.VarChar(10) // NG, KE, etc.
+  currency      String   @db.VarChar(10) // NGN, KES, etc.
+  bankName      String   @map("bank_name") @db.VarChar(255)
+  accountNumber String   @map("account_number") @db.VarChar(50)
+  accountName   String   @map("account_name") @db.VarChar(255)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  transactions Transaction[]
+
+  @@index([countryCode])
+  @@index([currency])
+  @@index([isActive])
+  @@index([countryCode, currency])
+  @@map("bank_accounts")
+}
+
+// ============================================
+// MODULE: MOBILE MONEY PROVIDER
+// ============================================
+// Mobile money provider details for deposits
+
+model MobileMoneyProvider {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(100) // MTN, Vodafone, M-Pesa, etc.
+  code        String   @db.VarChar(50) // MTN, VODAFONE, MPESA, etc.
+  countryCode String   @map("country_code") @db.VarChar(10) // NG, KE, GH, etc.
+  currency    String   @db.VarChar(10) // NGN, KES, GHS, etc.
+  logoUrl     String?  @map("logo_url") // URL or path to provider logo
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  transactions       Transaction[]
+  userPaymentMethods UserPaymentMethod[]
+
+  @@unique([code, countryCode, currency])
+  @@index([countryCode])
+  @@index([currency])
+  @@index([isActive])
+  @@index([code])
+  @@map("mobile_money_providers")
+}
+
+// ============================================
+// MODULE: COUNTRY
+// ============================================
+// Country model
+
+model Country {
+  id        Int      @id @default(autoincrement())
+  name      String?
+  code      String?  @unique // ISO country code (NG, KE, GH, etc.)
+  flag      String? // Path to flag image in uploads/flags
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  users      User[]
+  currencies Currency[] // Countries can have multiple currencies
+
+  @@index([code])
+  @@map("countries")
+}
+
+// ============================================
+// MODULE: CURRENCY
+// ============================================
+// Currency model
+
+model Currency {
+  id           Int      @id @default(autoincrement())
+  code         String   @unique // NGN, USD, EUR, KSH, etc.
+  name         String? // Nigerian Naira, US Dollar, etc.
+  symbol       String? // ₦, $, €, etc.
+  countryId    Int? // Primary country for this currency
+  type         String   @default("fiat") // fiat, crypto
+  flag         String? // Path to flag/icon in uploads/flags
+  exchangeRate Decimal? @db.Decimal(20, 8) // Exchange rate to base currency (USD)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  country Country? @relation(fields: [countryId], references: [id])
+  wallets Wallet[]
+
+  @@index([code])
+  @@index([countryId])
+  @@map("currencies")
+}
+
+// ============================================
+// MODULE: EXCHANGE RATE
+// ============================================
+// Currency exchange rates
+
+model ExchangeRate {
+  id           Int      @id @default(autoincrement())
+  fromCurrency String   @map("from_currency") @db.VarChar(10)
+  toCurrency   String   @map("to_currency") @db.VarChar(10)
+  rate         Decimal  @db.Decimal(20, 8) // Rate to convert fromCurrency to toCurrency
+  inverseRate  Decimal? @map("inverse_rate") @db.Decimal(20, 8) // Rate to convert toCurrency to fromCurrency (1/rate)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([fromCurrency, toCurrency])
+  @@index([fromCurrency])
+  @@index([toCurrency])
+  @@index([isActive])
+  @@map("exchange_rates")
+}
+
+// ============================================
+// MODULE: TATUM CRYPTO
+// ============================================
+// Tatum virtual account and crypto wallet models
+
+model WalletCurrency {
+  id              Int              @id @default(autoincrement())
+  blockchain      String           @db.VarChar(255)
+  currency        String           @db.VarChar(50)
+  symbol          String?          @db.VarChar(255)
+  name            String           @db.VarChar(255)
+  icon            String? // Path to icon image in uploads/wallet_symbols
+  price           Decimal?         @db.Decimal(20, 8)
+  nairaPrice      Decimal?         @map("naira_price") @db.Decimal(20, 8)
+  tokenType       String?          @map("token_type") @db.VarChar(50)
+  contractAddress String?          @map("contract_address") @db.VarChar(255)
+  decimals        Int              @default(18)
+  isToken         Boolean          @default(false) @map("is_token")
+  blockchainName  String?          @map("blockchain_name") @db.VarChar(255)
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  virtualAccounts VirtualAccount[]
+
+  @@unique([blockchain, currency])
+  @@index([blockchain])
+  @@index([currency])
+  @@index([isToken])
+  @@map("wallet_currencies")
+}
+
+model UserWallet {
+  id               Int              @id @default(autoincrement())
+  userId           Int              @map("user_id")
+  blockchain       String           @db.VarChar(255)
+  mnemonic         String?          @db.Text // Encrypted mnemonic/secret/privateKey
+  xpub             String?          @db.VarChar(500) // Extended public key (or address for Solana/XRP)
+  derivationPath   String?          @map("derivation_path") @db.VarChar(100)
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  depositAddresses DepositAddress[]
+
+  @@unique([userId, blockchain])
+  @@index([userId])
+  @@index([blockchain])
+  @@map("user_wallets")
+}
+
+model VirtualAccount {
+  id                 Int              @id @default(autoincrement())
+  userId             Int              @map("user_id")
+  blockchain         String           @db.VarChar(255)
+  currency           String           @db.VarChar(50)
+  customerId         String?          @map("customer_id") @db.VarChar(255)
+  accountId          String           @unique @map("account_id") @db.VarChar(255)
+  accountCode        String?          @map("account_code") @db.VarChar(255)
+  active             Boolean          @default(true)
+  frozen             Boolean          @default(false)
+  accountBalance     String           @default("0") @map("account_balance") @db.VarChar(255)
+  availableBalance   String           @default("0") @map("available_balance") @db.VarChar(255)
+  xpub               String?          @db.VarChar(500)
+  accountingCurrency String?          @map("accounting_currency") @db.VarChar(50)
+  currencyId         Int?             @map("currency_id")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletCurrency     WalletCurrency?  @relation(fields: [currencyId], references: [id])
+  depositAddresses   DepositAddress[]
+
+  @@unique([userId, blockchain, currency])
+  @@index([userId])
+  @@index([blockchain])
+  @@index([currency])
+  @@index([currencyId])
+  @@index([accountId])
+  @@map("virtual_accounts")
+}
+
+model DepositAddress {
+  id               Int            @id @default(autoincrement())
+  virtualAccountId Int            @map("virtual_account_id")
+  userWalletId     Int?           @map("user_wallet_id")
+  blockchain       String?        @db.VarChar(255)
+  currency         String?        @db.VarChar(50)
+  address          String         @db.VarChar(255)
+  index            Int?           @db.Int
+  privateKey       String?        @map("private_key") @db.Text // Encrypted
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  virtualAccount   VirtualAccount @relation(fields: [virtualAccountId], references: [id], onDelete: Cascade)
+  userWallet       UserWallet?    @relation(fields: [userWalletId], references: [id], onDelete: SetNull)
+
+  @@index([virtualAccountId])
+  @@index([userWalletId])
+  @@index([blockchain])
+  @@index([address])
+  @@map("deposit_addresses")
+}
+
+model MasterWallet {
+  id         Int      @id @default(autoincrement())
+  blockchain String   @unique @db.VarChar(255)
+  xpub       String?  @db.VarChar(500)
+  address    String?  @db.VarChar(255)
+  privateKey String?  @db.Text // Encrypted
+  mnemonic   String?  @db.Text // Encrypted
+  response   String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("master_wallets")
+}
+
+model WebhookResponse {
+  id               Int       @id @default(autoincrement())
+  accountId        String?   @map("account_id") @db.VarChar(255)
+  subscriptionType String?   @map("subscription_type") @db.VarChar(255)
+  amount           Decimal?  @db.Decimal(20, 8)
+  reference        String?   @db.VarChar(255)
+  currency         String?   @db.VarChar(50)
+  txId             String?   @map("tx_id") @db.VarChar(255)
+  blockHeight      BigInt?   @map("block_height")
+  blockHash        String?   @map("block_hash") @db.VarChar(255)
+  fromAddress      String?   @map("from_address") @db.VarChar(255)
+  toAddress        String?   @map("to_address") @db.VarChar(255)
+  contractAddress  String?   @map("contract_address") @db.VarChar(255)
+  transactionDate  DateTime? @map("transaction_date")
+  index            Int?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([accountId])
+  @@index([reference])
+  @@index([txId])
+  @@index([toAddress])
+  @@map("webhook_responses")
+}
+
+model TatumRawWebhook {
+  id           Int       @id @default(autoincrement())
+  rawData      String    @map("raw_data") @db.LongText
+  headers      String?   @db.Text
+  ipAddress    String?   @map("ip_address") @db.VarChar(255)
+  userAgent    String?   @map("user_agent") @db.VarChar(500)
+  processed    Boolean   @default(false)
+  processedAt  DateTime? @map("processed_at")
+  errorMessage String?   @map("error_message") @db.Text
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([processed])
+  @@index([createdAt])
+  @@map("tatum_raw_webhooks")
+}
+
+// ============================================
+// MODULE: USER PAYMENT METHOD
+// ============================================
+// User's saved payment methods (bank accounts, mobile money)
+
+model UserPaymentMethod {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @map("user_id")
+  type          String // bank_account, mobile_money
+  accountType   String?  @map("account_type") // For bank: savings, current, etc.
+  bankName      String?  @map("bank_name") // For bank accounts
+  accountNumber String?  @map("account_number") // For bank accounts (encrypted)
+  accountName   String?  @map("account_name") // Account holder name
+  providerId    Int?     @map("provider_id") // For mobile money (reference to MobileMoneyProvider)
+  phoneNumber   String?  @map("phone_number") // For mobile money
+  countryCode   String   @map("country_code") @db.VarChar(10)
+  currency      String   @db.VarChar(10)
+  isDefault     Boolean  @default(false) @map("is_default") // Default payment method
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider  MobileMoneyProvider? @relation(fields: [providerId], references: [id])
+  p2pOrders P2POrder[]
+
+  @@index([userId])
+  @@index([type])
+  @@index([countryCode])
+  @@index([currency])
+  @@index([isDefault])
+  @@index([isActive])
+  @@map("user_payment_methods")
+}
+
+// ============================================
+// MODULE: P2P AD
+// ============================================
+// P2P trading advertisements (buy/sell ads)
+
+model P2PAd {
+  id               Int      @id @default(autoincrement())
+  userId           Int      @map("user_id")
+  type             String // buy, sell
+  cryptoCurrency   String   @map("crypto_currency") @db.VarChar(50) // BTC, USDT, ETH, etc.
+  fiatCurrency     String   @map("fiat_currency") @db.VarChar(10) // NGN, USD, etc.
+  price            Decimal  @db.Decimal(20, 8) // Price per 1 unit of crypto
+  volume           Decimal  @db.Decimal(20, 8) // Total volume available
+  minOrder         Decimal  @map("min_order") @db.Decimal(20, 8) // Minimum order amount
+  maxOrder         Decimal  @map("max_order") @db.Decimal(20, 8) // Maximum order amount
+  autoAccept       Boolean  @default(false) @map("auto_accept") // Automatically accept orders
+  paymentMethodIds Json     @map("payment_method_ids") // Array of payment method IDs
+  status           String   @default("available") // available, unavailable, paused
+  isOnline         Boolean  @default(true) @map("is_online") // Online/offline status
+  ordersReceived   Int      @default(0) @map("orders_received") // Total orders received
+  responseTime     Int?     @map("response_time") // Response time in minutes
+  processingTime   Int?     @map("processing_time") // Processing time in minutes (wait time after acceptance)
+  score            Decimal? @db.Decimal(5, 2) // Vendor score (0-100)
+  countryCode      String?  @map("country_code") @db.VarChar(10)
+  description      String?  @db.Text // Optional ad description
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders  P2POrder[]
+  reviews P2PReview[]
+
+  @@index([userId])
+  @@index([type])
+  @@index([cryptoCurrency])
+  @@index([fiatCurrency])
+  @@index([status])
+  @@index([isOnline])
+  @@index([createdAt])
+  @@map("p2p_ads")
+}
+
+// ============================================
+// MODULE: P2P ORDER
+// ============================================
+// P2P orders created from ads
+
+model P2POrder {
+  id                    Int       @id @default(autoincrement())
+  adId                  Int       @map("ad_id")
+  buyerId               Int       @map("buyer_id")
+  vendorId              Int       @map("vendor_id")
+  type                  String // 'buy' or 'sell' (from ad perspective)
+  cryptoCurrency        String    @map("crypto_currency") @db.VarChar(50)
+  fiatCurrency          String    @map("fiat_currency") @db.VarChar(10)
+  cryptoAmount          Decimal   @map("crypto_amount") @db.Decimal(20, 8)
+  fiatAmount            Decimal   @map("fiat_amount") @db.Decimal(20, 8)
+  price                 Decimal   @db.Decimal(20, 8) // Price at time of order
+  paymentMethodId       Int?      @map("payment_method_id")
+  status                String    @default("pending") // pending, awaiting_payment, payment_made, awaiting_coin_release, completed, cancelled, disputed, refunded, expired
+  acceptedAt            DateTime? @map("accepted_at") // When vendor accepted the order
+  processingTimeMinutes Int?      @map("processing_time_minutes") // Processing time from ad
+  expiresAt             DateTime? @map("expires_at") // Order expiration time (acceptedAt + processingTime)
+  paymentConfirmedAt    DateTime? @map("payment_confirmed_at")
+  paymentReceivedAt     DateTime? @map("payment_received_at")
+  coinReleasedAt        DateTime? @map("coin_released_at")
+  completedAt           DateTime? @map("completed_at")
+  cancelledAt           DateTime? @map("cancelled_at")
+  txId                  String?   @map("tx_id") @db.VarChar(255) // Transaction reference
+  paymentChannel        String?   @map("payment_channel") // 'rhinoxpay_id' or 'offline'
+  metadata              Json? // Additional data (payment proof, etc.)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  ad            P2PAd              @relation(fields: [adId], references: [id], onDelete: Cascade)
+  buyer         User               @relation("P2POrdersAsBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  vendor        User               @relation("P2POrdersAsVendor", fields: [vendorId], references: [id], onDelete: Cascade)
+  paymentMethod UserPaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  chatMessages  P2PChatMessage[]
+  reviews       P2PReview[]
+
+  @@index([adId])
+  @@index([buyerId])
+  @@index([vendorId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("p2p_orders")
+}
+
+// ============================================
+// MODULE: P2P CHAT MESSAGE
+// ============================================
+// Chat messages between buyer and vendor for orders
+
+model P2PChatMessage {
+  id         Int       @id @default(autoincrement())
+  orderId    Int       @map("order_id")
+  senderId   Int       @map("sender_id")
+  receiverId Int       @map("receiver_id")
+  message    String    @db.Text
+  isRead     Boolean   @default(false) @map("is_read")
+  readAt     DateTime? @map("read_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  order    P2POrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sender   User     @relation("P2PMessagesAsSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User     @relation("P2PMessagesAsReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([createdAt])
+  @@map("p2p_chat_messages")
+}
+
+// ============================================
+// MODULE: P2P REVIEW
+// ============================================
+// Reviews left by users after order completion
+
+model P2PReview {
+  id         Int      @id @default(autoincrement())
+  orderId    Int      @map("order_id")
+  reviewerId Int      @map("reviewer_id")
+  revieweeId Int      @map("reviewee_id") // Vendor being reviewed
+  adId       Int      @map("ad_id")
+  type       String // 'positive' or 'negative' (thumbs up/down)
+  comment    String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  order    P2POrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reviewer User     @relation("P2PReviewsAsReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+  reviewee User     @relation("P2PReviewsAsReviewee", fields: [revieweeId], references: [id], onDelete: Cascade)
+  ad       P2PAd    @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId]) // One review per order
+  @@index([orderId])
+  @@index([revieweeId])
+  @@index([adId])
+  @@index([createdAt])
+  @@map("p2p_reviews")
+}

@@ -1,0 +1,17 @@
+node_modules
+# Keep environment variables out of version control
+.env
+
+/generated/prisma
+
+# TypeScript compiled output (not needed in dev mode)
+*.js
+*.js.map
+*.d.ts
+*.d.ts.map
+
+# Keep package.json and other config files
+!package.json
+!package-lock.json
+!tsconfig.json
+!nodemon.json
