@@ -254,6 +254,75 @@ export class ExchangeController {
 
   /**
    * @swagger
+   * /api/exchange/currencies:
+   *   get:
+   *     summary: "[PUBLIC] Get all available fiat currencies"
+   *     description: |
+   *       Returns a list of all available fiat currencies.
+   *       This endpoint is public and does not require authentication.
+   *       Only fiat currencies are returned (crypto currencies are excluded).
+   *       Currencies are sorted by code alphabetically.
+   *     tags: [Exchange]
+   *     responses:
+   *       200:
+   *         description: List of currencies
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: array
+   *                   items:
+   *                     type: object
+   *                     properties:
+   *                       id:
+   *                         type: integer
+   *                         example: 1
+   *                       code:
+   *                         type: string
+   *                         example: "NGN"
+   *                         description: Currency code (ISO 4217 for fiat)
+   *                       name:
+   *                         type: string
+   *                         example: "Nigerian Naira"
+   *                       symbol:
+   *                         type: string
+   *                         example: "₦"
+   *                       type:
+   *                         type: string
+   *                         enum: [fiat, crypto]
+   *                         example: "fiat"
+   *                       flag:
+   *                         type: string
+   *                         nullable: true
+   *                         example: "/uploads/flags/ng.png"
+   *                         description: Flag image URL for fiat currencies
+   *                       isActive:
+   *                         type: boolean
+   *                         example: true
+   */
+  async getCurrencies(req: Request, res: Response) {
+    try {
+      const currencies = await this.service.getCurrencies();
+
+      return res.json({
+        success: true,
+        data: currencies,
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to get currencies',
+      });
+    }
+  }
+
+  /**
+   * @swagger
    * /api/exchange/set-rate:
    *   post:
    *     summary: Set or update exchange rate (Admin)

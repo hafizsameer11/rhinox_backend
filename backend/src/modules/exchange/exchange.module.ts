@@ -27,6 +27,7 @@ export class ExchangeModule implements IModule {
 
   private setupRoutes(): void {
     // Public routes (no auth required)
+    this.router.get('/currencies', this.controller.getCurrencies.bind(this.controller));
     this.router.get('/rate', this.controller.getExchangeRate.bind(this.controller));
     this.router.get('/convert', this.controller.convertAmount.bind(this.controller));
     this.router.get('/rates', this.controller.getAllRates.bind(this.controller));

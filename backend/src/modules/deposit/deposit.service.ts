@@ -80,13 +80,19 @@ export class DepositService {
       providerId?: string; // Optional for mobile money
     }
   ) {
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Get or create wallet
     let wallet;
     try {
-      wallet = await this.walletService.getWalletByCurrency(userId, data.currency);
+      wallet = await this.walletService.getWalletByCurrency(parsedUserId, data.currency);
     } catch (error) {
       // Create wallet if it doesn't exist
-      wallet = await this.walletService.createWallet(userId, data.currency, 'fiat');
+      wallet = await this.walletService.createWallet(parsedUserId, data.currency, 'fiat');
     }
 
     // Generate unique reference
@@ -186,7 +192,7 @@ export class DepositService {
 
     // Get user email
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: parsedUserId },
       select: { email: true, firstName: true },
     });
 
@@ -234,9 +240,21 @@ export class DepositService {
     transactionId: string,
     pin: string
   ) {
+    // Parse transactionId to integer
+    const parsedTransactionId = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
+    if (isNaN(parsedTransactionId) || parsedTransactionId <= 0) {
+      throw new Error('Invalid transaction ID format');
+    }
+
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Get transaction
     const transaction = await prisma.transaction.findUnique({
-      where: { id: transactionId },
+      where: { id: parsedTransactionId },
       include: {
         wallet: {
           include: {
@@ -251,7 +269,7 @@ export class DepositService {
       throw new Error('Transaction not found');
     }
 
-    if (transaction.wallet.userId !== userId) {
+    if (transaction.wallet.userId !== parsedUserId) {
       throw new Error('Unauthorized access to transaction');
     }
 
@@ -342,8 +360,20 @@ export class DepositService {
    * Get transaction receipt
    */
   async getTransactionReceipt(userId: string, transactionId: string) {
+    // Parse transactionId to integer
+    const parsedTransactionId = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
+    if (isNaN(parsedTransactionId) || parsedTransactionId <= 0) {
+      throw new Error('Invalid transaction ID format');
+    }
+
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const transaction = await prisma.transaction.findUnique({
-      where: { id: transactionId },
+      where: { id: parsedTransactionId },
       include: {
         wallet: {
           include: {
@@ -360,7 +390,7 @@ export class DepositService {
       throw new Error('Transaction not found');
     }
 
-    if (transaction.wallet.userId !== userId) {
+    if (transaction.wallet.userId !== parsedUserId) {
       throw new Error('Unauthorized access to transaction');
     }
 
