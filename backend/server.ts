@@ -6,6 +6,7 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import swaggerUi from 'swagger-ui-express';
 import dotenv from 'dotenv';
+import { existsSync } from 'fs';
 import { ModuleLoader } from './src/core/utils/module-loader.js';
 import { AuthModule, WalletModule, KYCModule, HomeModule, CountryModule, CryptoModule, DepositModule, ExchangeModule, ConversionModule, TransferModule, PaymentSettingsModule, P2PModule, P2POrderModule, P2PChatModule, P2PReviewModule, BankAccountModule, TransactionHistoryModule, BillPaymentModule, SupportChatModule, NotificationModule } from './src/modules/index.js';
 import { authMiddleware } from './src/core/middleware/auth.middleware.js';
@@ -34,7 +35,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Handle both development (tsx) and production (compiled) paths
+const uploadsPathDev = path.join(__dirname, './uploads');
+const uploadsPathProd = path.join(__dirname, '../uploads');
+const uploadsPath = existsSync(uploadsPathDev) ? uploadsPathDev : uploadsPathProd;
+app.use('/uploads', express.static(uploadsPath));
 
 // ============================================
 // Health Check
