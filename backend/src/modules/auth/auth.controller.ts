@@ -58,10 +58,9 @@ export class AuthController {
    *                 example: "Doe"
    *                 description: User's last name. Required for account identification and KYC.
    *               countryId:
-   *                 type: string
-   *                 format: uuid
-   *                 example: "550e8400-e29b-41d4-a716-446655440000"
-   *                 description: Optional. UUID of the country selected by the user. Use GET /api/countries to get available countries.
+   *                 type: integer
+   *                 example: 1
+   *                 description: Optional. ID of the country selected by the user. Use GET /api/countries to get available countries.
    *               termsAccepted:
    *                 type: boolean
    *                 example: true
@@ -84,9 +83,8 @@ export class AuthController {
    *                       type: object
    *                       properties:
    *                         id:
-   *                           type: string
-   *                           format: uuid
-   *                           example: "550e8400-e29b-41d4-a716-446655440000"
+   *                           type: integer
+   *                           example: 1
    *                         email:
    *                           type: string
    *                           example: "user@example.com"
@@ -383,9 +381,8 @@ export class AuthController {
    *               - code
    *             properties:
    *               userId:
-   *                 type: string
-   *                 format: uuid
-   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 type: integer
+   *                 example: 1
    *                 description: Optional. User ID (can be extracted from JWT token if authenticated). Required if not authenticated.
    *               code:
    *                 type: string
@@ -412,8 +409,8 @@ export class AuthController {
    *                       type: object
    *                       properties:
    *                         id:
-   *                           type: string
-   *                           format: uuid
+   *                           type: integer
+   *                           example: 1
    *                         email:
    *                           type: string
    *                         phone:
@@ -510,7 +507,7 @@ export class AuthController {
    *             properties:
    *               userId:
    *                 type: string
-   *                 example: "user-uuid"
+   *                 example: 2
    *     responses:
    *       200:
    *         description: OTP resent successfully

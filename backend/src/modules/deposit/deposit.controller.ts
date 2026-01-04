@@ -47,7 +47,8 @@ export class DepositController {
    *                     type: object
    *                     properties:
    *                       id:
-   *                         type: string
+   *                         type: integer
+   *                         example: 9
    *                       name:
    *                         type: string
    *                         example: "MTN"
@@ -244,11 +245,10 @@ export class DepositController {
    *                   - bank_transfer: Transfer funds to provided bank account details
    *                   - mobile_money: Deposit via mobile money provider (requires providerId)
    *               providerId:
-   *                 type: string
-   *                 format: uuid
-   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 type: integer
+   *                 example: 9
    *                 description: |
-   *                   Required for mobile_money channel. UUID of the mobile money provider.
+   *                   Required for mobile_money channel. ID of the mobile money provider.
    *                   Use GET /api/deposit/mobile-money-providers to get available providers for your country/currency.
    *     responses:
    *       201:
@@ -265,9 +265,8 @@ export class DepositController {
    *                   type: object
    *                   properties:
    *                     id:
-   *                       type: string
-   *                       format: uuid
-   *                       example: "550e8400-e29b-41d4-a716-446655440000"
+   *                       type: integer
+   *                       example: 1
    *                       description: Transaction ID. Use this to confirm the deposit.
    *                     reference:
    *                       type: string
@@ -418,9 +417,8 @@ export class DepositController {
    *               - pin
    *             properties:
    *               transactionId:
-   *                 type: string
-   *                 format: uuid
-   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 type: integer
+   *                 example: 1
    *                 description: Transaction ID returned from the initiate deposit endpoint
    *               pin:
    *                 type: string
@@ -444,8 +442,8 @@ export class DepositController {
    *                   type: object
    *                   properties:
    *                     id:
-   *                       type: string
-   *                       format: uuid
+   *                       type: integer
+   *                       example: 1
    *                       description: Transaction ID
    *                     reference:
    *                       type: string
@@ -547,8 +545,8 @@ export class DepositController {
    *         name: transactionId
    *         required: true
    *         schema:
-   *           type: string
-   *         example: "transaction-uuid"
+   *           type: integer
+   *         example: 1
    *     responses:
    *       200:
    *         description: Transaction receipt

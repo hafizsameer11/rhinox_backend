@@ -33,7 +33,7 @@ export class CountryController {
    *                     properties:
    *                       id:
    *                         type: string
-   *                         example: "uuid"
+   *                         example: 1
    *                       name:
    *                         type: string
    *                         example: "Nigeria"

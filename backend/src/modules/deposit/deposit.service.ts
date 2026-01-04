@@ -96,8 +96,8 @@ export class DepositService {
     const fee = this.calculateFee(parseFloat(data.amount), data.currency);
 
     // Determine payment method and get related data
-    let bankAccountId: string | undefined;
-    let providerId: string | undefined;
+    let bankAccountId: number | undefined;
+    let providerId: number | undefined;
     let paymentMethod: string;
     let bankAccountData: any = null;
     let providerData: any = null;
@@ -109,12 +109,12 @@ export class DepositService {
       }
 
       // Verify provider exists and is active (parse ID to integer)
-      const providerId = typeof data.providerId === 'string' ? parseInt(data.providerId, 10) : data.providerId;
-      if (isNaN(providerId) || providerId <= 0) {
+      const parsedProviderId = typeof data.providerId === 'string' ? parseInt(data.providerId, 10) : data.providerId;
+      if (isNaN(parsedProviderId) || parsedProviderId <= 0) {
         throw new Error('Invalid provider ID format');
       }
       const provider = await prisma.mobileMoneyProvider.findUnique({
-        where: { id: providerId },
+        where: { id: parsedProviderId },
       });
 
       if (!provider || !provider.isActive) {
@@ -125,7 +125,8 @@ export class DepositService {
         throw new Error('Provider does not support this country/currency combination');
       }
 
-      providerId = data.providerId;
+      // Store providerId as integer for database
+      providerId = parsedProviderId;
       paymentMethod = 'Mobile Money';
       providerData = {
         name: provider.name,
@@ -136,12 +137,14 @@ export class DepositService {
       const bankAccountDataResult = await this.getBankAccountDetails(data.countryCode, data.currency);
       
       // Get full bank account record for ID
-      const bankAccount = await prisma.bankAccount.findUnique({
+      const bankAccount = await prisma.bankAccount.findFirst({
         where: {
-          countryCode_currency: {
-            countryCode: data.countryCode,
-            currency: data.currency,
-          },
+          countryCode: data.countryCode,
+          currency: data.currency,
+          isActive: true,
+        },
+        orderBy: {
+          createdAt: 'asc',
         },
       });
 

@@ -113,8 +113,8 @@ export class PaymentSettingsController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *         example: "payment-method-uuid"
+   *           type: integer
+   *         example: 1
    *     responses:
    *       200:
    *         description: Payment method details
@@ -271,8 +271,8 @@ export class PaymentSettingsController {
    *               - currency
    *             properties:
    *               providerId:
-   *                 type: string
-   *                 example: "provider-uuid"
+   *                 type: integer
+   *                 example: 9
    *                 description: Mobile money provider ID
    *               phoneNumber:
    *                 type: string

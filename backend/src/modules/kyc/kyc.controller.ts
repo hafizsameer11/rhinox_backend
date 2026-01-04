@@ -53,8 +53,8 @@ export class KYCController {
    *                 format: uri
    *                 example: "/uploads/documents/id.jpg"
    *               countryId:
-   *                 type: string
-   *                 example: "country-uuid"
+   *                 type: integer
+   *                 example: 1
    *     responses:
    *       200:
    *         description: KYC information submitted successfully
@@ -431,8 +431,8 @@ export class KYCController {
    *               - userId
    *             properties:
    *               userId:
-   *                 type: string
-   *                 example: "user-uuid"
+   *                 type: integer
+   *                 example: 2
    *                 description: User ID whose KYC to approve
    *     responses:
    *       200:
@@ -513,8 +513,8 @@ export class KYCController {
    *               - userId
    *             properties:
    *               userId:
-   *                 type: string
-   *                 example: "user-uuid"
+   *                 type: integer
+   *                 example: 2
    *                 description: User ID whose KYC to reject
    *               reason:
    *                 type: string
