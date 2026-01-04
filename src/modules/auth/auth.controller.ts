@@ -670,6 +670,196 @@ export class AuthController {
   }
 
   /**
+   * @swagger
+   * /api/auth/verify-password-for-pin:
+   *   post:
+   *     summary: Verify password before setting/changing PIN
+   *     description: |
+   *       Verifies the user's password before allowing them to set or change their PIN.
+   *       This is the first step in the PIN setup/change process.
+   *       After successful password verification, the user can proceed to set/update their PIN.
+   *     tags: [Auth]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - password
+   *             properties:
+   *               password:
+   *                 type: string
+   *                 format: password
+   *                 example: "SecurePassword123!"
+   *                 description: User's account password for verification
+   *     responses:
+   *       200:
+   *         description: Password verified successfully. User can proceed to set/update PIN.
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     verified:
+   *                       type: boolean
+   *                       example: true
+   *                     message:
+   *                       type: string
+   *                       example: "Password verified successfully"
+   *       400:
+   *         description: Invalid password
+   *         $ref: '#/components/schemas/Error'
+   *       401:
+   *         description: Unauthorized
+   *         $ref: '#/components/schemas/Error'
+   */
+  async verifyPasswordForPIN(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      const { password } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      if (!password) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password is required',
+        });
+      }
+
+      const result = await this.service.verifyPasswordForPIN(userId, password);
+
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Password verification failed',
+      });
+    }
+  }
+
+  /**
+   * @swagger
+   * /api/auth/set-pin:
+   *   post:
+   *     summary: Set or update PIN after password verification
+   *     description: |
+   *       Sets or updates the user's 5-digit transaction PIN.
+   *       This endpoint should be called after password verification.
+   *       The PIN is hashed before storage for security.
+   *       Works for both new PIN setup and PIN updates.
+   *     tags: [Auth]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - pin
+   *             properties:
+   *               pin:
+   *                 type: string
+   *                 pattern: '^\d{5}$'
+   *                 minLength: 5
+   *                 maxLength: 5
+   *                 example: "12345"
+   *                 description: |
+   *                   5-digit PIN code. Must be exactly 5 numeric digits.
+   *                   This PIN will be required for all financial transactions.
+   *     responses:
+   *       200:
+   *         description: PIN set/updated successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     message:
+   *                       type: string
+   *                       example: "PIN setup successfully"
+   *                     hasPin:
+   *                       type: boolean
+   *                       example: true
+   *       400:
+   *         description: |
+   *           Validation error. Common errors:
+   *           - "PIN is required"
+   *           - "PIN must be exactly 5 digits"
+   *         $ref: '#/components/schemas/Error'
+   *       401:
+   *         description: Unauthorized
+   *         $ref: '#/components/schemas/Error'
+   */
+  async setPIN(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      const { pin } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      if (!pin) {
+        return res.status(400).json({
+          success: false,
+          message: 'PIN is required',
+        });
+      }
+
+      // Validate PIN format (5 digits)
+      if (!/^\d{5}$/.test(pin)) {
+        return res.status(400).json({
+          success: false,
+          message: 'PIN must be exactly 5 digits',
+        });
+      }
+
+      const result = await this.service.setPINAfterVerification(userId, pin);
+
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to set PIN',
+      });
+    }
+  }
+
+  /**
    * Change PIN
    * POST /api/auth/change-pin
    */

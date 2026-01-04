@@ -977,5 +977,171 @@ export class TransactionHistoryService {
 
     return details;
   }
+
+  /**
+   * Get bill payment transactions with filters
+   */
+  async getBillPaymentTransactions(
+    userId: string | number,
+    filters: {
+      currency?: string;
+      status?: string;
+      categoryCode?: string; // Filter by bill payment category
+      period?: 'D' | 'W' | 'M' | 'Custom';
+      startDate?: Date;
+      endDate?: Date;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ) {
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(userIdNum) || userIdNum <= 0) {
+      throw new Error(`Invalid userId: ${userId}`);
+    }
+
+    // Get date range
+    const { start, end } = this.getDateRange(filters.period || 'M', filters.startDate, filters.endDate);
+
+    // Get user fiat wallets
+    const wallets = await prisma.wallet.findMany({
+      where: {
+        userId: userIdNum,
+        isActive: true,
+        type: 'fiat',
+      },
+    });
+
+    if (wallets.length === 0) {
+      return {
+        summary: { total: '0', count: 0 },
+        transactions: [],
+      };
+    }
+
+    let walletIds = wallets.map((w) => w.id);
+
+    // Filter by currency if provided
+    if (filters.currency) {
+      const filteredWallets = wallets.filter((w) => w.currency === filters.currency);
+      walletIds = filteredWallets.map((w) => w.id);
+      if (walletIds.length === 0) {
+        return {
+          summary: { total: '0', count: 0 },
+          transactions: [],
+        };
+      }
+    }
+
+    // Build where clause - Bill payment transactions
+    const where: any = {
+      walletId: { in: walletIds },
+      type: 'bill_payment',
+      createdAt: {
+        gte: start,
+        lte: end,
+      },
+    };
+
+    // Filter by status
+    if (filters.status && filters.status !== 'All') {
+      where.status = filters.status.toLowerCase();
+    }
+
+    // Get transactions (fetch all first, then filter by category if needed)
+    // Note: Category filtering done after fetch since Prisma doesn't support JSON path queries in MySQL
+    let transactions = await prisma.transaction.findMany({
+      where,
+      include: {
+        wallet: {
+          select: {
+            id: true,
+            currency: true,
+            type: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    // Filter by category if provided (after fetching, since Prisma doesn't support JSON path queries in MySQL)
+    if (filters.categoryCode) {
+      transactions = transactions.filter((tx) => {
+        const metadata = tx.metadata as any;
+        return metadata?.categoryCode === filters.categoryCode;
+      });
+    }
+
+    // Apply pagination after filtering
+    const limit = filters.limit || 50;
+    const offset = filters.offset || 0;
+    const paginatedTransactions = transactions.slice(offset, offset + limit);
+
+    // Calculate summary
+    let totalAmount = new Decimal(0);
+    paginatedTransactions.forEach((tx) => {
+      totalAmount = totalAmount.plus(new Decimal(tx.amount).abs());
+    });
+
+    // Normalize transactions
+    const normalizedTransactions = paginatedTransactions.map((tx) => {
+      const metadata = tx.metadata as any;
+      const amount = new Decimal(tx.amount);
+      const fee = new Decimal(tx.fee);
+      const totalAmount = amount.plus(fee);
+
+      // Get category name from metadata
+      const categoryName = metadata?.categoryName || 'Bill Payment';
+      const providerName = metadata?.providerName || '';
+      const normalizedType = `${categoryName}${providerName ? ` - ${providerName}` : ''}`;
+
+      return {
+        id: tx.id,
+        type: tx.type,
+        normalizedType,
+        status: tx.status,
+        amount: amount.toString(),
+        currency: tx.currency,
+        fee: fee.toString(),
+        totalAmount: totalAmount.toString(),
+        reference: tx.reference,
+        description: tx.description || normalizedType,
+        channel: tx.channel,
+        paymentMethod: tx.paymentMethod,
+        country: tx.country,
+        category: {
+          code: metadata?.categoryCode || null,
+          name: metadata?.categoryName || null,
+        },
+        provider: {
+          id: metadata?.providerId || null,
+          code: metadata?.providerCode || null,
+          name: metadata?.providerName || null,
+        },
+        accountNumber: metadata?.accountNumber || null,
+        accountName: metadata?.accountName || null,
+        accountType: metadata?.accountType || null,
+        plan: metadata?.planId ? {
+          id: metadata.planId,
+          code: metadata.planCode,
+          name: metadata.planName,
+        } : null,
+        rechargeToken: metadata?.rechargeToken || null,
+        metadata: tx.metadata,
+        completedAt: tx.completedAt,
+        createdAt: tx.createdAt,
+      };
+    });
+
+    return {
+      summary: {
+        total: totalAmount.toString(),
+        count: paginatedTransactions.length,
+        totalCount: transactions.length, // Total count before pagination
+      },
+      transactions: normalizedTransactions,
+    };
+  }
 }
 

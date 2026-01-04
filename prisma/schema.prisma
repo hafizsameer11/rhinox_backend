@@ -33,23 +33,27 @@ model User {
   updatedAt       DateTime @updatedAt
 
   // Relations
-  country               Country?            @relation(fields: [countryId], references: [id])
-  wallets               Wallet[]
-  sessions              Session[]
-  refreshTokens         RefreshToken[]
-  otps                  OTP[]
-  kyc                   KYC?
-  userWallets           UserWallet[]
-  virtualAccounts       VirtualAccount[]
-  paymentMethods        UserPaymentMethod[]
-  p2pAds                P2PAd[]
-  p2pOrdersAsBuyer      P2POrder[]          @relation("P2POrdersAsBuyer")
-  p2pOrdersAsVendor     P2POrder[]          @relation("P2POrdersAsVendor")
-  p2pMessagesAsSender   P2PChatMessage[]    @relation("P2PMessagesAsSender")
-  p2pMessagesAsReceiver P2PChatMessage[]    @relation("P2PMessagesAsReceiver")
-  p2pReviewsAsReviewer  P2PReview[]         @relation("P2PReviewsAsReviewer")
-  p2pReviewsAsReviewee  P2PReview[]         @relation("P2PReviewsAsReviewee")
-  beneficiaries         Beneficiary[]
+  country                 Country?            @relation(fields: [countryId], references: [id])
+  wallets                 Wallet[]
+  sessions                Session[]
+  refreshTokens           RefreshToken[]
+  otps                    OTP[]
+  kyc                     KYC?
+  userWallets             UserWallet[]
+  virtualAccounts         VirtualAccount[]
+  paymentMethods          UserPaymentMethod[]
+  p2pAds                  P2PAd[]
+  p2pOrdersAsBuyer        P2POrder[]          @relation("P2POrdersAsBuyer")
+  p2pOrdersAsVendor       P2POrder[]          @relation("P2POrdersAsVendor")
+  p2pMessagesAsSender     P2PChatMessage[]    @relation("P2PMessagesAsSender")
+  p2pMessagesAsReceiver   P2PChatMessage[]    @relation("P2PMessagesAsReceiver")
+  p2pReviewsAsReviewer    P2PReview[]         @relation("P2PReviewsAsReviewer")
+  p2pReviewsAsReviewee    P2PReview[]         @relation("P2PReviewsAsReviewee")
+  beneficiaries           Beneficiary[]
+  supportChats            SupportChat[]
+  supportChatsAssigned    SupportChat[]       @relation("SupportChatsAssigned")
+  supportMessagesAsSender SupportMessage[]    @relation("SupportMessagesAsSender")
+  notifications           Notification[]
 
   @@index([email])
   @@index([phone])
@@ -756,4 +760,86 @@ model Beneficiary {
   @@index([providerId])
   @@index([isActive])
   @@map("beneficiaries")
+}
+
+// ============================================
+// MODULE: SUPPORT CHAT
+// ============================================
+// Support chat system for user support
+
+model SupportChat {
+  id         Int       @id @default(autoincrement())
+  userId     Int       @map("user_id")
+  name       String    @db.VarChar(255) // User's name (can be different from account name)
+  email      String    @db.VarChar(255) // User's email (can be different from account email)
+  reason     String    @db.VarChar(255) // Reason for support (Payment Support, Account Issue, etc.)
+  status     String    @default("active") @db.VarChar(50) // active, resolved, appealed
+  assignedTo Int?      @map("assigned_to") // Support agent/admin user ID
+  resolvedAt DateTime? @map("resolved_at")
+  appealedAt DateTime? @map("appealed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignee User?            @relation("SupportChatsAssigned", fields: [assignedTo], references: [id], onDelete: SetNull)
+  messages SupportMessage[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([assignedTo])
+  @@index([createdAt])
+  @@map("support_chats")
+}
+
+model SupportMessage {
+  id        Int       @id @default(autoincrement())
+  chatId    Int       @map("chat_id")
+  senderId  Int       @map("sender_id") // User ID (can be user or support agent/admin)
+  message   String    @db.Text
+  isRead    Boolean   @default(false) @map("is_read")
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  chat   SupportChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender User        @relation("SupportMessagesAsSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([chatId])
+  @@index([senderId])
+  @@index([createdAt])
+  @@map("support_messages")
+}
+
+// ============================================
+// MODULE: NOTIFICATION
+// ============================================
+// User notifications for transactions, P2P, conversions, etc.
+
+model Notification {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  type      String // transaction, p2p, conversion, general, promotional
+  title     String    @db.VarChar(255)
+  message   String?   @db.Text
+  status    String    @default("success") // success, error, info, warning
+  amount    Decimal?  @db.Decimal(20, 8) // Transaction amount if applicable
+  currency  String?   @db.VarChar(10) // Currency code if applicable
+  reference String?   @db.VarChar(255) // Transaction reference, order ID, etc.
+  link      String?   @db.VarChar(500) // Link to view transaction/order details
+  isRead    Boolean   @default(false) @map("is_read")
+  readAt    DateTime? @map("read_at")
+  metadata  Json? // Additional data (transaction type, order details, etc.)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@index([isRead])
+  @@index([createdAt])
+  @@index([userId, isRead])
+  @@map("notifications")
 }

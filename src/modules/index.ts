@@ -21,6 +21,8 @@ export { P2PReviewModule } from './p2p-review/p2p-review.module.js';
 export { BankAccountModule } from './bank-account/bank-account.module.js';
 export { TransactionHistoryModule } from './transaction-history/transaction-history.module.js';
 export { BillPaymentModule } from './bill-payment/bill-payment.module.js';
+export { SupportChatModule } from './support-chat/support-chat.module.js';
+export { NotificationModule } from './notification/notification.module.js';
 
 // Add more module exports here as you create them
 // export { TransactionModule } from './transaction/transaction.module.js';

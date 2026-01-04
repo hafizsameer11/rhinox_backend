@@ -42,6 +42,7 @@ export class P2POrderModule implements IModule {
     this.router.get('/user/ads/sell', authMiddleware, this.controller.browseAdsToSell.bind(this.controller));
     
     // User order management
+    this.router.get('/user/profile', authMiddleware, this.controller.getUserP2PProfile.bind(this.controller));
     this.router.post('/user/orders', authMiddleware, this.controller.createOrder.bind(this.controller));
     this.router.get('/user/orders', authMiddleware, this.controller.getUserOrders.bind(this.controller));
     this.router.get('/user/orders/:id', authMiddleware, this.controller.getOrderDetails.bind(this.controller));

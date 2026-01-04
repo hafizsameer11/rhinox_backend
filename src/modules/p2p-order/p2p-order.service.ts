@@ -819,6 +819,7 @@ export class P2POrderService {
 
     return {
       id: order.id,
+      chatId: order.id, // Chat ID is same as order ID (chat messages are linked via orderId)
       adId: order.adId,
       type: order.type,
       userAction: this.getUserAction(order.type), // User-facing
@@ -1485,6 +1486,7 @@ export class P2POrderService {
 
       return {
         id: order.id,
+        chatId: order.id, // Chat ID is same as order ID (chat messages are linked via orderId)
         adId: order.adId,
         type: order.type,
         userAction: this.getUserAction(order.type), // User-facing
@@ -1502,6 +1504,122 @@ export class P2POrderService {
         updatedAt: order.updatedAt,
       };
     });
+  }
+
+  /**
+   * Get user P2P profile with orders and statistics
+   */
+  async getUserP2PProfile(userId: string | number) {
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(userIdNum) || userIdNum <= 0) {
+      throw new Error(`Invalid userId: ${userId}`);
+    }
+
+    // Get all user orders
+    const allOrders = await prisma.p2POrder.findMany({
+      where: {
+        OR: [
+          { buyerId: userIdNum },
+          { vendorId: userIdNum },
+        ],
+      },
+      select: {
+        id: true,
+        status: true,
+        buyerId: true,
+        vendorId: true,
+        type: true,
+        cryptoAmount: true,
+        fiatAmount: true,
+        createdAt: true,
+        completedAt: true,
+      },
+    });
+
+    // Calculate statistics
+    const totalOrders = allOrders.length;
+    const ordersAsBuyer = allOrders.filter(o => o.buyerId === userIdNum).length;
+    const ordersAsVendor = allOrders.filter(o => o.vendorId === userIdNum).length;
+    const completedOrders = allOrders.filter(o => o.status === 'completed').length;
+    const pendingOrders = allOrders.filter(o => ['pending', 'awaiting_payment', 'payment_made', 'awaiting_coin_release'].includes(o.status)).length;
+    const cancelledOrders = allOrders.filter(o => o.status === 'cancelled').length;
+
+    // Get recent orders (last 10)
+    const recentOrders = await prisma.p2POrder.findMany({
+      where: {
+        OR: [
+          { buyerId: userIdNum },
+          { vendorId: userIdNum },
+        ],
+      },
+      include: {
+        ad: {
+          select: {
+            id: true,
+            type: true,
+            cryptoCurrency: true,
+            fiatCurrency: true,
+          },
+        },
+        buyer: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        vendor: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 10,
+    });
+
+    const formattedRecentOrders = recentOrders.map(order => {
+      const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+      const isUserBuyer = buyerId === userIdNum.toString();
+      const isUserSeller = sellerId === userIdNum.toString();
+
+      return {
+        id: order.id,
+        chatId: order.id, // Chat ID is same as order ID
+        adId: order.adId,
+        type: order.type,
+        userAction: this.getUserAction(order.type),
+        cryptoCurrency: order.cryptoCurrency,
+        fiatCurrency: order.fiatCurrency,
+        cryptoAmount: order.cryptoAmount.toString(),
+        fiatAmount: order.fiatAmount.toString(),
+        status: order.status,
+        buyer: order.buyer,
+        vendor: order.vendor,
+        isUserBuyer,
+        isUserSeller,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+      };
+    });
+
+    return {
+      statistics: {
+        totalOrders,
+        ordersAsBuyer,
+        ordersAsVendor,
+        completedOrders,
+        pendingOrders,
+        cancelledOrders,
+      },
+      recentOrders: formattedRecentOrders,
+    };
   }
 
   /**

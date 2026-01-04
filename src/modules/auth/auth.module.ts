@@ -38,6 +38,8 @@ export class AuthModule implements IModule {
     
     // PIN management (requires authentication)
     this.router.post('/setup-pin', authMiddleware, this.controller.setupPIN.bind(this.controller));
+    this.router.post('/verify-password-for-pin', authMiddleware, this.controller.verifyPasswordForPIN.bind(this.controller));
+    this.router.post('/set-pin', authMiddleware, this.controller.setPIN.bind(this.controller));
     this.router.post('/change-pin', authMiddleware, this.controller.changePIN.bind(this.controller));
     
     // Face verification (requires authentication)

@@ -277,7 +277,7 @@ export class BillPaymentController {
    * @swagger
    * /api/bill-payment/initiate:
    *   post:
-   *     summary: Initiate bill payment (returns summary, does not create transaction)
+   *     summary: Initiate bill payment (creates pending transaction, returns transaction ID)
    *     tags: [Bill Payment]
    *     security:
    *       - bearerAuth: []
@@ -344,7 +344,7 @@ export class BillPaymentController {
    * @swagger
    * /api/bill-payment/confirm:
    *   post:
-   *     summary: Confirm bill payment (creates transaction)
+   *     summary: Confirm bill payment (completes pending transaction)
    *     tags: [Bill Payment]
    *     security:
    *       - bearerAuth: []
@@ -356,31 +356,15 @@ export class BillPaymentController {
    *           schema:
    *             type: object
    *             required:
-   *               - categoryCode
-   *               - providerId
-   *               - currency
-   *               - amount
-   *               - accountNumber
+   *               - transactionId
    *               - pin
    *             properties:
-   *               categoryCode:
-   *                 type: string
-   *               providerId:
+   *               transactionId:
    *                 type: integer
-   *               currency:
-   *                 type: string
-   *               amount:
-   *                 type: string
-   *               accountNumber:
-   *                 type: string
-   *               accountType:
-   *                 type: string
-   *               planId:
-   *                 type: integer
-   *               beneficiaryId:
-   *                 type: integer
+   *                 description: Transaction ID from initiate endpoint
    *               pin:
    *                 type: string
+   *                 description: User PIN for authorization
    *     responses:
    *       200:
    *         description: Payment confirmed
@@ -398,7 +382,15 @@ export class BillPaymentController {
         });
       }
 
-      const result = await this.service.confirmBillPayment(userId, req.body);
+      const { transactionId, pin } = req.body;
+      if (!transactionId || !pin) {
+        return res.status(400).json({
+          success: false,
+          message: 'transactionId and pin are required',
+        });
+      }
+
+      const result = await this.service.confirmBillPayment(userId, transactionId, pin);
       return res.json({
         success: true,
         data: result,

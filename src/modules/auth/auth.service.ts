@@ -375,6 +375,64 @@ export class AuthService {
   }
 
   /**
+   * Verify password for PIN setup/change
+   */
+  async verifyPasswordForPIN(userId: string, password: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, passwordHash: true },
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Verify password
+    const isValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isValid) {
+      throw new Error('Invalid password');
+    }
+
+    return {
+      verified: true,
+      message: 'Password verified successfully',
+    };
+  }
+
+  /**
+   * Set or update PIN after password verification
+   */
+  async setPINAfterVerification(userId: string, pin: string) {
+    // Validate PIN (must be 5 digits)
+    if (!/^\d{5}$/.test(pin)) {
+      throw new Error('PIN must be exactly 5 digits');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, pinHash: true },
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Hash PIN
+    const pinHash = await bcrypt.hash(pin, 10);
+
+    // Update user PIN (can be setting new or updating existing)
+    await prisma.user.update({
+      where: { id: userId },
+      data: { pinHash },
+    });
+
+    return {
+      message: user.pinHash ? 'PIN updated successfully' : 'PIN setup successfully',
+      hasPin: true,
+    };
+  }
+
+  /**
    * Change PIN
    */
   async changePIN(userId: string, oldPin: string, newPin: string) {
