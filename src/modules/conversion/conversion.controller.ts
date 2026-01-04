@@ -13,6 +13,9 @@ export class ConversionController {
    * /api/conversion/calculate:
    *   get:
    *     summary: Calculate conversion preview (amount, fee, received amount)
+   *     description: |
+   *       **Note: Conversion is only allowed between fiat currencies.**
+   *       Crypto currencies cannot be converted through this endpoint.
    *     tags: [Conversion]
    *     security:
    *       - bearerAuth: []
@@ -120,6 +123,10 @@ export class ConversionController {
    * /api/conversion/initiate:
    *   post:
    *     summary: Initiate currency conversion
+   *     description: |
+   *       **Note: Conversion is only allowed between fiat currencies.**
+   *       Crypto currencies cannot be converted through this endpoint.
+   *       Both fromCurrency and toCurrency must be fiat currencies (e.g., NGN, USD, KES, GHS).
    *     tags: [Conversion]
    *     security:
    *       - bearerAuth: []
@@ -138,9 +145,11 @@ export class ConversionController {
    *               fromCurrency:
    *                 type: string
    *                 example: "NGN"
+   *                 description: Source fiat currency code (e.g., NGN, USD, KES). Must be a fiat currency.
    *               toCurrency:
    *                 type: string
    *                 example: "KES"
+   *                 description: Destination fiat currency code (e.g., NGN, USD, KES). Must be a fiat currency.
    *               amount:
    *                 type: string
    *                 example: "200000"

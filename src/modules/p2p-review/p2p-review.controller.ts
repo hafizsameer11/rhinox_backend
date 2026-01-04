@@ -25,8 +25,8 @@ export class P2PReviewController {
    *         name: orderId
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     requestBody:
    *       required: true
@@ -62,12 +62,14 @@ export class P2PReviewController {
    *                   type: object
    *                   properties:
    *                     id:
-   *                       type: string
-   *                       format: uuid
+   *                       type: integer
+   *                       example: 1
    *                     orderId:
-   *                       type: string
+   *                       type: integer
+   *                       example: 1
    *                     adId:
-   *                       type: string
+   *                       type: integer
+   *                       example: 1
    *                     type:
    *                       type: string
    *                       enum: [positive, negative]
@@ -149,8 +151,8 @@ export class P2PReviewController {
    *         name: vendorId
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 2
    *         description: Vendor user ID
    *       - in: query
    *         name: type
@@ -241,8 +243,8 @@ export class P2PReviewController {
    *         name: adId
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Ad ID
    *       - in: query
    *         name: type
@@ -336,8 +338,8 @@ export class P2PReviewController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Review ID
    *     requestBody:
    *       required: true
@@ -429,8 +431,8 @@ export class P2PReviewController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Review ID
    *     responses:
    *       200:

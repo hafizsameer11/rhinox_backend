@@ -100,8 +100,8 @@ export class P2POrderController {
    *                     type: object
    *                     properties:
    *                       id:
-   *                         type: string
-   *                         format: uuid
+   *                         type: integer
+   *                         example: 1
    *                       type:
    *                         type: string
    *                         enum: [buy, sell]
@@ -206,8 +206,8 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Ad ID
    *     responses:
    *       200:
@@ -496,9 +496,8 @@ export class P2POrderController {
    *               - paymentMethodId
    *             properties:
    *               adId:
-   *                 type: string
-   *                 format: uuid
-   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 type: integer
+   *                 example: 1
    *                 description: ID of the ad to create order from
    *               cryptoAmount:
    *                 type: string
@@ -507,9 +506,8 @@ export class P2POrderController {
    *                   Amount of cryptocurrency (quantity user wants to buy/sell).
    *                   Must be within ad's min/max order limits when converted to fiat.
    *               paymentMethodId:
-   *                 type: string
-   *                 format: uuid
-   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 type: integer
+   *                 example: 1
    *                 description: |
    *                   Payment method ID from the ad's accepted payment methods.
    *                   Use GET /api/p2p/ads/:id to see available payment methods.
@@ -529,8 +527,8 @@ export class P2POrderController {
    *                   type: object
    *                   properties:
    *                     id:
-   *                       type: string
-   *                       format: uuid
+   *                       type: integer
+   *                       example: 1
    *                     status:
    *                       type: string
    *                       enum: [pending, awaiting_payment]
@@ -632,8 +630,8 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     responses:
    *       200:
@@ -720,8 +718,8 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     responses:
    *       200:
@@ -979,8 +977,8 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     responses:
    *       200:
@@ -1080,8 +1078,8 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     requestBody:
    *       required: false
@@ -1201,8 +1199,8 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     requestBody:
    *       required: false
@@ -1312,8 +1310,8 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     requestBody:
    *       required: false
@@ -1412,8 +1410,9 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
+   *         description: Order ID
    *     responses:
    *       200:
    *         description: Order cancelled successfully
@@ -1536,8 +1535,9 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
+   *         description: Order ID
    *     responses:
    *       200:
    *         description: Order cancelled successfully
@@ -1589,8 +1589,8 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     requestBody:
    *       required: false
@@ -1688,8 +1688,9 @@ export class P2POrderController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
+   *         description: Order ID
    *     responses:
    *       200:
    *         description: Order cancelled successfully

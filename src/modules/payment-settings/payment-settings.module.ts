@@ -32,9 +32,13 @@ export class PaymentSettingsModule implements IModule {
     // Get mobile money providers (public, but requires auth for consistency)
     this.router.get('/mobile-money-providers', this.controller.getMobileMoneyProviders.bind(this.controller));
     
+    // Get banks list
+    this.router.get('/banks', this.controller.getBanks.bind(this.controller));
+    
     // Add payment methods
     this.router.post('/bank-account', this.controller.addBankAccount.bind(this.controller));
     this.router.post('/mobile-money', this.controller.addMobileMoney.bind(this.controller));
+    this.router.post('/rhinoxpay-id', this.controller.addRhinoxPayID.bind(this.controller));
     
     // Get single payment method
     this.router.get('/:id', this.controller.getPaymentMethod.bind(this.controller));

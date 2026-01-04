@@ -66,7 +66,7 @@ const options: swaggerJsdoc.Options = {
         User: {
           type: 'object',
           properties: {
-            id: { type: 'string', example: 'uuid' },
+            id: { type: 'integer', example: 1 },
             email: { type: 'string', example: 'user@example.com' },
             phone: { type: 'string', example: '+1234567890' },
             firstName: { type: 'string', example: 'John' },
@@ -78,7 +78,7 @@ const options: swaggerJsdoc.Options = {
         Wallet: {
           type: 'object',
           properties: {
-            id: { type: 'string', example: 'uuid' },
+            id: { type: 'integer', example: 1 },
             currency: { type: 'string', example: 'NGN' },
             currencyName: { type: 'string', example: 'Nigerian Naira' },
             type: { type: 'string', example: 'fiat' },
@@ -91,8 +91,8 @@ const options: swaggerJsdoc.Options = {
         VirtualAccount: {
           type: 'object',
           properties: {
-            id: { type: 'string', example: 'uuid' },
-            accountId: { type: 'string', example: 'account-uuid' },
+            id: { type: 'integer', example: 1 },
+            accountId: { type: 'string', example: 'account-id' },
             blockchain: { type: 'string', example: 'ethereum' },
             currency: { type: 'string', example: 'USDT' },
             accountBalance: { type: 'string', example: '100.00' },
@@ -118,7 +118,7 @@ const options: swaggerJsdoc.Options = {
             address: { type: 'string', example: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb' },
             currency: { type: 'string', example: 'USDT' },
             blockchain: { type: 'string', example: 'ethereum' },
-            virtualAccountId: { type: 'string', example: 'account-uuid' },
+            virtualAccountId: { type: 'integer', example: 1 },
           },
         },
       },
@@ -143,6 +143,8 @@ const options: swaggerJsdoc.Options = {
       { name: 'P2P Chat', description: 'Chat messages between buyer and vendor for orders' },
       { name: 'P2P Review', description: 'Reviews left by users after order completion' },
       { name: 'Bank Accounts', description: 'Public bank account information for deposits' },
+      { name: 'Transaction History', description: 'Transaction history with chart data and filtering' },
+      { name: 'Bill Payment', description: 'Bill payments (airtime, data, electricity, cable TV, betting, internet)' },
       { name: 'Health', description: 'Health check endpoints' },
     ],
   },

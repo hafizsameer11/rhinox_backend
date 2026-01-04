@@ -56,23 +56,38 @@ export class P2PService {
       throw new Error('Min order cannot be greater than volume');
     }
 
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    // Parse payment method IDs to integers
+    const parsedPaymentMethodIds = data.paymentMethodIds.map(id => {
+      const parsed = typeof id === 'string' ? parseInt(id, 10) : id;
+      if (isNaN(parsed) || parsed <= 0) {
+        throw new Error(`Invalid payment method ID: ${id}`);
+      }
+      return parsed;
+    });
+
     // Validate payment methods belong to user
     const userPaymentMethods = await prisma.userPaymentMethod.findMany({
       where: {
-        userId,
-        id: { in: data.paymentMethodIds },
+        userId: parsedUserId,
+        id: { in: parsedPaymentMethodIds },
         isActive: true,
       },
     });
 
-    if (userPaymentMethods.length !== data.paymentMethodIds.length) {
+    if (userPaymentMethods.length !== parsedPaymentMethodIds.length) {
       throw new Error('One or more payment methods are invalid or not found');
     }
 
     // Create buy ad
     const ad = await prisma.p2PAd.create({
       data: {
-        userId,
+        userId: parsedUserId,
         type: 'buy',
         cryptoCurrency: data.cryptoCurrency,
         fiatCurrency: data.fiatCurrency,
@@ -81,7 +96,7 @@ export class P2PService {
         minOrder: minOrder.toNumber(),
         maxOrder: maxOrder.toNumber(),
         autoAccept: data.autoAccept || false,
-        paymentMethodIds: data.paymentMethodIds as any,
+        paymentMethodIds: parsedPaymentMethodIds as any,
         countryCode: data.countryCode,
         description: data.description,
         status: 'available',
@@ -99,7 +114,7 @@ export class P2PService {
       minOrder: ad.minOrder.toString(),
       maxOrder: ad.maxOrder.toString(),
       autoAccept: ad.autoAccept,
-      paymentMethodIds: ad.paymentMethodIds as string[],
+      paymentMethodIds: (ad.paymentMethodIds as number[]).map(id => id.toString()),
       status: ad.status,
       isOnline: ad.isOnline,
       ordersReceived: ad.ordersReceived,
@@ -162,23 +177,38 @@ export class P2PService {
       throw new Error('Min order cannot be greater than volume');
     }
 
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    // Parse payment method IDs to integers
+    const parsedPaymentMethodIds = data.paymentMethodIds.map(id => {
+      const parsed = typeof id === 'string' ? parseInt(id, 10) : id;
+      if (isNaN(parsed) || parsed <= 0) {
+        throw new Error(`Invalid payment method ID: ${id}`);
+      }
+      return parsed;
+    });
+
     // Validate payment methods belong to user
     const userPaymentMethods = await prisma.userPaymentMethod.findMany({
       where: {
-        userId,
-        id: { in: data.paymentMethodIds },
+        userId: parsedUserId,
+        id: { in: parsedPaymentMethodIds },
         isActive: true,
       },
     });
 
-    if (userPaymentMethods.length !== data.paymentMethodIds.length) {
+    if (userPaymentMethods.length !== parsedPaymentMethodIds.length) {
       throw new Error('One or more payment methods are invalid or not found');
     }
 
     // Create sell ad
     const ad = await prisma.p2PAd.create({
       data: {
-        userId,
+        userId: parsedUserId,
         type: 'sell',
         cryptoCurrency: data.cryptoCurrency,
         fiatCurrency: data.fiatCurrency,
@@ -187,7 +217,7 @@ export class P2PService {
         minOrder: minOrder.toNumber(),
         maxOrder: maxOrder.toNumber(),
         autoAccept: data.autoAccept || false,
-        paymentMethodIds: data.paymentMethodIds as any,
+        paymentMethodIds: parsedPaymentMethodIds as any,
         countryCode: data.countryCode,
         description: data.description,
         status: 'available',
@@ -205,7 +235,7 @@ export class P2PService {
       minOrder: ad.minOrder.toString(),
       maxOrder: ad.maxOrder.toString(),
       autoAccept: ad.autoAccept,
-      paymentMethodIds: ad.paymentMethodIds as string[],
+      paymentMethodIds: (ad.paymentMethodIds as number[]).map(id => id.toString()),
       status: ad.status,
       isOnline: ad.isOnline,
       ordersReceived: ad.ordersReceived,
@@ -256,7 +286,7 @@ export class P2PService {
       minOrder: ad.minOrder.toString(),
       maxOrder: ad.maxOrder.toString(),
       autoAccept: ad.autoAccept,
-      paymentMethodIds: ad.paymentMethodIds as string[],
+      paymentMethodIds: (ad.paymentMethodIds as number[]).map(id => id.toString()),
       status: ad.status,
       isOnline: ad.isOnline,
       ordersReceived: ad.ordersReceived,
@@ -294,7 +324,7 @@ export class P2PService {
       minOrder: ad.minOrder.toString(),
       maxOrder: ad.maxOrder.toString(),
       autoAccept: ad.autoAccept,
-      paymentMethodIds: ad.paymentMethodIds as string[],
+      paymentMethodIds: (ad.paymentMethodIds as number[]).map(id => id.toString()),
       status: ad.status,
       isOnline: ad.isOnline,
       ordersReceived: ad.ordersReceived,

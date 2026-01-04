@@ -25,8 +25,8 @@ export class P2PChatController {
    *         name: orderId
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     requestBody:
    *       required: true
@@ -58,10 +58,11 @@ export class P2PChatController {
    *                   type: object
    *                   properties:
    *                     id:
-   *                       type: string
-   *                       format: uuid
+   *                       type: integer
+   *                       example: 1
    *                     orderId:
-   *                       type: string
+   *                       type: integer
+   *                       example: 1
    *                     senderId:
    *                       type: string
    *                     sender:
@@ -152,8 +153,8 @@ export class P2PChatController {
    *         name: orderId
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     responses:
    *       200:
@@ -245,8 +246,8 @@ export class P2PChatController {
    *         name: orderId
    *         required: true
    *         schema:
-   *           type: string
-   *           format: uuid
+   *           type: integer
+   *         example: 1
    *         description: Order ID
    *     responses:
    *       200:

@@ -21,6 +21,7 @@ export class ConversionService {
 
   /**
    * Calculate conversion preview (amount, fee, received amount)
+   * Note: Conversion is only allowed between fiat currencies
    */
   async calculateConversion(
     userId: string,
@@ -31,6 +32,33 @@ export class ConversionService {
     // Validate currencies are different
     if (fromCurrency === toCurrency) {
       throw new Error('Cannot convert to the same currency');
+    }
+
+    // Validate both currencies are fiat (conversion is only for fiat currencies)
+    const fromCurrencyData = await prisma.currency.findUnique({
+      where: { code: fromCurrency.toUpperCase() },
+      select: { type: true },
+    });
+
+    const toCurrencyData = await prisma.currency.findUnique({
+      where: { code: toCurrency.toUpperCase() },
+      select: { type: true },
+    });
+
+    if (!fromCurrencyData) {
+      throw new Error(`Currency ${fromCurrency} not found`);
+    }
+
+    if (!toCurrencyData) {
+      throw new Error(`Currency ${toCurrency} not found`);
+    }
+
+    if (fromCurrencyData.type !== 'fiat') {
+      throw new Error(`Conversion is only allowed for fiat currencies. ${fromCurrency} is a ${fromCurrencyData.type} currency.`);
+    }
+
+    if (toCurrencyData.type !== 'fiat') {
+      throw new Error(`Conversion is only allowed for fiat currencies. ${toCurrency} is a ${toCurrencyData.type} currency.`);
     }
 
     // Get or create source wallet
@@ -209,12 +237,18 @@ export class ConversionService {
     conversionReference: string,
     pin: string
   ) {
-    // Find both transactions by conversion reference
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    // Find both transactions by conversion reference in metadata
+    // Using reference pattern matching since Prisma JSON queries can be tricky
     const transactions = await prisma.transaction.findMany({
       where: {
-        metadata: {
-          path: ['conversionReference'],
-          equals: conversionReference,
+        reference: {
+          startsWith: conversionReference,
         },
       },
       include: {
@@ -239,7 +273,7 @@ export class ConversionService {
     }
 
     // Verify user owns both wallets
-    if (debitTx.wallet.userId !== userId || creditTx.wallet.userId !== userId) {
+    if (debitTx.wallet.userId !== parsedUserId || creditTx.wallet.userId !== parsedUserId) {
       throw new Error('Unauthorized access to conversion');
     }
 
@@ -368,11 +402,18 @@ export class ConversionService {
    * Get conversion receipt
    */
   async getConversionReceipt(userId: string, conversionReference: string) {
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    // Find both transactions by conversion reference
+    // Using reference pattern matching since Prisma JSON queries can be tricky
     const transactions = await prisma.transaction.findMany({
       where: {
-        metadata: {
-          path: ['conversionReference'],
-          equals: conversionReference,
+        reference: {
+          startsWith: conversionReference,
         },
       },
       include: {
@@ -397,7 +438,7 @@ export class ConversionService {
     }
 
     // Verify user owns both wallets
-    if (debitTx.wallet.userId !== userId || creditTx.wallet.userId !== userId) {
+    if (debitTx.wallet.userId !== parsedUserId || creditTx.wallet.userId !== parsedUserId) {
       throw new Error('Unauthorized access to conversion');
     }
 

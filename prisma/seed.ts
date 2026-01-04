@@ -653,6 +653,241 @@ async function main() {
   }
   console.log(`✅ Seeded ${exchangeRates.length} exchange rates`);
 
+  // ============================================
+  // BILL PAYMENT SEEDING
+  // ============================================
+  console.log('💳 Seeding bill payment categories...');
+  const billCategories = [
+    { code: 'airtime', name: 'Airtime', description: 'Mobile airtime recharge' },
+    { code: 'data', name: 'Data', description: 'Mobile data plans and bundles' },
+    { code: 'electricity', name: 'Electricity', description: 'Electricity bill payments' },
+    { code: 'cable_tv', name: 'Cable TV', description: 'Cable TV and streaming subscriptions' },
+    { code: 'betting', name: 'Betting', description: 'Sports betting platform funding' },
+    { code: 'internet', name: 'Internet Subscription', description: 'Internet router subscriptions' },
+  ];
+
+  const categoryMap: { [key: string]: number } = {};
+  for (const cat of billCategories) {
+    let category = await prisma.billPaymentCategory.findUnique({
+      where: { code: cat.code },
+    });
+    
+    if (category) {
+      category = await prisma.billPaymentCategory.update({
+        where: { id: category.id },
+        data: {
+          name: cat.name,
+          description: cat.description,
+          isActive: true,
+        },
+      });
+    } else {
+      category = await prisma.billPaymentCategory.create({
+        data: {
+          code: cat.code,
+          name: cat.name,
+          description: cat.description,
+          isActive: true,
+        },
+      });
+    }
+    categoryMap[cat.code] = category.id;
+  }
+  console.log(`✅ Seeded ${billCategories.length} bill payment categories`);
+
+  console.log('🏢 Seeding bill payment providers...');
+  const billProviders = [
+    // Airtime providers
+    { category: 'airtime', code: 'MTN', name: 'MTN', logoUrl: '/uploads/billpayments/mtn.png' },
+    { category: 'airtime', code: 'GLO', name: 'GLO', logoUrl: '/uploads/billpayments/glo.png' },
+    { category: 'airtime', code: 'AIRTEL', name: 'Airtel', logoUrl: '/uploads/billpayments/airtel.png' },
+    
+    // Data providers (same as airtime)
+    { category: 'data', code: 'MTN', name: 'MTN', logoUrl: '/uploads/billpayments/mtn.png' },
+    { category: 'data', code: 'GLO', name: 'GLO', logoUrl: '/uploads/billpayments/glo.png' },
+    { category: 'data', code: 'AIRTEL', name: 'Airtel', logoUrl: '/uploads/billpayments/airtel.png' },
+    
+    // Electricity providers
+    { category: 'electricity', code: 'IKEJA', name: 'Ikeja Electric', logoUrl: '/uploads/billpayments/ikeja.png', metadata: { meterTypes: ['prepaid', 'postpaid'] } },
+    { category: 'electricity', code: 'IBADAN', name: 'Ibadan Electric', logoUrl: '/uploads/billpayments/ibandan.png', metadata: { meterTypes: ['prepaid', 'postpaid'] } },
+    { category: 'electricity', code: 'ABUJA', name: 'Abuja Electric', logoUrl: '/uploads/billpayments/abuja.png', metadata: { meterTypes: ['prepaid', 'postpaid'] } },
+    
+    // Cable TV providers
+    { category: 'cable_tv', code: 'DSTV', name: 'DSTV', logoUrl: '/uploads/billpayments/dstv.png' },
+    { category: 'cable_tv', code: 'SHOWMAX', name: 'Showmax', logoUrl: '/uploads/billpayments/showmax.png' },
+    { category: 'cable_tv', code: 'GOTV', name: 'GOtv', logoUrl: '/uploads/billpayments/gotv.png' },
+    
+    // Betting providers
+    { category: 'betting', code: '1XBET', name: '1xBet', logoUrl: '/uploads/billpayments/1xbet.png' },
+    { category: 'betting', code: 'BET9JA', name: 'Bet9ja', logoUrl: '/uploads/billpayments/bet9ja.png' },
+    { category: 'betting', code: 'SPORTBET', name: 'SportBet', logoUrl: '/uploads/billpayments/sportbet.png' },
+  ];
+
+  const providerMap: { [key: string]: number } = {};
+  for (const prov of billProviders) {
+    const categoryId = categoryMap[prov.category];
+    let provider = await prisma.billPaymentProvider.findFirst({
+      where: {
+        categoryId,
+        code: prov.code,
+      },
+    });
+    
+    if (provider) {
+      provider = await prisma.billPaymentProvider.update({
+        where: { id: provider.id },
+        data: {
+          name: prov.name,
+          logoUrl: prov.logoUrl,
+          metadata: prov.metadata || null,
+          isActive: true,
+        },
+      });
+    } else {
+      provider = await prisma.billPaymentProvider.create({
+        data: {
+          categoryId,
+          code: prov.code,
+          name: prov.name,
+          logoUrl: prov.logoUrl,
+          countryCode: 'NG',
+          currency: 'NGN',
+          metadata: prov.metadata || null,
+          isActive: true,
+        },
+      });
+    }
+    providerMap[`${prov.category}_${prov.code}`] = provider.id;
+  }
+  console.log(`✅ Seeded ${billProviders.length} bill payment providers`);
+
+  console.log('📦 Seeding data plans...');
+  const dataPlans = [
+    // MTN Data Plans
+    { providerKey: 'data_MTN', code: 'MTN_100MB', name: '100MB', amount: 100, dataAmount: '100MB', validity: '1 day' },
+    { providerKey: 'data_MTN', code: 'MTN_200MB', name: '200MB', amount: 200, dataAmount: '200MB', validity: '3 days' },
+    { providerKey: 'data_MTN', code: 'MTN_500MB', name: '500MB', amount: 500, dataAmount: '500MB', validity: '7 days' },
+    { providerKey: 'data_MTN', code: 'MTN_1GB', name: '1GB', amount: 1000, dataAmount: '1GB', validity: '30 days' },
+    { providerKey: 'data_MTN', code: 'MTN_2GB', name: '2GB', amount: 2000, dataAmount: '2GB', validity: '30 days' },
+    { providerKey: 'data_MTN', code: 'MTN_5GB', name: '5GB', amount: 5000, dataAmount: '5GB', validity: '30 days' },
+    { providerKey: 'data_MTN', code: 'MTN_10GB', name: '10GB', amount: 10000, dataAmount: '10GB', validity: '30 days' },
+    
+    // GLO Data Plans
+    { providerKey: 'data_GLO', code: 'GLO_100MB', name: '100MB', amount: 100, dataAmount: '100MB', validity: '1 day' },
+    { providerKey: 'data_GLO', code: 'GLO_200MB', name: '200MB', amount: 200, dataAmount: '200MB', validity: '3 days' },
+    { providerKey: 'data_GLO', code: 'GLO_500MB', name: '500MB', amount: 500, dataAmount: '500MB', validity: '7 days' },
+    { providerKey: 'data_GLO', code: 'GLO_1GB', name: '1GB', amount: 1000, dataAmount: '1GB', validity: '30 days' },
+    { providerKey: 'data_GLO', code: 'GLO_2GB', name: '2GB', amount: 2000, dataAmount: '2GB', validity: '30 days' },
+    { providerKey: 'data_GLO', code: 'GLO_5GB', name: '5GB', amount: 5000, dataAmount: '5GB', validity: '30 days' },
+    { providerKey: 'data_GLO', code: 'GLO_10GB', name: '10GB', amount: 10000, dataAmount: '10GB', validity: '30 days' },
+    
+    // Airtel Data Plans
+    { providerKey: 'data_AIRTEL', code: 'AIRTEL_100MB', name: '100MB', amount: 100, dataAmount: '100MB', validity: '1 day' },
+    { providerKey: 'data_AIRTEL', code: 'AIRTEL_200MB', name: '200MB', amount: 200, dataAmount: '200MB', validity: '3 days' },
+    { providerKey: 'data_AIRTEL', code: 'AIRTEL_500MB', name: '500MB', amount: 500, dataAmount: '500MB', validity: '7 days' },
+    { providerKey: 'data_AIRTEL', code: 'AIRTEL_1GB', name: '1GB', amount: 1000, dataAmount: '1GB', validity: '30 days' },
+    { providerKey: 'data_AIRTEL', code: 'AIRTEL_2GB', name: '2GB', amount: 2000, dataAmount: '2GB', validity: '30 days' },
+    { providerKey: 'data_AIRTEL', code: 'AIRTEL_5GB', name: '5GB', amount: 5000, dataAmount: '5GB', validity: '30 days' },
+    { providerKey: 'data_AIRTEL', code: 'AIRTEL_10GB', name: '10GB', amount: 10000, dataAmount: '10GB', validity: '30 days' },
+  ];
+
+  for (const plan of dataPlans) {
+    const providerId = providerMap[plan.providerKey];
+    if (providerId) {
+      let existingPlan = await prisma.billPaymentPlan.findFirst({
+        where: {
+          providerId,
+          code: plan.code,
+        },
+      });
+      
+      if (existingPlan) {
+        await prisma.billPaymentPlan.update({
+          where: { id: existingPlan.id },
+          data: {
+            name: plan.name,
+            amount: plan.amount,
+            dataAmount: plan.dataAmount,
+            validity: plan.validity,
+            isActive: true,
+          },
+        });
+      } else {
+        await prisma.billPaymentPlan.create({
+          data: {
+            providerId,
+            code: plan.code,
+            name: plan.name,
+            amount: plan.amount,
+            currency: 'NGN',
+            dataAmount: plan.dataAmount,
+            validity: plan.validity,
+            isActive: true,
+          },
+        });
+      }
+    }
+  }
+  console.log(`✅ Seeded ${dataPlans.length} data plans`);
+
+  console.log('📺 Seeding cable TV plans...');
+  const cablePlans = [
+    // DSTV Plans
+    { providerKey: 'cable_tv_DSTV', code: 'DSTV_COMPACT', name: 'DSTV Compact', amount: 7900, validity: '1 month' },
+    { providerKey: 'cable_tv_DSTV', code: 'DSTV_COMPACT_PLUS', name: 'DSTV Compact Plus', amount: 12900, validity: '1 month' },
+    { providerKey: 'cable_tv_DSTV', code: 'DSTV_PREMIUM', name: 'DSTV Premium', amount: 24500, validity: '1 month' },
+    { providerKey: 'cable_tv_DSTV', code: 'DSTV_ASIAN', name: 'DSTV Asian', amount: 1900, validity: '1 month' },
+    { providerKey: 'cable_tv_DSTV', code: 'DSTV_PIDGIN', name: 'DSTV Pidgin', amount: 2650, validity: '1 month' },
+    
+    // Showmax Plans
+    { providerKey: 'cable_tv_SHOWMAX', code: 'SHOWMAX_MOBILE', name: 'Showmax Mobile', amount: 1200, validity: '1 month' },
+    { providerKey: 'cable_tv_SHOWMAX', code: 'SHOWMAX_STANDARD', name: 'Showmax Standard', amount: 2900, validity: '1 month' },
+    { providerKey: 'cable_tv_SHOWMAX', code: 'SHOWMAX_PRO', name: 'Showmax Pro', amount: 4900, validity: '1 month' },
+    
+    // GOtv Plans
+    { providerKey: 'cable_tv_GOTV', code: 'GOTV_SMALLIE', name: 'GOtv Smallie', amount: 1650, validity: '1 month' },
+    { providerKey: 'cable_tv_GOTV', code: 'GOTV_JINJA', name: 'GOtv Jinja', amount: 2650, validity: '1 month' },
+    { providerKey: 'cable_tv_GOTV', code: 'GOTV_JINJA_PLUS', name: 'GOtv Jinja Plus', amount: 3250, validity: '1 month' },
+    { providerKey: 'cable_tv_GOTV', code: 'GOTV_MAX', name: 'GOtv Max', amount: 5650, validity: '1 month' },
+  ];
+
+  for (const plan of cablePlans) {
+    const providerId = providerMap[plan.providerKey];
+    if (providerId) {
+      let existingPlan = await prisma.billPaymentPlan.findFirst({
+        where: {
+          providerId,
+          code: plan.code,
+        },
+      });
+      
+      if (existingPlan) {
+        await prisma.billPaymentPlan.update({
+          where: { id: existingPlan.id },
+          data: {
+            name: plan.name,
+            amount: plan.amount,
+            validity: plan.validity,
+            isActive: true,
+          },
+        });
+      } else {
+        await prisma.billPaymentPlan.create({
+          data: {
+            providerId,
+            code: plan.code,
+            name: plan.name,
+            amount: plan.amount,
+            currency: 'NGN',
+            validity: plan.validity,
+            isActive: true,
+          },
+        });
+      }
+    }
+  }
+  console.log(`✅ Seeded ${cablePlans.length} cable TV plans`);
+
   console.log('🎉 Database seed completed!');
 }
 

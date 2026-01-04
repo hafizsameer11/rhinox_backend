@@ -8,10 +8,11 @@ import jwt from 'jsonwebtoken';
  *       Refresh tokens should NOT be used for API authentication
  */
 export const verifyToken = async (token: string): Promise<{ id: string | number; userId?: string | number } | null> => {
+  // ONLY verify with JWT_SECRET (access tokens only)
+  // Refresh tokens should NOT be accepted here for security
+  const secret = process.env.ACCESS_TOKEN_SECRET || 'your-secret-key';
+  
   try {
-    // ONLY verify with JWT_SECRET (access tokens only)
-    // Refresh tokens should NOT be accepted here for security
-    const secret = process.env.JWT_SECRET || 'your-secret-key';
     const decoded = jwt.verify(token, secret) as {
       userId?: string | number;
       id?: string | number;
@@ -20,14 +21,38 @@ export const verifyToken = async (token: string): Promise<{ id: string | number;
       exp?: number;
     };
 
+    // Log decoded token in development for debugging
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[verifyToken] Decoded token:', {
+        userId: decoded.userId,
+        id: decoded.id,
+        type: decoded.type,
+        exp: decoded.exp,
+        expDate: decoded.exp ? new Date(decoded.exp * 1000).toISOString() : null,
+        now: new Date().toISOString(),
+      });
+    }
+
     // Reject refresh tokens even if they're signed with JWT_SECRET
     if (decoded.type === 'refresh') {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[verifyToken] Rejected: Token is a refresh token');
+      }
       return null;
     }
 
     // Extract userId - it could be in userId or id field
     const userId = decoded.userId ?? decoded.id;
-    if (!userId && userId !== 0) {
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[verifyToken] Extracted userId:', userId, 'type:', typeof userId);
+    }
+    
+    // Check if userId exists (handle both 0 and other falsy values correctly)
+    if (userId === undefined || userId === null || userId === '') {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[verifyToken] Rejected: No userId found in token');
+      }
       return null;
     }
 
@@ -40,6 +65,13 @@ export const verifyToken = async (token: string): Promise<{ id: string | number;
     // Log the error in development for debugging
     if (process.env.NODE_ENV === 'development') {
       console.error('[verifyToken] Error:', error.message);
+      console.error('[verifyToken] Error name:', error.name);
+      if (error.name === 'TokenExpiredError') {
+        console.error('[verifyToken] Token expired at:', new Date(error.expiredAt).toISOString());
+      }
+      if (error.name === 'JsonWebTokenError') {
+        console.error('[verifyToken] JWT Error - possible secret mismatch');
+      }
       console.error('[verifyToken] Using secret:', secret.substring(0, 10) + '...');
     }
     return null;

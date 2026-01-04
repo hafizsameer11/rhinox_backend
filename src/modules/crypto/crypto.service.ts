@@ -45,6 +45,18 @@ export class CryptoService {
             decimals: true,
           },
         },
+        depositAddresses: {
+          select: {
+            id: true,
+            address: true,
+            currency: true,
+            blockchain: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1, // Get the most recent deposit address
+        },
       },
       orderBy: [
         { blockchain: 'asc' },
@@ -64,6 +76,7 @@ export class CryptoService {
       accountBalance: va.accountBalance,
       availableBalance: va.availableBalance,
       walletCurrency: va.walletCurrency,
+      depositAddresses: va.depositAddresses || [],
     }));
   }
 

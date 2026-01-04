@@ -225,7 +225,7 @@ export class WalletController {
    *         required: true
    *         schema:
    *           type: string
-   *         example: "wallet-uuid"
+   *         example: 1
    *     responses:
    *       200:
    *         description: Wallet balance information
@@ -308,7 +308,7 @@ export class WalletController {
    *         required: true
    *         schema:
    *           type: string
-   *         example: "wallet-uuid"
+   *         example: 1
    *       - in: query
    *         name: limit
    *         schema:

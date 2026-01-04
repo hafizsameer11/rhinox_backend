@@ -113,8 +113,8 @@ export class PaymentSettingsController {
    *         name: id
    *         required: true
    *         schema:
-   *           type: string
-   *         example: "payment-method-uuid"
+   *           type: integer
+   *         example: 1
    *     responses:
    *       200:
    *         description: Payment method details
@@ -271,8 +271,8 @@ export class PaymentSettingsController {
    *               - currency
    *             properties:
    *               providerId:
-   *                 type: string
-   *                 example: "provider-uuid"
+   *                 type: integer
+   *                 example: 9
    *                 description: Mobile money provider ID
    *               phoneNumber:
    *                 type: string
@@ -334,6 +334,120 @@ export class PaymentSettingsController {
       return res.status(400).json({
         success: false,
         message: error.message || 'Failed to add mobile money account',
+      });
+    }
+  }
+
+  /**
+   * @swagger
+   * /api/payment-settings/rhinoxpay-id:
+   *   post:
+   *     summary: Add Rhinox Pay ID as a payment method
+   *     description: |
+   *       Adds Rhinox Pay ID as a payment method. This allows users to receive payments
+   *       directly to their Rhinox Pay wallet. The payment method will use the user's
+   *       email as the identifier.
+   *     tags: [Payment Settings]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - countryCode
+   *               - currency
+   *             properties:
+   *               countryCode:
+   *                 type: string
+   *                 example: "NG"
+   *                 description: Country code for the payment method
+   *               currency:
+   *                 type: string
+   *                 example: "NGN"
+   *                 description: Currency for the payment method
+   *               isDefault:
+   *                 type: boolean
+   *                 example: false
+   *                 description: Set as default payment method
+   *     responses:
+   *       201:
+   *         description: Rhinox Pay ID added successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     id:
+   *                       type: integer
+   *                       example: 1
+   *                     type:
+   *                       type: string
+   *                       example: "rhinoxpay_id"
+   *                     accountName:
+   *                       type: string
+   *                       example: "John Doe"
+   *                     countryCode:
+   *                       type: string
+   *                       example: "NG"
+   *                     currency:
+   *                       type: string
+   *                       example: "NGN"
+   *                     isDefault:
+   *                       type: boolean
+   *                       example: false
+   *                     message:
+   *                       type: string
+   *                       example: "Rhinox Pay ID added successfully"
+   *       400:
+   *         description: Validation error
+   *         $ref: '#/components/schemas/Error'
+   *       401:
+   *         description: Unauthorized
+   *         $ref: '#/components/schemas/Error'
+   */
+  async addRhinoxPayID(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
+      const { countryCode, currency, isDefault } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      if (!countryCode || !currency) {
+        return res.status(400).json({
+          success: false,
+          message: 'Country code and currency are required',
+        });
+      }
+
+      const result = await this.service.addRhinoxPayID(userId, {
+        countryCode,
+        currency,
+        isDefault,
+      });
+
+      return res.status(201).json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to add Rhinox Pay ID',
       });
     }
   }
@@ -582,6 +696,82 @@ export class PaymentSettingsController {
       return res.status(400).json({
         success: false,
         message: error.message || 'Failed to get mobile money providers',
+      });
+    }
+  }
+
+  /**
+   * @swagger
+   * /api/payment-settings/banks:
+   *   get:
+   *     summary: Get available banks
+   *     description: |
+   *       Retrieves a list of available banks filtered by country code and/or currency.
+   *       This endpoint is useful for populating bank selection dropdowns when adding
+   *       bank account payment methods.
+   *     tags: [Payment Settings]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: countryCode
+   *         schema:
+   *           type: string
+   *           example: "NG"
+   *         description: Filter banks by country code (optional)
+   *       - in: query
+   *         name: currency
+   *         schema:
+   *           type: string
+   *           example: "NGN"
+   *         description: Filter banks by currency (optional)
+   *     responses:
+   *       200:
+   *         description: List of available banks
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: array
+   *                   items:
+   *                     type: object
+   *                     properties:
+   *                       name:
+   *                         type: string
+   *                         example: "Access Bank"
+   *                       countryCode:
+   *                         type: string
+   *                         example: "NG"
+   *                       currency:
+   *                         type: string
+   *                         example: "NGN"
+   *       500:
+   *         description: Internal server error
+   *         $ref: '#/components/schemas/Error'
+   */
+  async getBanks(req: Request, res: Response) {
+    try {
+      const { countryCode, currency } = req.query;
+
+      const result = await this.service.getBanks(
+        countryCode as string | undefined,
+        currency as string | undefined
+      );
+
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to get banks',
       });
     }
   }

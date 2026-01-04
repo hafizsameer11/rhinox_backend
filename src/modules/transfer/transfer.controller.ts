@@ -123,9 +123,8 @@ export class TransferController {
    *                   For rhionx_user channel. Recipient's email address (from QR code scan).
    *                   Either recipientEmail or recipientUserId is required for rhionx_user transfers.
    *               recipientUserId:
-   *                 type: string
-   *                 format: uuid
-   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 type: integer
+   *                 example: 2
    *                 description: |
    *                   For rhionx_user channel. Recipient's user ID.
    *                   Either recipientEmail or recipientUserId is required for rhionx_user transfers.
@@ -143,9 +142,8 @@ export class TransferController {
    *                   For bank_account channel. Name of the recipient's bank.
    *                   Required for bank_account transfers.
    *               providerId:
-   *                 type: string
-   *                 format: uuid
-   *                 example: "550e8400-e29b-41d4-a716-446655440000"
+   *                 type: integer
+   *                 example: 9
    *                 description: |
    *                   For mobile_money channel. UUID of the mobile money provider.
    *                   Use GET /api/deposit/mobile-money-providers to get available providers.
@@ -172,8 +170,8 @@ export class TransferController {
    *                   type: object
    *                   properties:
    *                     id:
-   *                       type: string
-   *                       format: uuid
+   *                       type: integer
+   *                       example: 1
    *                       description: Transaction ID. Use this to verify the transfer.
    *                     reference:
    *                       type: string
@@ -336,8 +334,8 @@ export class TransferController {
    *               - pin
    *             properties:
    *               transactionId:
-   *                 type: string
-   *                 example: "transaction-uuid"
+   *                 type: integer
+   *                 example: 1
    *               emailCode:
    *                 type: string
    *                 pattern: '^\d{5}$'
@@ -418,8 +416,8 @@ export class TransferController {
    *         name: transactionId
    *         required: true
    *         schema:
-   *           type: string
-   *         example: "transaction-uuid"
+   *           type: integer
+   *         example: 1
    *     responses:
    *       200:
    *         description: Transfer receipt

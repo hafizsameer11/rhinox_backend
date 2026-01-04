@@ -202,5 +202,30 @@ export class ExchangeService {
       data: { isActive: false },
     });
   }
+
+  /**
+   * Get all currencies (fiat only)
+   */
+  async getCurrencies() {
+    const currencies = await prisma.currency.findMany({
+      where: {
+        type: 'fiat', // Only return fiat currencies
+        isActive: true,
+      },
+      orderBy: {
+        code: 'asc',
+      },
+    });
+
+    return currencies.map(currency => ({
+      id: currency.id,
+      code: currency.code,
+      name: currency.name,
+      symbol: currency.symbol,
+      type: currency.type,
+      flag: currency.flag ? `/uploads/flags/${currency.flag}` : null,
+      isActive: currency.isActive,
+    }));
+  }
 }
 

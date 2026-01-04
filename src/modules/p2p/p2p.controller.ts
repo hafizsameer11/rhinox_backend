@@ -92,12 +92,13 @@ export class P2PController {
    *                 type: array
    *                 minItems: 1
    *                 items:
-   *                   type: string
-   *                   format: uuid
-   *                 example: ["550e8400-e29b-41d4-a716-446655440000", "660e8400-e29b-41d4-a716-446655440001"]
+   *                   type: integer
+   *                 example: [1, 2]
    *                 description: |
-   *                   Array of payment method UUIDs that you accept for this ad.
+   *                   Array of payment method IDs that you accept for this ad.
    *                   Payment methods must be added to your account first via Payment Settings.
+   *                   Can include bank accounts, mobile money accounts, or Rhinox Pay ID.
+   *                   To add Rhinox Pay ID, use POST /api/payment-settings/rhinoxpay-id.
    *                   At least one payment method is required.
    *                   Examples: bank account IDs, mobile money account IDs.
    *               countryCode:
@@ -128,8 +129,8 @@ export class P2PController {
    *                   type: object
    *                   properties:
    *                     id:
-   *                       type: string
-   *                       format: uuid
+   *                       type: integer
+   *                       example: 1
    *                       description: Ad ID. Use this to update or manage the ad.
    *                     type:
    *                       type: string
@@ -160,7 +161,8 @@ export class P2PController {
    *                     paymentMethodIds:
    *                       type: array
    *                       items:
-   *                         type: string
+   *                         type: integer
+   *                       example: [1, 2]
    *                     status:
    *                       type: string
    *                       enum: [available]
@@ -299,7 +301,7 @@ export class P2PController {
    *                 type: array
    *                 items:
    *                   type: string
-   *                 example: ["payment-method-uuid-1"]
+   *                 example: [1, 2]
    *               countryCode:
    *                 type: string
    *                 example: "NG"
