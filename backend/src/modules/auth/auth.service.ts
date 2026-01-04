@@ -640,9 +640,10 @@ export class AuthService {
   }
 
   /**
-   * Reset password with OTP
+   * Verify password reset OTP
+   * Validates the OTP code sent to user's email
    */
-  async resetPassword(email: string, otp: string, newPassword: string) {
+  async verifyPasswordResetOTP(email: string, otp: string) {
     // Find user
     const user = await prisma.user.findUnique({
       where: { email },
@@ -671,6 +672,49 @@ export class AuthService {
 
     if (!otpRecord) {
       throw new Error('Invalid or expired OTP');
+    }
+
+    // Return success without marking OTP as used yet
+    // OTP will be marked as used when password is actually reset
+    return {
+      verified: true,
+      message: 'OTP verified successfully. You can now reset your password.',
+    };
+  }
+
+  /**
+   * Reset password with verified OTP
+   * This should be called after OTP verification
+   */
+  async resetPassword(email: string, otp: string, newPassword: string) {
+    // Find user
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new Error('Invalid email or OTP');
+    }
+
+    // Validate OTP again (security check)
+    const otpRecord = await prisma.oTP.findFirst({
+      where: {
+        userId: user.id,
+        email: user.email,
+        code: otp,
+        type: 'password_reset',
+        isUsed: false,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    if (!otpRecord) {
+      throw new Error('Invalid or expired OTP. Please request a new password reset.');
     }
 
     // Validate new password

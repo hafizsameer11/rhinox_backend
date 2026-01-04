@@ -1076,11 +1076,96 @@ export class AuthController {
 
   /**
    * @swagger
+   * /api/auth/verify-password-reset-otp:
+   *   post:
+   *     summary: Verify password reset OTP
+   *     description: |
+   *       Verifies the OTP code sent to the user's email for password reset.
+   *       This is the first step in the password reset process.
+   *       After successful verification, the user can proceed to reset their password.
+   *     tags: [Auth]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - email
+   *               - otp
+   *             properties:
+   *               email:
+   *                 type: string
+   *                 format: email
+   *                 example: "user@example.com"
+   *                 description: User's email address
+   *               otp:
+   *                 type: string
+   *                 pattern: '^\d{5}$'
+   *                 minLength: 5
+   *                 maxLength: 5
+   *                 example: "12345"
+   *                 description: 5-digit OTP code sent to email
+   *     responses:
+   *       200:
+   *         description: OTP verified successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     verified:
+   *                       type: boolean
+   *                       example: true
+   *                     message:
+   *                       type: string
+   *                       example: "OTP verified successfully. You can now reset your password."
+   *       400:
+   *         description: |
+   *           Validation error. Common errors:
+   *           - "Invalid email or OTP"
+   *           - "Invalid or expired OTP"
+   *         $ref: '#/components/schemas/Error'
+   */
+  async verifyPasswordResetOTP(req: Request, res: Response) {
+    try {
+      const { email, otp } = req.body;
+
+      if (!email || !otp) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email and OTP are required',
+        });
+      }
+
+      const result = await this.service.verifyPasswordResetOTP(email, otp);
+
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to verify OTP',
+      });
+    }
+  }
+
+  /**
+   * @swagger
    * /api/auth/reset-password:
    *   post:
-   *     summary: Reset password with OTP
+   *     summary: Reset password with verified OTP
    *     description: |
-   *       Resets the user's password using the OTP code sent to their email.
+   *       Resets the user's password using the verified OTP code.
+   *       This endpoint should be called after verifying the OTP.
    *       After successful password reset, all existing sessions will be invalidated
    *       and the user will need to login again with the new password.
    *     tags: [Auth]
@@ -1106,7 +1191,7 @@ export class AuthController {
    *                 minLength: 5
    *                 maxLength: 5
    *                 example: "12345"
-   *                 description: 5-digit OTP code sent to email
+   *                 description: 5-digit OTP code that was verified in the previous step
    *               newPassword:
    *                 type: string
    *                 format: password
@@ -1134,7 +1219,7 @@ export class AuthController {
    *         description: |
    *           Validation error. Common errors:
    *           - "Invalid email or OTP"
-   *           - "Invalid or expired OTP"
+   *           - "Invalid or expired OTP. Please request a new password reset."
    *           - "Password must be at least 8 characters long"
    *         $ref: '#/components/schemas/Error'
    */

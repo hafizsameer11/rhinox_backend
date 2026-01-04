@@ -38,6 +38,7 @@ export class AuthModule implements IModule {
     
     // Password reset (public, no auth required)
     this.router.post('/forgot-password', this.controller.forgotPassword.bind(this.controller));
+    this.router.post('/verify-password-reset-otp', this.controller.verifyPasswordResetOTP.bind(this.controller));
     this.router.post('/reset-password', this.controller.resetPassword.bind(this.controller));
     
     // PIN management (requires authentication)
