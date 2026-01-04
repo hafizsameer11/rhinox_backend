@@ -5,6 +5,8 @@ import prisma from '../../core/config/database.js';
 import { WalletService } from '../wallet/wallet.service.js';
 import { KYCService } from '../kyc/kyc.service.js';
 import { generateOTP, sendOTPEmail } from '../../core/utils/email.service.js';
+import { PaymentSettingsService } from '../payment-settings/payment-settings.service.js';
+import { decryptPrivateKey } from '../../core/utils/encryption.js';
 
 /**
  * Transfer Service
@@ -13,10 +15,12 @@ import { generateOTP, sendOTPEmail } from '../../core/utils/email.service.js';
 export class TransferService {
   private walletService: WalletService;
   private kycService: KYCService;
+  private paymentSettingsService: PaymentSettingsService;
 
   constructor() {
     this.walletService = new WalletService();
     this.kycService = new KYCService();
+    this.paymentSettingsService = new PaymentSettingsService();
   }
 
   /**
@@ -170,8 +174,9 @@ export class TransferService {
       channel: 'rhionx_user' | 'bank_account' | 'mobile_money';
       recipientUserId?: string; // For RhionX user transfers (legacy support)
       recipientEmail?: string; // For RhionX user transfers (from QR scan)
-      accountNumber?: string; // For bank account transfers
-      bankName?: string; // For bank account transfers
+      paymentMethodId?: number; // For bank_account withdrawals - ID from payment settings
+      accountNumber?: string; // For bank account transfers (legacy - use paymentMethodId instead)
+      bankName?: string; // For bank account transfers (legacy - use paymentMethodId instead)
       providerId?: string; // For mobile money transfers
       phoneNumber?: string; // For mobile money transfers
     }
@@ -216,10 +221,39 @@ export class TransferService {
         throw new Error('You cannot transfer funds to yourself');
       }
     } else if (data.channel === 'bank_account') {
-      if (!data.accountNumber || !data.bankName) {
-        throw new Error('Account number and bank name are required for bank transfers');
+      // For withdrawals, use payment method from payment settings
+      if (data.paymentMethodId) {
+        const paymentMethod = await this.paymentSettingsService.getPaymentMethod(userId, data.paymentMethodId.toString());
+        if (paymentMethod.type !== 'bank_account') {
+          throw new Error('Payment method must be a bank account');
+        }
+        // Get decrypted account number for validation
+        const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+        const fullPaymentMethod = await prisma.userPaymentMethod.findFirst({
+          where: {
+            id: data.paymentMethodId,
+            userId: parsedUserId,
+            type: 'bank_account',
+            isActive: true,
+          },
+        });
+        if (!fullPaymentMethod || !fullPaymentMethod.accountNumber) {
+          throw new Error('Payment method not found or invalid');
+        }
+        const decryptedAccountNumber = decryptPrivateKey(fullPaymentMethod.accountNumber);
+        recipientInfo = {
+          accountNumber: decryptedAccountNumber,
+          bankName: paymentMethod.bankName || '',
+          accountName: paymentMethod.accountName || '',
+          countryCode: paymentMethod.countryCode,
+          paymentMethodId: data.paymentMethodId,
+        };
+      } else if (data.accountNumber && data.bankName) {
+        // Legacy support - direct account number and bank name
+        recipientInfo = await this.validateBankAccount(data.accountNumber, data.bankName, data.countryCode);
+      } else {
+        throw new Error('Payment method ID is required for bank account withdrawals. Use payment method from payment settings.');
       }
-      recipientInfo = await this.validateBankAccount(data.accountNumber, data.bankName, data.countryCode);
     } else if (data.channel === 'mobile_money') {
       if (!data.providerId || !data.phoneNumber) {
         throw new Error('Provider ID and phone number are required for mobile money transfers');
@@ -245,11 +279,14 @@ export class TransferService {
     // Generate unique reference
     const reference = this.generateReference();
 
+    // Determine transaction type: 'withdrawal' for bank_account, 'transfer' for others
+    const transactionType = data.channel === 'bank_account' ? 'withdrawal' : 'transfer';
+
     // Create pending transaction
     const transaction = await prisma.transaction.create({
       data: {
         walletId: sourceWallet.id,
-        type: 'transfer',
+        type: transactionType,
         status: 'pending',
         amount: amountDecimal.toNumber(),
         currency: data.currency,
@@ -262,9 +299,10 @@ export class TransferService {
         metadata: {
           recipientUserId: recipientInfo.userId || data.recipientUserId, // Store validated userId
           recipientEmail: data.recipientEmail, // Store original email if provided
-          accountNumber: data.accountNumber, // For bank transfers
-          bankName: data.bankName, // For bank transfers
-          accountName: recipientInfo.accountName, // For bank transfers (from validation)
+          paymentMethodId: recipientInfo.paymentMethodId || data.paymentMethodId, // For bank withdrawals
+          accountNumber: recipientInfo.accountNumber || data.accountNumber, // For bank transfers
+          bankName: recipientInfo.bankName || data.bankName, // For bank transfers
+          accountName: recipientInfo.accountName, // For bank transfers (from validation/payment method)
           phoneNumber: data.phoneNumber, // For mobile money
           providerId: data.providerId, // For mobile money
           recipientInfo, // Full recipient information
@@ -345,7 +383,7 @@ export class TransferService {
       throw new Error(`Transaction is already ${transaction.status}`);
     }
 
-    if (transaction.type !== 'transfer') {
+    if (transaction.type !== 'transfer' && transaction.type !== 'withdrawal') {
       throw new Error('Invalid transaction type');
     }
 
@@ -541,7 +579,7 @@ export class TransferService {
       throw new Error('Unauthorized access to transaction');
     }
 
-    if (transaction.type !== 'transfer') {
+    if (transaction.type !== 'transfer' && transaction.type !== 'withdrawal') {
       throw new Error('Invalid transaction type');
     }
 

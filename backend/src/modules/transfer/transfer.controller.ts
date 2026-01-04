@@ -109,11 +109,11 @@ export class TransferController {
    *               channel:
    *                 type: string
    *                 enum: [rhionx_user, bank_account, mobile_money]
-   *                 example: "rhionx_user"
+   *                 example: "bank_account"
    *                 description: |
    *                   Transfer channel type:
    *                   - rhionx_user: Transfer to another RhionX user (requires recipientEmail or recipientUserId)
-   *                   - bank_account: Transfer to external bank account (requires accountNumber and bankName)
+   *                   - bank_account: Withdrawal to external bank account (requires paymentMethodId from payment settings)
    *                   - mobile_money: Transfer via mobile money (requires providerId and phoneNumber)
    *               recipientEmail:
    *                 type: string
@@ -128,19 +128,26 @@ export class TransferController {
    *                 description: |
    *                   For rhionx_user channel. Recipient's user ID.
    *                   Either recipientEmail or recipientUserId is required for rhionx_user transfers.
+   *               paymentMethodId:
+   *                 type: integer
+   *                 example: 1
+   *                 description: |
+   *                   For bank_account channel (withdrawals). ID of the bank account from payment settings.
+   *                   Use GET /api/payment-settings?type=bank_account to get user's saved bank accounts.
+   *                   Required for bank_account withdrawals. The bank account must be saved in payment settings first.
    *               accountNumber:
    *                 type: string
    *                 minLength: 8
    *                 example: "1234567890"
    *                 description: |
-   *                   For bank_account channel. Recipient's bank account number. Must be at least 8 characters.
-   *                   Required for bank_account transfers.
+   *                   For bank_account channel (legacy). Recipient's bank account number. 
+   *                   Use paymentMethodId instead. This field is deprecated.
    *               bankName:
    *                 type: string
    *                 example: "Access Bank"
    *                 description: |
-   *                   For bank_account channel. Name of the recipient's bank.
-   *                   Required for bank_account transfers.
+   *                   For bank_account channel (legacy). Name of the recipient's bank.
+   *                   Use paymentMethodId instead. This field is deprecated.
    *               providerId:
    *                 type: integer
    *                 example: 9
@@ -239,8 +246,9 @@ export class TransferController {
         channel,
         recipientUserId,
         recipientEmail, // For RhionX user transfers (from QR scan)
-        accountNumber,
-        bankName,
+        paymentMethodId, // For bank_account withdrawals
+        accountNumber, // Legacy
+        bankName, // Legacy
         providerId,
         phoneNumber,
       } = req.body;
@@ -274,10 +282,10 @@ export class TransferController {
         });
       }
 
-      if (channel === 'bank_account' && (!accountNumber || !bankName)) {
+      if (channel === 'bank_account' && !paymentMethodId && (!accountNumber || !bankName)) {
         return res.status(400).json({
           success: false,
-          message: 'Account number and bank name are required for bank transfers',
+          message: 'Payment method ID is required for bank account withdrawals. Use payment method from payment settings (GET /api/payment-settings?type=bank_account)',
         });
       }
 
@@ -295,6 +303,7 @@ export class TransferController {
         channel,
         recipientUserId,
         recipientEmail,
+        paymentMethodId,
         accountNumber,
         bankName,
         providerId,

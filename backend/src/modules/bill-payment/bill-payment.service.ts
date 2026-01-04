@@ -220,7 +220,7 @@ export class BillPaymentService {
   }
 
   /**
-   * Initiate bill payment (returns summary, does not create transaction)
+   * Initiate bill payment (creates pending transaction, returns transaction ID)
    */
   async initiateBillPayment(
     userId: string | number,
@@ -374,136 +374,89 @@ export class BillPaymentService {
   }
 
   /**
-   * Confirm bill payment (creates transaction)
+   * Confirm bill payment (completes pending transaction)
    */
   async confirmBillPayment(
     userId: string | number,
-    data: {
-      categoryCode: string;
-      providerId: number;
-      currency: string;
-      amount: string;
-      accountNumber: string;
-      accountType?: string;
-      planId?: number;
-      beneficiaryId?: number;
-      pin: string;
-    }
+    transactionId: string | number,
+    pin: string
   ) {
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const txIdNum = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
+
     if (isNaN(userIdNum) || userIdNum <= 0) {
       throw new Error(`Invalid userId: ${userId}`);
     }
-
-    // Verify PIN
-    const user = await prisma.user.findUnique({
-      where: { id: userIdNum },
-    });
-
-    if (!user || !user.pinHash) {
-      throw new Error('User not found or PIN not set');
+    if (isNaN(txIdNum) || txIdNum <= 0) {
+      throw new Error(`Invalid transactionId: ${transactionId}`);
     }
 
-    const isPINValid = await bcrypt.compare(data.pin, user.pinHash);
+    // Get transaction
+    const transaction = await prisma.transaction.findUnique({
+      where: { id: txIdNum },
+      include: {
+        wallet: {
+          include: {
+            user: true,
+            currencyRef: true,
+          },
+        },
+      },
+    });
+
+    if (!transaction) {
+      throw new Error('Transaction not found');
+    }
+
+    if (transaction.wallet.userId !== userIdNum) {
+      throw new Error('Unauthorized access to transaction');
+    }
+
+    if (transaction.type !== 'bill_payment') {
+      throw new Error('Transaction is not a bill payment');
+    }
+
+    if (transaction.status !== 'pending') {
+      throw new Error(`Transaction is already ${transaction.status}`);
+    }
+
+    // Verify PIN
+    if (!transaction.wallet.user.pinHash) {
+      throw new Error('PIN not set. Please setup your PIN first.');
+    }
+
+    const isPINValid = await bcrypt.compare(pin, transaction.wallet.user.pinHash);
     if (!isPINValid) {
       throw new Error('Invalid PIN');
     }
 
-    // Get wallet
-    const wallet = await this.walletService.getWalletByCurrency(userIdNum, data.currency);
-    if (!wallet) {
-      throw new Error(`Wallet for ${data.currency} not found`);
-    }
-
-    // Get category and provider
-    const category = await prisma.billPaymentCategory.findUnique({
-      where: { code: data.categoryCode },
-    });
-
-    if (!category) {
-      throw new Error('Category not found');
-    }
-
-    const provider = await prisma.billPaymentProvider.findUnique({
-      where: { id: data.providerId },
-    });
-
-    if (!provider || provider.categoryId !== category.id) {
-      throw new Error('Provider not found');
-    }
-
-    // Get plan if provided
-    let plan = null;
-    let amount = new Decimal(data.amount);
-    if (data.planId) {
-      plan = await prisma.billPaymentPlan.findUnique({
-        where: { id: data.planId },
-      });
-
-      if (!plan || plan.providerId !== data.providerId) {
-        throw new Error('Plan not found');
-      }
-      amount = new Decimal(plan.amount);
-    }
-
-    // Calculate fee and total
-    const fee = this.calculateFee(amount.toNumber(), data.currency);
+    const metadata = transaction.metadata as any;
+    const amount = new Decimal(transaction.amount);
+    const fee = new Decimal(transaction.fee);
     const totalAmount = amount.plus(fee);
 
     // Check balance
-    const walletBalance = new Decimal(wallet.balance);
+    const walletBalance = new Decimal(transaction.wallet.balance);
     if (walletBalance.lessThan(totalAmount)) {
       throw new Error('Insufficient balance');
     }
 
-    // Validate account
-    let accountName = null;
+    // Generate recharge token for prepaid electricity
     let rechargeToken = null;
-
-    if (category.code === 'electricity' && data.accountType) {
-      const validation = await this.validateMeterNumber(data.providerId, data.accountNumber, data.accountType as 'prepaid' | 'postpaid');
-      accountName = validation.accountName;
-      
-      // For prepaid, generate a recharge token
-      if (data.accountType === 'prepaid') {
-        rechargeToken = Math.random().toString(36).substring(2, 15).toUpperCase();
-      }
-    } else if (category.code === 'betting') {
-      await this.validateAccountNumber(data.providerId, data.accountNumber);
+    if (metadata?.categoryCode === 'electricity' && metadata?.accountType === 'prepaid') {
+      rechargeToken = Math.random().toString(36).substring(2, 15).toUpperCase();
     }
 
-    // Generate reference
-    const reference = this.generateReference();
-
-    // Create transaction
-    const transaction = await prisma.transaction.create({
+    // Update transaction status and metadata
+    const updatedTransaction = await prisma.transaction.update({
+      where: { id: txIdNum },
       data: {
-        walletId: wallet.id,
-        type: 'bill_payment',
-        status: 'completed', // For demo, mark as completed. In production, this would be 'pending' until provider confirms
-        amount: amount.toNumber(),
-        currency: data.currency,
-        fee: fee,
-        reference,
-        channel: 'bill_payment',
-        description: `${category.name} - ${provider.name} - ${data.accountNumber}`,
-        country: provider.countryCode,
-        metadata: {
-          categoryCode: data.categoryCode,
-          categoryName: category.name,
-          providerId: data.providerId,
-          providerCode: provider.code,
-          providerName: provider.name,
-          accountNumber: data.accountNumber,
-          accountName,
-          accountType: data.accountType,
-          planId: data.planId,
-          planCode: plan?.code,
-          planName: plan?.name,
-          beneficiaryId: data.beneficiaryId,
-          rechargeToken,
-        },
+        status: 'completed',
         completedAt: new Date(),
+        metadata: {
+          ...metadata,
+          rechargeToken: rechargeToken || metadata?.rechargeToken || null,
+        },
       },
       include: {
         wallet: {
@@ -516,7 +469,7 @@ export class BillPaymentService {
 
     // Deduct from wallet
     await prisma.wallet.update({
-      where: { id: wallet.id },
+      where: { id: transaction.walletId },
       data: {
         balance: {
           decrement: totalAmount.toNumber(),
@@ -525,32 +478,33 @@ export class BillPaymentService {
     });
 
     return {
-      id: transaction.id,
-      reference: transaction.reference,
-      status: transaction.status,
+      id: updatedTransaction.id,
+      reference: updatedTransaction.reference,
+      status: updatedTransaction.status,
       amount: amount.toString(),
-      currency: data.currency,
+      currency: transaction.currency,
       fee: fee.toString(),
       totalAmount: totalAmount.toString(),
-      accountNumber: data.accountNumber,
-      accountName,
+      accountNumber: metadata?.accountNumber || null,
+      accountName: metadata?.accountName || null,
       rechargeToken,
       category: {
-        code: data.categoryCode,
-        name: category.name,
+        code: metadata?.categoryCode || null,
+        name: metadata?.categoryName || null,
       },
       provider: {
-        id: provider.id,
-        code: provider.code,
-        name: provider.name,
+        id: metadata?.providerId || null,
+        code: metadata?.providerCode || null,
+        name: metadata?.providerName || null,
       },
-      plan: plan ? {
-        id: plan.id,
-        name: plan.name,
-        dataAmount: plan.dataAmount,
+      plan: metadata?.planId ? {
+        id: metadata.planId,
+        code: metadata.planCode,
+        name: metadata.planName,
+        dataAmount: metadata.planDataAmount,
       } : null,
-      completedAt: transaction.completedAt,
-      createdAt: transaction.createdAt,
+      completedAt: updatedTransaction.completedAt,
+      createdAt: updatedTransaction.createdAt,
     };
   }
 

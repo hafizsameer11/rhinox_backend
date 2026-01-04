@@ -375,6 +375,64 @@ export class AuthService {
   }
 
   /**
+   * Verify password for PIN setup/change
+   */
+  async verifyPasswordForPIN(userId: string, password: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, passwordHash: true },
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Verify password
+    const isValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isValid) {
+      throw new Error('Invalid password');
+    }
+
+    return {
+      verified: true,
+      message: 'Password verified successfully',
+    };
+  }
+
+  /**
+   * Set or update PIN after password verification
+   */
+  async setPINAfterVerification(userId: string, pin: string) {
+    // Validate PIN (must be 5 digits)
+    if (!/^\d{5}$/.test(pin)) {
+      throw new Error('PIN must be exactly 5 digits');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, pinHash: true },
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Hash PIN
+    const pinHash = await bcrypt.hash(pin, 10);
+
+    // Update user PIN (can be setting new or updating existing)
+    await prisma.user.update({
+      where: { id: userId },
+      data: { pinHash },
+    });
+
+    return {
+      message: user.pinHash ? 'PIN updated successfully' : 'PIN setup successfully',
+      hasPin: true,
+    };
+  }
+
+  /**
    * Change PIN
    */
   async changePIN(userId: string, oldPin: string, newPin: string) {
@@ -534,6 +592,115 @@ export class AuthService {
       console.error(`Failed to initialize fiat wallets for user ${userId}:`, error);
       // Don't throw - this is a background operation
     }
+  }
+
+  /**
+   * Request password reset
+   * Sends OTP to user's email for password reset
+   */
+  async requestPasswordReset(email: string) {
+    // Find user
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      // Don't reveal if user exists for security
+      return {
+        message: 'If an account with this email exists, a password reset code has been sent.',
+      };
+    }
+
+    // Check if user is active
+    if (!user.isActive) {
+      throw new Error('Account is deactivated');
+    }
+
+    // Generate OTP
+    const otp = generateOTP();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Save OTP with type 'password_reset'
+    await prisma.oTP.create({
+      data: {
+        userId: user.id,
+        email: user.email,
+        code: otp,
+        type: 'password_reset',
+        expiresAt,
+      },
+    });
+
+    // Send OTP email
+    await sendOTPEmail(user.email, otp, 'password_reset');
+
+    return {
+      message: 'If an account with this email exists, a password reset code has been sent.',
+    };
+  }
+
+  /**
+   * Reset password with OTP
+   */
+  async resetPassword(email: string, otp: string, newPassword: string) {
+    // Find user
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new Error('Invalid email or OTP');
+    }
+
+    // Validate OTP
+    const otpRecord = await prisma.oTP.findFirst({
+      where: {
+        userId: user.id,
+        email: user.email,
+        code: otp,
+        type: 'password_reset',
+        isUsed: false,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    if (!otpRecord) {
+      throw new Error('Invalid or expired OTP');
+    }
+
+    // Validate new password
+    if (!newPassword || newPassword.length < 8) {
+      throw new Error('Password must be at least 8 characters long');
+    }
+
+    // Hash new password
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    // Update user password
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    // Mark OTP as used
+    await prisma.oTP.update({
+      where: { id: otpRecord.id },
+      data: { isUsed: true },
+    });
+
+    // Invalidate all existing sessions (force re-login)
+    await prisma.session.deleteMany({
+      where: { userId: user.id },
+    });
+
+    return {
+      message: 'Password reset successfully. Please login with your new password.',
+    };
   }
 }
 

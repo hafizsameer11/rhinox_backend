@@ -145,6 +145,8 @@ const options: swaggerJsdoc.Options = {
       { name: 'Bank Accounts', description: 'Public bank account information for deposits' },
       { name: 'Transaction History', description: 'Transaction history with chart data and filtering' },
       { name: 'Bill Payment', description: 'Bill payments (airtime, data, electricity, cable TV, betting, internet)' },
+      { name: 'Support Chat', description: 'Support chat conversations between users and support agents' },
+      { name: 'Notifications', description: 'User notifications for transactions, P2P, conversions, etc.' },
       { name: 'Health', description: 'Health check endpoints' },
     ],
   },

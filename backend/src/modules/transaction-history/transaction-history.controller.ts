@@ -734,5 +734,164 @@ export class TransactionHistoryController {
       });
     }
   }
+
+  /**
+   * @swagger
+   * /api/transaction-history/bill-payments:
+   *   get:
+   *     summary: Get bill payment transactions with filters
+   *     tags: [Transaction History]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     description: Returns bill payment transactions (airtime, data, electricity, cable TV, betting, internet) with filtering options
+   *     parameters:
+   *       - in: query
+   *         name: currency
+   *         schema:
+   *           type: string
+   *         description: Filter by currency (e.g., NGN, USD, KES)
+   *       - in: query
+   *         name: status
+   *         schema:
+   *           type: string
+   *           enum: [All, Completed, Pending, Failed]
+   *         description: Filter by transaction status
+   *       - in: query
+   *         name: categoryCode
+   *         schema:
+   *           type: string
+   *           enum: [airtime, data, electricity, cable_tv, betting, internet]
+   *         description: Filter by bill payment category
+   *       - in: query
+   *         name: period
+   *         schema:
+   *           type: string
+   *           enum: [D, W, M, Custom]
+   *           default: M
+   *         description: Time period filter
+   *       - in: query
+   *         name: startDate
+   *         schema:
+   *           type: string
+   *           format: date
+   *         description: Start date for custom period
+   *       - in: query
+   *         name: endDate
+   *         schema:
+   *           type: string
+   *           format: date
+   *         description: End date for custom period
+   *       - in: query
+   *         name: limit
+   *         schema:
+   *           type: integer
+   *           default: 50
+   *         description: Maximum number of transactions to return
+   *       - in: query
+   *         name: offset
+   *         schema:
+   *           type: integer
+   *           default: 0
+   *         description: Number of transactions to skip
+   *     responses:
+   *       200:
+   *         description: Bill payment transactions
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     summary:
+   *                       type: object
+   *                       properties:
+   *                         total:
+   *                           type: string
+   *                         count:
+   *                           type: integer
+   *                     transactions:
+   *                       type: array
+   *                       items:
+   *                         type: object
+   *                         properties:
+   *                           id:
+   *                             type: integer
+   *                           type:
+   *                             type: string
+   *                           normalizedType:
+   *                             type: string
+   *                           status:
+   *                             type: string
+   *                           amount:
+   *                             type: string
+   *                           currency:
+   *                             type: string
+   *                           fee:
+   *                             type: string
+   *                           totalAmount:
+   *                             type: string
+   *                           reference:
+   *                             type: string
+   *                           category:
+   *                             type: object
+   *                           provider:
+   *                             type: object
+   *                           accountNumber:
+   *                             type: string
+   *                           accountName:
+   *                             type: string
+   *                           rechargeToken:
+   *                             type: string
+   *                             nullable: true
+   *       401:
+   *         description: Unauthorized
+   *         $ref: '#/components/schemas/Error'
+   */
+  async getBillPaymentTransactions(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      const currency = req.query.currency as string | undefined;
+      const status = req.query.status as string | undefined;
+      const categoryCode = req.query.categoryCode as string | undefined;
+      const period = (req.query.period as 'D' | 'W' | 'M' | 'Custom') || 'M';
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+      const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
+
+      const data = await this.service.getBillPaymentTransactions(userId, {
+        currency,
+        status,
+        categoryCode,
+        period,
+        startDate,
+        endDate,
+        limit,
+        offset,
+      });
+
+      return res.json({
+        success: true,
+        data,
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to get bill payment transactions',
+      });
+    }
+  }
 }
 

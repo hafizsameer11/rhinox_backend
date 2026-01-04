@@ -31,6 +31,7 @@ export class TransactionHistoryModule implements IModule {
     this.router.get('/deposits', this.controller.getFiatDeposits.bind(this.controller));
     this.router.get('/withdrawals', this.controller.getFiatWithdrawals.bind(this.controller));
     this.router.get('/p2p', this.controller.getFiatP2PTransactions.bind(this.controller));
+    this.router.get('/bill-payments', this.controller.getBillPaymentTransactions.bind(this.controller));
     this.router.get('/:id/details', this.controller.getTransactionDetails.bind(this.controller));
   }
 }

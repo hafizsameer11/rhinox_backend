@@ -830,7 +830,10 @@ export class P2POrderController {
    *                     type: object
    *                     properties:
    *                       id:
-   *                         type: string
+   *                         type: integer
+   *                       chatId:
+   *                         type: integer
+   *                         description: Chat ID (same as order ID) - use this to identify the chat for this order
    *                       status:
    *                         type: string
    *                       userAction:
@@ -875,6 +878,54 @@ export class P2POrderController {
       return res.status(400).json({
         success: false,
         message: error.message || 'Failed to get orders',
+      });
+    }
+  }
+
+  /**
+   * @swagger
+   * /api/p2p/user/profile:
+   *   get:
+   *     summary: "[USER] Get my P2P profile - Orders and statistics"
+   *     description: |
+   *       Get user's P2P profile including:
+   *       - Statistics (total orders, completed, pending, etc.)
+   *       - Recent orders (last 10) with chatId
+   *       - All orders include chatId (same as orderId)
+   *       
+   *       Use this endpoint for "My P2P" or profile pages.
+   *     tags: ["P2P - USER (Browse & Order)"]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     responses:
+   *       200:
+   *         description: User P2P profile with statistics and recent orders
+   *       401:
+   *         description: Unauthorized
+   *         $ref: '#/components/schemas/Error'
+   */
+  async getUserP2PProfile(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      const profile = await this.service.getUserP2PProfile(userId);
+
+      return res.json({
+        success: true,
+        data: profile,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to get P2P profile',
       });
     }
   }
