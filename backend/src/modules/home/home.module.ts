@@ -29,6 +29,7 @@ export class HomeModule implements IModule {
     // Home routes (all require authentication)
     this.router.get('/', this.controller.getUserHome.bind(this.controller));
     this.router.get('/wallets', this.controller.getWalletBalances.bind(this.controller));
+    this.router.get('/transactions', this.controller.getHomeTransactions.bind(this.controller));
   }
 }
 

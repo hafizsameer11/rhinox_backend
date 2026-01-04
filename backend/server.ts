@@ -6,7 +6,6 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import swaggerUi from 'swagger-ui-express';
 import dotenv from 'dotenv';
-import { existsSync } from 'fs';
 import { ModuleLoader } from './src/core/utils/module-loader.js';
 import { AuthModule, WalletModule, KYCModule, HomeModule, CountryModule, CryptoModule, DepositModule, ExchangeModule, ConversionModule, TransferModule, PaymentSettingsModule, P2PModule, P2POrderModule, P2PChatModule, P2PReviewModule, BankAccountModule, TransactionHistoryModule, BillPaymentModule, SupportChatModule, NotificationModule } from './src/modules/index.js';
 import { authMiddleware } from './src/core/middleware/auth.middleware.js';
@@ -33,13 +32,42 @@ app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 // Serve static files from uploads directory
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
 // Handle both development (tsx) and production (compiled) paths
-const uploadsPathDev = path.join(__dirname, './uploads');
-const uploadsPathProd = path.join(__dirname, '../uploads');
-const uploadsPath = existsSync(uploadsPathDev) ? uploadsPathDev : uploadsPathProd;
-app.use('/uploads', express.static(uploadsPath));
+// In development: __dirname = backend/src (if running from src) or backend (if compiled)
+// In production: __dirname = backend/dist (compiled location)
+const uploadsPathDev = path.join(__dirname, '../uploads');
+const uploadsPathProd = path.join(__dirname, './uploads');
+const uploadsPathRoot = path.join(process.cwd(), 'uploads');
+
+// Try multiple paths to find uploads directory
+let uploadsPath = uploadsPathRoot; // Default to project root
+if (existsSync(uploadsPathDev)) {
+  uploadsPath = uploadsPathDev;
+} else if (existsSync(uploadsPathProd)) {
+  uploadsPath = uploadsPathProd;
+} else if (existsSync(uploadsPathRoot)) {
+  uploadsPath = uploadsPathRoot;
+}
+
+console.log(`📁 Serving static files from: ${uploadsPath}`);
+
+app.use('/uploads', express.static(uploadsPath, {
+  setHeaders: (res, filePath) => {
+    // Set proper content type for images
+    if (filePath.endsWith('.png')) {
+      res.setHeader('Content-Type', 'image/png');
+    } else if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
+      res.setHeader('Content-Type', 'image/jpeg');
+    } else if (filePath.endsWith('.svg')) {
+      res.setHeader('Content-Type', 'image/svg+xml');
+    }
+  },
+}));
 
 // ============================================
 // Health Check
