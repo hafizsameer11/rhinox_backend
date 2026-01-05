@@ -1,0 +1,11 @@
+{
+  "name": "rhinox-backend",
+  "version": "1.0.0",
+  "description": "Rhinox Pay Backend API",
+  "type": "module",
+  "scripts": {
+    "generate:postman": "node scripts/generate-postman-collection.js",
+    "generate:postman:file": "node scripts/generate-postman-collection.js --file"
+  }
+}
+

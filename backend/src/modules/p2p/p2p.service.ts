@@ -303,10 +303,22 @@ export class P2PService {
    * Get a single ad by ID
    */
   async getAd(userId: string, adId: string) {
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    // Parse adId to integer
+    const parsedAdId = typeof adId === 'string' ? parseInt(adId, 10) : adId;
+    if (isNaN(parsedAdId) || parsedAdId <= 0) {
+      throw new Error('Invalid ad ID format');
+    }
+
     const ad = await prisma.p2PAd.findFirst({
       where: {
-        id: adId,
-        userId,
+        id: parsedAdId,
+        userId: parsedUserId,
       },
     });
 
@@ -346,10 +358,22 @@ export class P2PService {
     status: 'available' | 'unavailable' | 'paused',
     isOnline?: boolean
   ) {
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    // Parse adId to integer
+    const parsedAdId = typeof adId === 'string' ? parseInt(adId, 10) : adId;
+    if (isNaN(parsedAdId) || parsedAdId <= 0) {
+      throw new Error('Invalid ad ID format');
+    }
+
     const ad = await prisma.p2PAd.findFirst({
       where: {
-        id: adId,
-        userId,
+        id: parsedAdId,
+        userId: parsedUserId,
       },
     });
 
@@ -366,7 +390,7 @@ export class P2PService {
     }
 
     const updated = await prisma.p2PAd.update({
-      where: { id: adId },
+      where: { id: parsedAdId },
       data: updateData,
     });
 
@@ -395,10 +419,22 @@ export class P2PService {
       description?: string;
     }
   ) {
+    // Parse userId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    // Parse adId to integer
+    const parsedAdId = typeof adId === 'string' ? parseInt(adId, 10) : adId;
+    if (isNaN(parsedAdId) || parsedAdId <= 0) {
+      throw new Error('Invalid ad ID format');
+    }
+
     const ad = await prisma.p2PAd.findFirst({
       where: {
-        id: adId,
-        userId,
+        id: parsedAdId,
+        userId: parsedUserId,
       },
     });
 
@@ -463,20 +499,29 @@ export class P2PService {
         throw new Error('At least one payment method is required');
       }
 
+      // Parse payment method IDs to integers
+      const parsedPaymentMethodIds = data.paymentMethodIds.map(id => {
+        const parsed = typeof id === 'string' ? parseInt(id, 10) : id;
+        if (isNaN(parsed) || parsed <= 0) {
+          throw new Error(`Invalid payment method ID: ${id}`);
+        }
+        return parsed;
+      });
+
       // Validate payment methods belong to user
       const userPaymentMethods = await prisma.userPaymentMethod.findMany({
         where: {
-          userId,
-          id: { in: data.paymentMethodIds },
+          userId: parsedUserId,
+          id: { in: parsedPaymentMethodIds },
           isActive: true,
         },
       });
 
-      if (userPaymentMethods.length !== data.paymentMethodIds.length) {
+      if (userPaymentMethods.length !== parsedPaymentMethodIds.length) {
         throw new Error('One or more payment methods are invalid or not found');
       }
 
-      updateData.paymentMethodIds = data.paymentMethodIds as any;
+      updateData.paymentMethodIds = parsedPaymentMethodIds as any;
     }
 
     if (data.countryCode !== undefined) {
@@ -488,7 +533,7 @@ export class P2PService {
     }
 
     const updated = await prisma.p2PAd.update({
-      where: { id: adId },
+      where: { id: parsedAdId },
       data: updateData,
     });
 

@@ -1,0 +1,3385 @@
+{
+  "info": {
+    "_postman_id": "rhinox-pay-api-collection-1767486288044",
+    "name": "Rhinox Pay API",
+    "description": "Complete API documentation for Rhinox Pay - A fintech wallet platform for fiat and crypto payments",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "rhinox-pay"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Get current authenticated user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Login user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"SecurePassword123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Logout user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Invalidates user session and refresh token"
+          },
+          "response": []
+        },
+        {
+          "name": "Mark face verification as successful",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/mark-face-verified",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "mark-face-verified"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh access token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register a new user account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Creates a new user account and sends a 5-digit OTP code to the provided email address for verification.\nAfter registration, the user must verify their email using the OTP code before they can use the platform.\nAuth tokens are returned immediately after registration for convenience.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"phone\": \"+2348012345678\",\n  \"password\": \"SecurePassword123!\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"countryId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"termsAccepted\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resend email verification OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/resend-verification",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "resend-verification"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user-uuid\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Setup 5-digit transaction PIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/setup-pin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "setup-pin"
+              ]
+            },
+            "description": "Sets up a 5-digit PIN for the user's account. This PIN is required for all financial transactions\n(deposits, transfers, conversions, etc.). The PIN is hashed before storage for security.\nCan only be set once. To change an existing PIN, use the change-pin endpoint.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Verify email address with OTP code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/verify-email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "verify-email"
+              ]
+            },
+            "description": "Verifies the user's email address using the 5-digit OTP code sent to their email during registration.\nAfter successful verification, the user's email is marked as verified and crypto wallets are automatically initialized.\nReturns new authentication tokens after verification.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"code\": \"12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Authentication and user management"
+    },
+    {
+      "name": "Bank Accounts",
+      "item": [
+        {
+          "name": "Get all active bank accounts (PUBLIC)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bank-accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bank-accounts"
+              ],
+              "query": [
+                {
+                  "key": "countryCode",
+                  "value": "NG",
+                  "description": "Filter by country code (e.g., NG, KE, GH)",
+                  "disabled": false
+                },
+                {
+                  "key": "currency",
+                  "value": "NGN",
+                  "description": "Filter by currency code (e.g., NGN, KES, GHS)",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Public endpoint to retrieve all active bank accounts for deposits.\nUsers can see bank account details to make deposits.\nNo authentication required.\n"
+          },
+          "response": []
+        }
+      ],
+      "description": "Public bank account information for deposits"
+    },
+    {
+      "name": "Conversion",
+      "item": [
+        {
+          "name": "Calculate conversion preview (amount, fee, received amount)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/conversion/calculate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "conversion",
+                "calculate"
+              ],
+              "query": [
+                {
+                  "key": "fromCurrency",
+                  "value": "NGN",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "toCurrency",
+                  "value": "KES",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "amount",
+                  "value": "200000",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm conversion with PIN verification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/conversion/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "conversion",
+                "confirm"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversionReference\": \"CONVABC123XYZ\",\n  \"pin\": \"12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get conversion receipt",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/conversion/receipt/{conversionReference}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "conversion",
+                "receipt",
+                "{conversionReference}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Initiate currency conversion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/conversion/initiate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "conversion",
+                "initiate"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fromCurrency\": \"NGN\",\n  \"toCurrency\": \"KES\",\n  \"amount\": \"200000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Currency conversion between fiat wallets"
+    },
+    {
+      "name": "Country",
+      "item": [
+        {
+          "name": "Get all countries",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/countries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "countries"
+              ]
+            },
+            "description": "Returns a list of all available countries with their flags"
+          },
+          "response": []
+        },
+        {
+          "name": "Get country by code",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/countries/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "countries",
+                "{code}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ],
+      "description": "Country information and data"
+    },
+    {
+      "name": "Crypto",
+      "item": [
+        {
+          "name": "Get all tokens for a given symbol across different blockchains",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crypto/tokens/{symbol}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crypto",
+                "tokens",
+                "{symbol}"
+              ]
+            },
+            "description": "Returns all token variants for a symbol (e.g., USDT, USDC) across different blockchains. Public endpoint, no authentication required."
+          },
+          "response": []
+        },
+        {
+          "name": "Get all USDT tokens across different blockchains",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crypto/usdt-tokens",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crypto",
+                "usdt-tokens"
+              ]
+            },
+            "description": "Returns all USDT token variants (Ethereum, TRON, BSC, Solana, Polygon, etc.) as a unified list. Public endpoint, no authentication required."
+          },
+          "response": []
+        },
+        {
+          "name": "Get deposit address for a currency and blockchain",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/crypto/deposit-address/{currency}/{blockchain}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crypto",
+                "deposit-address",
+                "{currency}",
+                "{blockchain}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get user's virtual accounts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/crypto/virtual-accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crypto",
+                "virtual-accounts"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Receive Tatum webhook events",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/crypto/webhooks/tatum",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crypto",
+                "webhooks",
+                "tatum"
+              ]
+            },
+            "description": "Processes incoming webhook events from Tatum for deposits. This endpoint is called by Tatum when a deposit is detected.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscriptionType\": \"INCOMING_NATIVE_TX\",\n  \"address\": \"0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb\",\n  \"counterAddress\": \"0x...\",\n  \"amount\": \"100.0\",\n  \"txId\": \"0x...\",\n  \"blockNumber\": 12345,\n  \"contractAddress\": \"0x...\",\n  \"timestamp\": 1234567890\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Cryptocurrency operations and virtual accounts"
+    },
+    {
+      "name": "Deposit",
+      "item": [
+        {
+          "name": "Confirm and complete deposit transaction with PIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deposit/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deposit",
+                "confirm"
+              ]
+            },
+            "description": "Confirms a pending deposit transaction by verifying the user's 5-digit PIN.\nAfter confirmation, the deposit amount (minus fees) is credited to the user's wallet.\nTransaction status is updated to \"completed\" and a success email is sent.\nNote: For bank transfers, this marks the transaction as completed in the system.\nFor mobile money, this confirms the user has completed the mobile money payment.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"pin\": \"12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get bank account details for deposit",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deposit/bank-details",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deposit",
+                "bank-details"
+              ],
+              "query": [
+                {
+                  "key": "countryCode",
+                  "value": "NG",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "currency",
+                  "value": "NGN",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get mobile money providers for a country",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deposit/mobile-money-providers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deposit",
+                "mobile-money-providers"
+              ],
+              "query": [
+                {
+                  "key": "countryCode",
+                  "value": "KE",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "currency",
+                  "value": "KES",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get transaction receipt",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deposit/receipt/{transactionId}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deposit",
+                "receipt",
+                "{transactionId}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Initiate a fiat wallet deposit transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deposit/initiate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deposit",
+                "initiate"
+              ]
+            },
+            "description": "Creates a pending deposit transaction and provides bank account details or mobile money instructions.\nFor bank transfers, returns bank account details to transfer to. For mobile money, returns provider details.\nAn email notification is sent with deposit instructions. User must confirm the deposit with PIN to complete.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"2000000\",\n  \"currency\": \"NGN\",\n  \"countryCode\": \"NG\",\n  \"channel\": \"bank_transfer\",\n  \"providerId\": \"550e8400-e29b-41d4-a716-446655440000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Fiat wallet deposits via bank transfer"
+    },
+    {
+      "name": "Exchange",
+      "item": [
+        {
+          "name": "Convert amount from one currency to another",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/exchange/convert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exchange",
+                "convert"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": 1000000,
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "from",
+                  "value": "NGN",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "to",
+                  "value": "USD",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get all exchange rates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/exchange/rates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exchange",
+                "rates"
+              ],
+              "query": [
+                {
+                  "key": "activeOnly",
+                  "value": true,
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get all exchange rates from a base currency",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/exchange/rates/{baseCurrency}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exchange",
+                "rates",
+                "{baseCurrency}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get exchange rate between two currencies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/exchange/rate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exchange",
+                "rate"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "NGN",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "to",
+                  "value": "USD",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Set or update exchange rate (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exchange/set-rate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exchange",
+                "set-rate"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fromCurrency\": \"NGN\",\n  \"toCurrency\": \"USD\",\n  \"rate\": 0.0012,\n  \"inverseRate\": 833.33\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Currency exchange rates and conversion"
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "API root endpoint",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Health check endpoint",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ],
+      "description": "Health check endpoints"
+    },
+    {
+      "name": "Home",
+      "item": [
+        {
+          "name": "Get all wallet balances",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/home/wallets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "home",
+                "wallets"
+              ]
+            },
+            "description": "Returns list of all active wallets with their balances and currency information"
+          },
+          "response": []
+        },
+        {
+          "name": "Get user home/dashboard data",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/home",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "home"
+              ]
+            },
+            "description": "Returns user information, wallets, balances, and transaction summary"
+          },
+          "response": []
+        }
+      ],
+      "description": "User home/dashboard data"
+    },
+    {
+      "name": "KYC",
+      "item": [
+        {
+          "name": "Admin - Approve user KYC",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/kyc/admin/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "kyc",
+                "admin",
+                "approve"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user-uuid\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Admin - Reject user KYC",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/kyc/admin/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "kyc",
+                "admin",
+                "reject"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user-uuid\",\n  \"reason\": \"ID document unclear\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get user KYC status and information",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/kyc/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "kyc",
+                "status"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Submit face verification result",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/kyc/face-verification",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "kyc",
+                "face-verification"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imageUrl\": \"/uploads/face-verification/face.jpg\",\n  \"isSuccessful\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Submit or update KYC registration information",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/kyc/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "kyc",
+                "submit"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Abdul Malik\",\n  \"lastName\": \"Qmardeen\",\n  \"middleName\": \"Middle\",\n  \"dateOfBirth\": \"1990-01-01\",\n  \"idType\": \"national_id\",\n  \"idNumber\": \"1234567890\",\n  \"idDocumentUrl\": \"/uploads/documents/id.jpg\",\n  \"countryId\": \"country-uuid\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Upload ID document for KYC verification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/kyc/upload-id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "kyc",
+                "upload-id"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentUrl\": \"/uploads/documents/passport.jpg\",\n  \"idType\": \"passport\",\n  \"idNumber\": \"A12345678\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "KYC registration and verification"
+    },
+    {
+      "name": "P2P - PUBLIC",
+      "item": [
+        {
+          "name": "[PUBLIC] Browse P2P ads - Market listing",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/ads/browse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "ads",
+                "browse"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "",
+                  "description": "Filter by user action (what user wants to do).\n- \"buy\": Show ads where user can BUY crypto (vendor SELL ads)\n- \"sell\": Show ads where user can SELL crypto (vendor BUY ads)\n",
+                  "disabled": false
+                },
+                {
+                  "key": "cryptoCurrency",
+                  "value": "USDT",
+                  "description": "Filter by cryptocurrency symbol (e.g., USDT, BTC, ETH).",
+                  "disabled": false
+                },
+                {
+                  "key": "fiatCurrency",
+                  "value": "NGN",
+                  "description": "Filter by fiat currency code (e.g., NGN, USD, KES).",
+                  "disabled": false
+                },
+                {
+                  "key": "countryCode",
+                  "value": "NG",
+                  "description": "Filter by ISO country code (2 letters, e.g., NG, KE, GH).",
+                  "disabled": false
+                },
+                {
+                  "key": "minPrice",
+                  "value": "1500",
+                  "description": "Minimum price per unit of crypto in fiat currency.",
+                  "disabled": false
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "2000",
+                  "description": "Maximum price per unit of crypto in fiat currency.",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "Maximum number of ads to return.",
+                  "disabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "description": "Number of ads to skip for pagination.",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "**UI Flow: P2P Market → Browse Ads**\n\nGet a list of all available P2P advertisements. This endpoint is public and does not require authentication.\nUsers can filter ads by type (buy/sell), cryptocurrency, fiat currency, country, and price range.\n\n**Important - API Visibility:**\n- When user filters by `type=buy`: Shows vendor SELL ads (user can buy from vendor)\n- When user filters by `type=sell`: Shows vendor BUY ads (user can sell to vendor)\n- Response includes `userAction` field showing what action user can take (buy/sell)\n\n**Response includes:**\n- `type`: Original ad type (for internal use)\n- `userAction`: What user sees (buy/sell) - use this for UI labels\n- Vendor information, prices, limits, payment methods\n\nResults are paginated and sorted by creation date (newest first).\n"
+          },
+          "response": []
+        }
+      ],
+      "description": "PUBLIC: Browse P2P ads without authentication. Routes: /api/p2p/ads/browse, /api/p2p/ads/:id"
+    },
+    {
+      "name": "P2P - USER (Browse & Order)",
+      "item": [
+        {
+          "name": "[BUYER OR VENDOR] Get order details - Full order information",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{id}"
+              ]
+            },
+            "description": "Get detailed information about a specific order. Includes:\n- Order details (amounts, status, timestamps)\n- Chat messages between buyer and vendor\n- Payment method information\n- Reviews (if order completed)\n- Role indicators (`isUserBuyer`, `isUserSeller`)\n\n**Who can view:**\n- Buyer (order creator)\n- Vendor (ad owner)\n\n**Use this endpoint to:**\n- Display order details page\n- Show chat messages\n- Display payment account information\n- Show order status and next actions\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[BUYER] Confirm payment made - Awaiting Payment → Payment Made",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{id}/buyer/payment-made",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{id}",
+                "buyer",
+                "payment-made"
+              ]
+            },
+            "description": "**UI State: \"Awaiting Payment\"**\n\nBuyer confirms they have made the payment to vendor's account.\n\n**Payment Methods:**\n- **RhinoxPay ID:** Payment is automatic. Fiat transferred immediately, crypto auto-released.\n  Status: `awaiting_payment` → `payment_made` → `awaiting_coin_release` → `completed`\n- **Offline (Bank/Mobile Money):** Manual confirmation. Buyer confirms payment made.\n  Status: `awaiting_payment` → `payment_made`\n  Next: Vendor must call `/vendor/payment-received` to release crypto\n\n**Who can call:** Only buyer (order creator)\n**Required status:** `awaiting_payment`\n**Next step:** \n  - RhinoxPay ID: Order automatically completes\n  - Offline: Vendor calls `/vendor/payment-received`\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentProof\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "[USER OR VENDOR] Cancel order (Legacy endpoint)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{id}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{id}",
+                "cancel"
+              ]
+            },
+            "description": "Cancel an order. Only buyer or vendor can cancel.\nCan only cancel if order status is 'pending' or 'awaiting_payment'.\nA notification message is sent to the other party.\n\n**Note:** This is a legacy endpoint. Use `/user/orders/:id/cancel` or `/vendor/orders/:id/cancel` instead.\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[USER] Browse ads to BUY crypto",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/user/ads/buy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "user",
+                "ads",
+                "buy"
+              ],
+              "query": [
+                {
+                  "key": "cryptoCurrency",
+                  "value": "USDT",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "fiatCurrency",
+                  "value": "NGN",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "countryCode",
+                  "value": "NG",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "minPrice",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "**UI Flow: User wants to BUY crypto → Shows vendor SELL ads**\n\nGet list of ads where user can BUY crypto. This shows vendor SELL ads.\n- Vendor SELL ad = User can BUY\n- Response includes `userAction: \"buy\"` for all ads\n\n**Use this for:** \"Buy\" tab in P2P market\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[USER] Browse ads to SELL crypto",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/user/ads/sell",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "user",
+                "ads",
+                "sell"
+              ],
+              "query": [
+                {
+                  "key": "cryptoCurrency",
+                  "value": "USDT",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "fiatCurrency",
+                  "value": "NGN",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "countryCode",
+                  "value": "NG",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "minPrice",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "**UI Flow: User wants to SELL crypto → Shows vendor BUY ads**\n\nGet list of ads where user can SELL crypto. This shows vendor BUY ads.\n- Vendor BUY ad = User can SELL\n- Response includes `userAction: \"sell\"` for all ads\n\n**Use this for:** \"Sell\" tab in P2P market\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[USER] Cancel order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/user/orders/{id}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "user",
+                "orders",
+                "{id}",
+                "cancel"
+              ]
+            },
+            "description": "User (buyer) cancels their order. Only works if order status allows cancellation.\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[USER] Create order from ad - Browse → Order Created",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders"
+              ]
+            },
+            "description": "**UI Flow: User selects ad → Enters crypto amount → Creates order**\n\nUser creates a new P2P order from an ad. User enters the crypto amount (quantity they want to buy/sell).\nSystem validates ad availability, order limits, and balances.\n\n**Order Status After Creation:**\n- `pending`: If vendor must manually accept (most common)\n- `awaiting_payment`: If ad has auto-accept enabled\n\n**Next Steps:**\n1. If `pending`: Vendor must call `/vendor/accept` to accept order\n2. If `awaiting_payment`: Buyer can immediately call `/buyer/payment-made`\n\n**Role Resolution (Binance/Bybit style):**\n- Vendor BUY ad → User sees as SELL action (User is SELLER, Vendor is BUYER)\n- Vendor SELL ad → User sees as BUY action (User is BUYER, Vendor is SELLER)\n- Crypto ALWAYS moves from SELLER → BUYER\n\nA chat thread is automatically initialized for communication.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"cryptoAmount\": \"5.00\",\n  \"paymentMethodId\": \"550e8400-e29b-41d4-a716-446655440000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "[USER] Get my orders - Orders where I am the buyer (order creator)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "role",
+                  "value": "",
+                  "description": "Filter by user's role in the order.\n- \"buyer\": Only orders where user is the buyer\n- \"vendor\": Only orders where user is the vendor (ad owner)\n- If not specified: Returns all orders (buyer + vendor)\n",
+                  "disabled": false
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "Filter by order status",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "Maximum number of orders to return",
+                  "disabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "description": "Number of orders to skip for pagination",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Get all orders for the authenticated user. Returns orders where user is either:\n- Buyer (order creator)\n- Vendor (ad owner)\n\n**Use cases:**\n- \"My Orders\" page showing all user's P2P transactions\n- Filter by role to see only orders as buyer or vendor\n- Filter by status to see pending, completed, cancelled orders\n\n**Response includes:**\n- Order details (amounts, status, parties)\n- `userAction`: What action user took (buy/sell) - for UI display\n- `isUserBuyer`: Boolean indicating if user is buyer\n- `isUserSeller`: Boolean indicating if user is seller\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[USER] Mark payment received - When user is selling (vendor is buying)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/user/orders/{id}/payment-received",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "user",
+                "orders",
+                "{id}",
+                "payment-received"
+              ]
+            },
+            "description": "**UI State: \"Payment Made\"**\n\nUser (seller) confirms they have received payment from vendor (buyer).\nThis is used when vendor created a BUY ad and is buying crypto from the user.\n\n**Scenario:**\n- Vendor created BUY ad (wants to buy crypto)\n- User (seller) created order to sell crypto to vendor\n- Vendor is the BUYER, User is the SELLER\n- Vendor makes fiat payment to user\n- Vendor calls `/vendor/orders/:id/payment-made` to confirm payment made\n- User (seller) calls this endpoint to confirm payment received and release crypto\n\n**This action:**\n1. Changes status: `payment_made` → `awaiting_coin_release`\n2. Automatically releases crypto from user (seller) to vendor (buyer)\n3. Changes status: `awaiting_coin_release` → `completed`\n\n**Crypto Release:**\n- Crypto ALWAYS moves from SELLER → BUYER\n- For BUY ads: User is seller, Vendor is buyer → Crypto: User → Vendor\n\n**Who can call:** Only user when they are the seller (for BUY ads)\n**Required status:** `payment_made` (offline payments only)\n**Note:** For RhinoxPay ID, this step is automatic and not needed\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirmed\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "USER: Browse ads to buy/sell, create orders, manage your orders. Routes: /api/p2p/user/*"
+    },
+    {
+      "name": "P2P - VENDOR (Ad Creation)",
+      "item": [
+        {
+          "name": "[VENDOR] Create BUY ad - I want to BUY crypto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/ads/buy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "ads",
+                "buy"
+              ]
+            },
+            "description": "Creates a buy advertisement for purchasing cryptocurrency with fiat currency.\nAs a vendor, you can create buy ads to allow other users to sell crypto to you.\nThe ad will be visible to other users who want to sell the specified cryptocurrency.\nPayment methods must be added to your account first (use Payment Settings endpoints).\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cryptoCurrency\": \"BTC\",\n  \"fiatCurrency\": \"NGN\",\n  \"price\": \"1500.00\",\n  \"volume\": \"50.00\",\n  \"minOrder\": \"1600.00\",\n  \"maxOrder\": \"75000.00\",\n  \"autoAccept\": true,\n  \"paymentMethodIds\": [\n    \"550e8400-e29b-41d4-a716-446655440000\",\n    \"660e8400-e29b-41d4-a716-446655440001\"\n  ],\n  \"countryCode\": \"NG\",\n  \"description\": \"Buy USDT at best rates. Fast and secure transactions.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "[VENDOR] Create SELL ad - I want to SELL crypto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/ads/sell",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "ads",
+                "sell"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cryptoCurrency\": \"USDT\",\n  \"fiatCurrency\": \"NGN\",\n  \"price\": \"1550.70\",\n  \"volume\": \"100.00\",\n  \"minOrder\": \"1600.00\",\n  \"maxOrder\": \"75000.00\",\n  \"autoAccept\": false,\n  \"paymentMethodIds\": [\n    \"payment-method-uuid-1\"\n  ],\n  \"countryCode\": \"NG\",\n  \"description\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "VENDOR ONLY: Create new P2P buy and sell ads"
+    },
+    {
+      "name": "P2P - VENDOR (Ad Management)",
+      "item": [
+        {
+          "name": "[VENDOR] Edit ad - Update ad details",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/ads/{id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "ads",
+                "{id}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": \"string\",\n  \"volume\": \"string\",\n  \"minOrder\": \"string\",\n  \"maxOrder\": \"string\",\n  \"autoAccept\": true,\n  \"paymentMethodIds\": [\n    \"string\"\n  ],\n  \"countryCode\": \"string\",\n  \"description\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "[VENDOR] Get ad details - View one of my ads",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/ads/{id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "ads",
+                "{id}"
+              ]
+            },
+            "description": "**UI Flow: Browse Ads → Select Ad → View Details**\n\nGet detailed information about a specific P2P ad, including:\n- Vendor information and reputation\n- Accepted payment methods (with masked account details)\n- Price, limits, available quantity\n- Processing time and response time\n\n**Response includes:**\n- `type`: Original ad type (for internal use)\n- `userAction`: What user can do (buy/sell) - use this for UI labels\n- `paymentMethods`: List of accepted payment methods with masked account numbers\n\nThis endpoint is public and does not require authentication.\nUse this to display ad details before user creates an order.\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[VENDOR] Get my ads - View all my buy and sell ads",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/ads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "ads"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "",
+                  "description": "Filter by ad type",
+                  "disabled": false
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "Filter by ad status",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "[VENDOR] Update ad status - Toggle available/unavailable",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/ads/{id}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "ads",
+                "{id}",
+                "status"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"unavailable\",\n  \"isOnline\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "VENDOR ONLY: Create, edit, and manage your P2P ads. Routes: /api/p2p/ads/*"
+    },
+    {
+      "name": "P2P - VENDOR (Order Management)",
+      "item": [
+        {
+          "name": "[BUYER OR VENDOR] Get order details - Full order information",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{id}"
+              ]
+            },
+            "description": "Get detailed information about a specific order. Includes:\n- Order details (amounts, status, timestamps)\n- Chat messages between buyer and vendor\n- Payment method information\n- Reviews (if order completed)\n- Role indicators (`isUserBuyer`, `isUserSeller`)\n\n**Who can view:**\n- Buyer (order creator)\n- Vendor (ad owner)\n\n**Use this endpoint to:**\n- Display order details page\n- Show chat messages\n- Display payment account information\n- Show order status and next actions\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[USER OR VENDOR] Cancel order (Legacy endpoint)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{id}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{id}",
+                "cancel"
+              ]
+            },
+            "description": "Cancel an order. Only buyer or vendor can cancel.\nCan only cancel if order status is 'pending' or 'awaiting_payment'.\nA notification message is sent to the other party.\n\n**Note:** This is a legacy endpoint. Use `/user/orders/:id/cancel` or `/vendor/orders/:id/cancel` instead.\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[VENDOR] Accept order - Order Received → Awaiting Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{id}/vendor/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{id}",
+                "vendor",
+                "accept"
+              ]
+            },
+            "description": "**UI State: \"Order Received\"**\n\nVendor (ad owner) accepts a pending order. This action:\n1. Freezes crypto from seller's VirtualAccount\n2. Changes status: `pending` → `awaiting_payment`\n3. Starts processing time countdown (from ad's processingTime)\n4. Buyer can now make payment\n\n**Who can call:** Only vendor (ad owner)\n**Required status:** `pending`\n**Next step:** Buyer makes payment and calls `/buyer/payment-made`\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[VENDOR] Cancel order - Cancel order for my ad",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/vendor/orders/{id}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "vendor",
+                "orders",
+                "{id}",
+                "cancel"
+              ]
+            },
+            "description": "Vendor (ad owner) cancels an order for their ad. Only works if order status allows cancellation.\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[VENDOR] Decline order - Order Received → Cancelled",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{id}/vendor/decline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{id}",
+                "vendor",
+                "decline"
+              ]
+            },
+            "description": "**UI State: \"Order Received\"**\n\nVendor (ad owner) declines a pending order. Order is cancelled.\n\n**Who can call:** Only vendor (ad owner)\n**Required status:** `pending`\n**Result:** Status changes to `cancelled`\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[VENDOR] Get my vendor orders - Orders where I am the ad owner",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/vendor/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "vendor",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "Filter by order status",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Get all orders for ads owned by the authenticated vendor.\nThis is a convenience endpoint that filters `getUserOrders` by `role=vendor`.\n"
+          },
+          "response": []
+        },
+        {
+          "name": "[VENDOR] Mark payment made - When vendor is buying (user is selling)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/vendor/orders/{id}/payment-made",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "vendor",
+                "orders",
+                "{id}",
+                "payment-made"
+              ]
+            },
+            "description": "**UI State: \"Awaiting Payment\"**\n\nVendor (buyer) confirms they have made the fiat payment to user (seller).\nThis is used when vendor created a BUY ad and is buying crypto from the user.\n\n**Scenario:**\n- Vendor created BUY ad (wants to buy crypto)\n- User (seller) created order to sell crypto to vendor\n- Vendor is the BUYER, User is the SELLER\n- Vendor makes fiat payment to user\n- Vendor calls this endpoint to confirm payment made\n\n**Payment Methods:**\n- **RhinoxPay ID:** Payment is automatic. Fiat transferred immediately, crypto auto-released.\n  Status: `awaiting_payment` → `payment_made` → `awaiting_coin_release` → `completed`\n- **Offline (Bank/Mobile Money):** Manual confirmation. Vendor confirms payment made.\n  Status: `awaiting_payment` → `payment_made`\n  Next: User (seller) must call `/user/orders/:id/payment-received` to release crypto\n\n**Who can call:** Only vendor when they are the buyer (for BUY ads)\n**Required status:** `awaiting_payment`\n**Next step:** \n  - RhinoxPay ID: Order automatically completes\n  - Offline: User (seller) calls payment-received to release crypto\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentProof\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "[VENDOR] Mark payment received - Payment Made → Completed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{id}/vendor/payment-received",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{id}",
+                "vendor",
+                "payment-received"
+              ]
+            },
+            "description": "**UI State: \"Payment Made\"**\n\nVendor (seller) confirms they have received payment from buyer.\nThis action:\n1. Changes status: `payment_made` → `awaiting_coin_release`\n2. Automatically releases crypto from seller to buyer\n3. Changes status: `awaiting_coin_release` → `completed`\n\n**Crypto Release:**\n- Crypto ALWAYS moves from SELLER → BUYER\n- For SELL ads: Vendor is seller, User is buyer → Crypto: Vendor → User\n- For BUY ads: User is seller, Vendor is buyer → Crypto: User → Vendor\n\n**Who can call:** Only seller (vendor for SELL ads, user for BUY ads)\n**Required status:** `payment_made` (offline payments only)\n**Note:** For RhinoxPay ID, this step is automatic and not needed\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirmed\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "VENDOR ONLY: Manage orders received for your ads. Accept, decline, mark payment received. Routes: /api/p2p/vendor/orders/*"
+    },
+    {
+      "name": "P2P Chat",
+      "item": [
+        {
+          "name": "Get chat messages for an order",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{orderId}/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{orderId}",
+                "messages"
+              ]
+            },
+            "description": "Get all chat messages for a P2P order. Only the buyer or vendor can view messages.\nMessages are returned in chronological order (oldest first).\n"
+          },
+          "response": []
+        },
+        {
+          "name": "Get unread message count",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/chat/unread-count",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "chat",
+                "unread-count"
+              ]
+            },
+            "description": "Get the total number of unread messages across all orders for the authenticated user.\nUseful for displaying notification badges.\n"
+          },
+          "response": []
+        },
+        {
+          "name": "Mark messages as read",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{orderId}/messages/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{orderId}",
+                "messages",
+                "read"
+              ]
+            },
+            "description": "Mark all unread messages in an order chat as read. Only the buyer or vendor can mark messages as read.\nThis updates all messages sent to the authenticated user that are currently unread.\n"
+          },
+          "response": []
+        },
+        {
+          "name": "Send message in order chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{orderId}/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{orderId}",
+                "messages"
+              ]
+            },
+            "description": "Send a message in the chat thread for a P2P order. Only the buyer or vendor of the order can send messages.\nMessages are automatically delivered to the other party.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Hello, I have made the payment. Please confirm receipt.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Chat messages between buyer and vendor for orders"
+    },
+    {
+      "name": "P2P Review",
+      "item": [
+        {
+          "name": "Create review for completed order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/orders/{orderId}/review",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "orders",
+                "{orderId}",
+                "review"
+              ]
+            },
+            "description": "Create a review for a completed P2P order. Only the buyer can leave a review for the vendor.\nReviews can be positive (thumbs up) or negative (thumbs down) with an optional comment.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"positive\",\n  \"comment\": \"He is fast and reliable\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete review",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/reviews/{id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "reviews",
+                "{id}"
+              ]
+            },
+            "description": "Delete a review. Only the reviewer can delete their own review.\nCan only delete within 24 hours of creation.\n"
+          },
+          "response": []
+        },
+        {
+          "name": "Get all reviews for a vendor",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/vendors/{vendorId}/reviews",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "vendors",
+                "{vendorId}",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "",
+                  "description": "Filter by review type",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Get all reviews left for a specific vendor. Can filter by review type (positive/negative).\nResults are paginated and sorted by creation date (newest first).\n"
+          },
+          "response": []
+        },
+        {
+          "name": "Get reviews for a specific ad",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/ads/{adId}/reviews",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "ads",
+                "{adId}",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "",
+                  "description": "Filter by review type",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Get all reviews for a specific P2P ad. Can filter by review type (positive/negative).\nResults are paginated and sorted by creation date (newest first).\n"
+          },
+          "response": []
+        },
+        {
+          "name": "Update review",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/p2p/reviews/{id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "p2p",
+                "reviews",
+                "{id}"
+              ]
+            },
+            "description": "Update a review. Only the reviewer can update their own review.\nCan only update within 24 hours of creation.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"positive\",\n  \"comment\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Reviews left by users after order completion"
+    },
+    {
+      "name": "Payment Settings",
+      "item": [
+        {
+          "name": "Add a new bank account payment method",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payment-settings/bank-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payment-settings",
+                "bank-account"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountType\": \"savings\",\n  \"bankName\": \"Opay\",\n  \"accountNumber\": \"1234567890\",\n  \"accountName\": \"Qamardeen Abdul Malik\",\n  \"countryCode\": \"NG\",\n  \"currency\": \"NGN\",\n  \"isDefault\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add a new mobile money payment method",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payment-settings/mobile-money",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payment-settings",
+                "mobile-money"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"providerId\": \"provider-uuid\",\n  \"phoneNumber\": \"08012345678\",\n  \"countryCode\": \"NG\",\n  \"currency\": \"NGN\",\n  \"isDefault\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete a payment method",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payment-settings/{id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payment-settings",
+                "{id}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get a single payment method by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payment-settings/{id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payment-settings",
+                "{id}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get all user payment methods",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payment-settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payment-settings"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "",
+                  "description": "Filter by payment method type",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get available mobile money providers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payment-settings/mobile-money-providers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payment-settings",
+                "mobile-money-providers"
+              ],
+              "query": [
+                {
+                  "key": "countryCode",
+                  "value": "",
+                  "description": "Filter by country code",
+                  "disabled": false
+                },
+                {
+                  "key": "currency",
+                  "value": "",
+                  "description": "Filter by currency",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Set a payment method as default",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payment-settings/{id}/set-default",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payment-settings",
+                "{id}",
+                "set-default"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Update a payment method",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payment-settings/{id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payment-settings",
+                "{id}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountType\": \"string\",\n  \"bankName\": \"string\",\n  \"accountNumber\": \"string\",\n  \"accountName\": \"string\",\n  \"phoneNumber\": \"string\",\n  \"isDefault\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "User payment method management (bank accounts, mobile money)"
+    },
+    {
+      "name": "Transfer",
+      "item": [
+        {
+          "name": "Check if user is eligible to send funds (KYC verification)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transfer/eligibility",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfer",
+                "eligibility"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get transfer receipt",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transfer/receipt/{transactionId}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfer",
+                "receipt",
+                "{transactionId}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Initiate a fiat transfer transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transfer/initiate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfer",
+                "initiate"
+              ]
+            },
+            "description": "Creates a pending transfer transaction to send funds to another RhionX user, bank account, or mobile money.\nUser must have completed KYC verification to use this endpoint (check eligibility first).\nAn email OTP is sent for verification. User must verify with email code and PIN to complete the transfer.\nFor RhionX user transfers, recipient wallet is automatically credited upon verification.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"200000\",\n  \"currency\": \"NGN\",\n  \"countryCode\": \"NG\",\n  \"channel\": \"rhionx_user\",\n  \"recipientEmail\": \"recipient@example.com\",\n  \"recipientUserId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"accountNumber\": \"1234567890\",\n  \"bankName\": \"Access Bank\",\n  \"providerId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"phoneNumber\": \"+2348012345678\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Verify and complete transfer with email code and PIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transfer/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfer",
+                "verify"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"transaction-uuid\",\n  \"emailCode\": \"12345\",\n  \"pin\": \"12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Fiat transfers (RhionX user, bank account, mobile money)"
+    },
+    {
+      "name": "Wallet",
+      "item": [
+        {
+          "name": "Create a new wallet",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/wallets/create",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "wallets",
+                "create"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currency\": \"NGN\",\n  \"type\": \"fiat\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get all user wallets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/wallets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "wallets"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get wallet balance",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/wallets/{walletId}/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "wallets",
+                "{walletId}",
+                "balance"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get wallet by currency code",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/wallets/{currency}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "wallets",
+                "{currency}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get wallet transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "JWT access token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/wallets/{walletId}/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "wallets",
+                "{walletId}",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "Number of transactions to return",
+                  "disabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "description": "Number of transactions to skip",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ],
+      "description": "Wallet management and operations"
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string",
+      "description": "JWT access token obtained from /api/auth/login or /api/auth/register"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string",
+      "description": "JWT refresh token obtained from /api/auth/login or /api/auth/register"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Auto-extract tokens from login/register responses",
+          "if (pm.response && pm.response.json) {",
+          "    try {",
+          "        const json = pm.response.json();",
+          "        if (json.data && json.data.accessToken) {",
+          "            pm.collectionVariables.set(\"accessToken\", json.data.accessToken);",
+          "            console.log(\"✅ Access token set automatically\");",
+          "        }",
+          "        if (json.data && json.data.refreshToken) {",
+          "            pm.collectionVariables.set(\"refreshToken\", json.data.refreshToken);",
+          "            console.log(\"✅ Refresh token set automatically\");",
+          "        }",
+          "    } catch (e) {",
+          "        // Ignore errors",
+          "    }",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Auto-extract tokens from login/register responses",
+          "if (pm.response && pm.response.json) {",
+          "    try {",
+          "        const json = pm.response.json();",
+          "        if (json.data && json.data.accessToken) {",
+          "            pm.collectionVariables.set(\"accessToken\", json.data.accessToken);",
+          "            console.log(\"✅ Access token set automatically\");",
+          "        }",
+          "        if (json.data && json.data.refreshToken) {",
+          "            pm.collectionVariables.set(\"refreshToken\", json.data.refreshToken);",
+          "            console.log(\"✅ Refresh token set automatically\");",
+          "        }",
+          "    } catch (e) {",
+          "        // Ignore errors",
+          "    }",
+          "}"
+        ]
+      }
+    }
+  ]
+}
