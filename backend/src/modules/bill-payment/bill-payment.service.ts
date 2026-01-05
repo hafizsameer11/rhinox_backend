@@ -339,7 +339,41 @@ export class BillPaymentService {
       await this.validateAccountNumber(data.providerId, accountNumber);
     }
 
+    // Create pending transaction
+    const reference = this.generateReference();
+    const transaction = await prisma.transaction.create({
+      data: {
+        walletId: wallet.id,
+        type: 'bill_payment',
+        status: 'pending',
+        amount: amount.toNumber(),
+        currency: data.currency,
+        fee: fee,
+        reference,
+        description: `${category.name} - ${provider.name}`,
+        channel: category.code,
+        country: provider.countryCode,
+        metadata: {
+          categoryCode: category.code,
+          categoryName: category.name,
+          providerId: provider.id,
+          providerCode: provider.code,
+          providerName: provider.name,
+          accountNumber,
+          accountName,
+          accountType,
+          planId: plan?.id || null,
+          planCode: plan?.code || null,
+          planName: plan?.name || null,
+          planDataAmount: plan?.dataAmount || null,
+          beneficiaryId: beneficiary?.id || null,
+        },
+      },
+    });
+
     return {
+      transactionId: transaction.id,
+      reference: transaction.reference,
       category: {
         id: category.id,
         code: category.code,

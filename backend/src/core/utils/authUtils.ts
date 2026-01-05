@@ -10,7 +10,7 @@ import jwt from 'jsonwebtoken';
 export const verifyToken = async (token: string): Promise<{ id: string | number; userId?: string | number } | null> => {
   // ONLY verify with JWT_SECRET (access tokens only)
   // Refresh tokens should NOT be accepted here for security
-  const secret = process.env.ACCESS_TOKEN_SECRET || 'your-secret-key';
+  const secret = process.env.ACCESS_TOKEN_SECRET || 'e97c25d5-90f8-4e3f-939c-b1ab2cac407d';
   
   try {
     const decoded = jwt.verify(token, secret) as {
