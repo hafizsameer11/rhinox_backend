@@ -125,8 +125,9 @@ model KYC {
 model OTP {
   id        Int      @id @default(autoincrement())
   userId    Int
+  email     String? // Email address (for email and password_reset OTPs)
   code      String // 5-digit code
-  type      String // email, phone
+  type      String // email, phone, password_reset
   expiresAt DateTime
   isUsed    Boolean  @default(false)
   createdAt DateTime @default(now())

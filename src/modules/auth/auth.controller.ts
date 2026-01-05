@@ -860,8 +860,46 @@ export class AuthController {
   }
 
   /**
-   * Change PIN
-   * POST /api/auth/change-pin
+   * @swagger
+   * /api/auth/change-pin:
+   *   post:
+   *     summary: Change transaction PIN
+   *     description: |
+   *       Changes the user's 5-digit transaction PIN.
+   *       Requires the old PIN for verification.
+   *     tags: [Auth]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - oldPin
+   *               - newPin
+   *             properties:
+   *               oldPin:
+   *                 type: string
+   *                 pattern: '^\d{5}$'
+   *                 example: "12345"
+   *                 description: Current 5-digit PIN
+   *               newPin:
+   *                 type: string
+   *                 pattern: '^\d{5}$'
+   *                 example: "54321"
+   *                 description: New 5-digit PIN
+   *     responses:
+   *       200:
+   *         description: PIN changed successfully
+   *       400:
+   *         description: Validation error
+   *         $ref: '#/components/schemas/Error'
+   *       401:
+   *         description: Unauthorized
+   *         $ref: '#/components/schemas/Error'
    */
   async changePIN(req: Request, res: Response) {
     try {
@@ -962,6 +1000,257 @@ export class AuthController {
       return res.status(400).json({
         success: false,
         message: error.message || 'Failed to mark face as verified',
+      });
+    }
+  }
+
+  /**
+   * @swagger
+   * /api/auth/forgot-password:
+   *   post:
+   *     summary: Request password reset
+   *     description: |
+   *       Sends a password reset OTP code to the user's email address.
+   *       If the email exists, a 5-digit OTP will be sent. For security,
+   *       the response message is the same whether the email exists or not.
+   *     tags: [Auth]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - email
+   *             properties:
+   *               email:
+   *                 type: string
+   *                 format: email
+   *                 example: "user@example.com"
+   *                 description: User's email address. A password reset OTP will be sent to this email if the account exists.
+   *     responses:
+   *       200:
+   *         description: Password reset OTP sent (if email exists)
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     message:
+   *                       type: string
+   *                       example: "If an account with this email exists, a password reset code has been sent."
+   *       400:
+   *         description: Validation error
+   *         $ref: '#/components/schemas/Error'
+   */
+  async forgotPassword(req: Request, res: Response) {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email is required',
+        });
+      }
+
+      const result = await this.service.requestPasswordReset(email);
+
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to send password reset code',
+      });
+    }
+  }
+
+  /**
+   * @swagger
+   * /api/auth/verify-password-reset-otp:
+   *   post:
+   *     summary: Verify password reset OTP
+   *     description: |
+   *       Verifies the OTP code sent to the user's email for password reset.
+   *       This is the first step in the password reset process.
+   *       After successful verification, the user can proceed to reset their password.
+   *     tags: [Auth]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - email
+   *               - otp
+   *             properties:
+   *               email:
+   *                 type: string
+   *                 format: email
+   *                 example: "user@example.com"
+   *                 description: User's email address
+   *               otp:
+   *                 type: string
+   *                 pattern: '^\d{5}$'
+   *                 minLength: 5
+   *                 maxLength: 5
+   *                 example: "12345"
+   *                 description: 5-digit OTP code sent to email
+   *     responses:
+   *       200:
+   *         description: OTP verified successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     verified:
+   *                       type: boolean
+   *                       example: true
+   *                     message:
+   *                       type: string
+   *                       example: "OTP verified successfully. You can now reset your password."
+   *       400:
+   *         description: |
+   *           Validation error. Common errors:
+   *           - "Invalid email or OTP"
+   *           - "Invalid or expired OTP"
+   *         $ref: '#/components/schemas/Error'
+   */
+  async verifyPasswordResetOTP(req: Request, res: Response) {
+    try {
+      const { email, otp } = req.body;
+
+      if (!email || !otp) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email and OTP are required',
+        });
+      }
+
+      const result = await this.service.verifyPasswordResetOTP(email, otp);
+
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to verify OTP',
+      });
+    }
+  }
+
+  /**
+   * @swagger
+   * /api/auth/reset-password:
+   *   post:
+   *     summary: Reset password with verified OTP
+   *     description: |
+   *       Resets the user's password using the verified OTP code.
+   *       This endpoint should be called after verifying the OTP.
+   *       After successful password reset, all existing sessions will be invalidated
+   *       and the user will need to login again with the new password.
+   *     tags: [Auth]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - email
+   *               - otp
+   *               - newPassword
+   *             properties:
+   *               email:
+   *                 type: string
+   *                 format: email
+   *                 example: "user@example.com"
+   *                 description: User's email address
+   *               otp:
+   *                 type: string
+   *                 pattern: '^\d{5}$'
+   *                 minLength: 5
+   *                 maxLength: 5
+   *                 example: "12345"
+   *                 description: 5-digit OTP code that was verified in the previous step
+   *               newPassword:
+   *                 type: string
+   *                 format: password
+   *                 minLength: 8
+   *                 example: "NewSecurePassword123!"
+   *                 description: New password. Must be at least 8 characters long.
+   *     responses:
+   *       200:
+   *         description: Password reset successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     message:
+   *                       type: string
+   *                       example: "Password reset successfully. Please login with your new password."
+   *       400:
+   *         description: |
+   *           Validation error. Common errors:
+   *           - "Invalid email or OTP"
+   *           - "Invalid or expired OTP. Please request a new password reset."
+   *           - "Password must be at least 8 characters long"
+   *         $ref: '#/components/schemas/Error'
+   */
+  async resetPassword(req: Request, res: Response) {
+    try {
+      const { email, otp, newPassword } = req.body;
+
+      if (!email || !otp || !newPassword) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email, OTP, and new password are required',
+        });
+      }
+
+      if (newPassword.length < 8) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password must be at least 8 characters long',
+        });
+      }
+
+      const result = await this.service.resetPassword(email, otp, newPassword);
+
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to reset password',
       });
     }
   }

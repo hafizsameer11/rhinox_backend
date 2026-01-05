@@ -85,14 +85,24 @@ export const sendEmail = async (to: string, subject: string, html: string): Prom
 /**
  * Send OTP email
  */
-export const sendOTPEmail = async (email: string, code: string, type: 'email' | 'phone' = 'email'): Promise<void> => {
-  const subject = type === 'email' 
-    ? 'Email Verification Code - Rhinox Pay'
-    : 'Phone Verification Code - Rhinox Pay';
+export const sendOTPEmail = async (email: string, code: string, type: 'email' | 'phone' | 'password_reset' = 'email'): Promise<void> => {
+  let subject: string;
+  let title: string;
+  
+  if (type === 'password_reset') {
+    subject = 'Password Reset Code - Rhinox Pay';
+    title = 'Password Reset Code';
+  } else if (type === 'email') {
+    subject = 'Email Verification Code - Rhinox Pay';
+    title = 'Email Verification Code';
+  } else {
+    subject = 'Phone Verification Code - Rhinox Pay';
+    title = 'Phone Verification Code';
+  }
   
   const message = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h2 style="color: #333;">${subject}</h2>
+      <h2 style="color: #333;">${title}</h2>
       <p>Your verification code is:</p>
       <div style="background: #f0f0f0; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 5px; margin: 20px 0; border-radius: 5px;">
         ${code}

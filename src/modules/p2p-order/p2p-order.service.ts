@@ -237,8 +237,14 @@ export class P2POrderService {
    * API Visibility: Transform ad.type to user perspective
    */
   async getAdDetails(adId: string) {
+    // Parse adId to integer
+    const parsedAdId = typeof adId === 'string' ? parseInt(adId, 10) : adId;
+    if (isNaN(parsedAdId) || parsedAdId <= 0) {
+      throw new Error('Invalid ad ID format');
+    }
+
     const ad = await prisma.p2PAd.findUnique({
-      where: { id: adId },
+      where: { id: parsedAdId },
       include: {
         user: {
           select: {
@@ -330,9 +336,15 @@ export class P2POrderService {
       paymentMethodId: string;
     }
   ) {
+    // Parse adId to integer
+    const parsedAdId = typeof data.adId === 'string' ? parseInt(data.adId, 10) : data.adId;
+    if (isNaN(parsedAdId) || parsedAdId <= 0) {
+      throw new Error('Invalid ad ID format');
+    }
+
     // Get ad
     const ad = await prisma.p2PAd.findUnique({
-      where: { id: data.adId },
+      where: { id: parsedAdId },
       include: {
         user: true,
       },

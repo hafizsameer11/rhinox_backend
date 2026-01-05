@@ -273,6 +273,14 @@ export class P2POrderController {
     try {
       const { id } = req.params;
 
+      // Reject common route names that might accidentally match
+      if (id === 'browse' || id === 'buy' || id === 'sell') {
+        return res.status(404).json({
+          success: false,
+          message: 'Invalid ad ID. Did you mean to use /api/p2p/ads/browse?',
+        });
+      }
+
       const ad = await this.service.getAdDetails(id);
 
       return res.json({
@@ -280,6 +288,13 @@ export class P2POrderController {
         data: ad,
       });
     } catch (error: any) {
+      // Check if it's a validation error (invalid ID format)
+      if (error.message && error.message.includes('Invalid ad ID format')) {
+        return res.status(404).json({
+          success: false,
+          message: 'Invalid ad ID format. Ad ID must be a number.',
+        });
+      }
       return res.status(404).json({
         success: false,
         message: error.message || 'Ad not found',

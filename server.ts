@@ -32,9 +32,42 @@ app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 // Serve static files from uploads directory
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Handle both development (tsx) and production (compiled) paths
+// In development: __dirname = backend/src (if running from src) or backend (if compiled)
+// In production: __dirname = backend/dist (compiled location)
+const uploadsPathDev = path.join(__dirname, '../uploads');
+const uploadsPathProd = path.join(__dirname, './uploads');
+const uploadsPathRoot = path.join(process.cwd(), 'uploads');
+
+// Try multiple paths to find uploads directory
+let uploadsPath = uploadsPathRoot; // Default to project root
+if (existsSync(uploadsPathDev)) {
+  uploadsPath = uploadsPathDev;
+} else if (existsSync(uploadsPathProd)) {
+  uploadsPath = uploadsPathProd;
+} else if (existsSync(uploadsPathRoot)) {
+  uploadsPath = uploadsPathRoot;
+}
+
+console.log(`📁 Serving static files from: ${uploadsPath}`);
+
+app.use('/uploads', express.static(uploadsPath, {
+  setHeaders: (res, filePath) => {
+    // Set proper content type for images
+    if (filePath.endsWith('.png')) {
+      res.setHeader('Content-Type', 'image/png');
+    } else if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
+      res.setHeader('Content-Type', 'image/jpeg');
+    } else if (filePath.endsWith('.svg')) {
+      res.setHeader('Content-Type', 'image/svg+xml');
+    }
+  },
+}));
 
 // ============================================
 // Health Check
@@ -198,6 +231,10 @@ moduleLoader.registerMany([
   {
     module: new BillPaymentModule(),
     middleware: [authMiddleware],
+  },
+  {
+    module: new SupportChatModule(),
+    // All routes require auth - handled in module
   },
   {
     module: new NotificationModule(),
