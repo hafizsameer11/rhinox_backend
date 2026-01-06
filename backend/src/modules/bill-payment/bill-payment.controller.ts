@@ -146,12 +146,29 @@ export class BillPaymentController {
         });
       }
 
-      const plans = await this.service.getPlansByProvider(parseInt(providerId as string, 10));
+      const providerIdNum = parseInt(providerId as string, 10);
+      
+      // Validate providerId is a valid positive integer
+      if (isNaN(providerIdNum) || providerIdNum <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid providerId. Must be a positive integer',
+        });
+      }
+
+      const plans = await this.service.getPlansByProvider(providerIdNum);
       return res.json({
         success: true,
         data: plans,
       });
     } catch (error: any) {
+      // Handle "Provider not found" as 404 instead of 500
+      if (error.message === 'Provider not found') {
+        return res.status(404).json({
+          success: false,
+          message: error.message,
+        });
+      }
       return res.status(500).json({
         success: false,
         message: error.message || 'Failed to get plans',
