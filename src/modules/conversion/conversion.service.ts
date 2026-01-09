@@ -1,5 +1,5 @@
 import { randomBytes } from 'crypto';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 import bcrypt from 'bcryptjs';
 import prisma from '../../core/config/database.js';
 import { WalletService } from '../wallet/wallet.service.js';
@@ -366,7 +366,7 @@ export class ConversionService {
         creditedAmount: creditedAmount.toString(),
         fee: updatedCreditTx.fee.toString(),
         reference: updatedCreditTx.reference,
-        transactionId: updatedCreditTx.id,
+        transactionId: updatedCreditTx.id.toString(),
         country: debitTx.country || 'N/A',
         channel: 'conversion',
         paymentMethod: 'Currency Conversion',
@@ -500,7 +500,7 @@ export class ConversionService {
     };
 
     const minFee = new Decimal(minFees[currency] || 1);
-    return Decimal.max(calculatedFee, minFee);
+    return calculatedFee.greaterThan(minFee) ? calculatedFee : minFee;
   }
 
   /**

@@ -130,15 +130,15 @@ export class KYCController {
         });
       }
 
-      const result = await this.service.submitKYC(userId, {
-        firstName,
-        lastName,
-        middleName,
-        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
-        idType,
-        idNumber,
-        idDocumentUrl,
-        countryId,
+      const result = await this.service.submitKYC(userId.toString(), {
+        ...(firstName && { firstName }),
+        ...(lastName && { lastName }),
+        ...(middleName && { middleName }),
+        ...(dateOfBirth && { dateOfBirth: new Date(dateOfBirth) }),
+        ...(idType && { idType }),
+        ...(idNumber && { idNumber }),
+        ...(idDocumentUrl && { idDocumentUrl }),
+        ...(countryId && { countryId }),
       });
 
       return res.json({

@@ -263,9 +263,9 @@ export class TransactionHistoryController {
 
       const data = await this.service.getTransactionHistory(userId, {
         period,
-        startDate,
-        endDate,
-        currency,
+        ...(startDate !== undefined && { startDate }),
+        ...(endDate !== undefined && { endDate }),
+        ...(currency !== undefined && { currency }),
       });
 
       return res.json({
@@ -387,14 +387,14 @@ export class TransactionHistoryController {
       const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
 
       const data = await this.service.getFiatDeposits(userId, {
-        currency,
-        status,
-        type,
         period,
-        startDate,
-        endDate,
         limit,
         offset,
+        ...(currency !== undefined && { currency }),
+        ...(status !== undefined && { status }),
+        ...(type !== undefined && { type }),
+        ...(startDate !== undefined && { startDate }),
+        ...(endDate !== undefined && { endDate }),
       });
 
       return res.json({
@@ -516,14 +516,14 @@ export class TransactionHistoryController {
       const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
 
       const data = await this.service.getFiatWithdrawals(userId, {
-        currency,
-        status,
-        type,
         period,
-        startDate,
-        endDate,
         limit,
         offset,
+        ...(currency !== undefined && { currency }),
+        ...(status !== undefined && { status }),
+        ...(type !== undefined && { type }),
+        ...(startDate !== undefined && { startDate }),
+        ...(endDate !== undefined && { endDate }),
       });
 
       return res.json({
@@ -638,13 +638,13 @@ export class TransactionHistoryController {
       const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
 
       const data = await this.service.getFiatP2PTransactions(userId, {
-        currency,
-        status,
         period,
-        startDate,
-        endDate,
         limit,
         offset,
+        ...(currency !== undefined && { currency }),
+        ...(status !== undefined && { status }),
+        ...(startDate !== undefined && { startDate }),
+        ...(endDate !== undefined && { endDate }),
       });
 
       return res.json({
@@ -871,16 +871,18 @@ export class TransactionHistoryController {
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
       const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
 
-      const data = await this.service.getBillPaymentTransactions(userId, {
-        currency,
-        status,
-        categoryCode,
+      const filters: any = {
         period,
-        startDate,
-        endDate,
         limit,
         offset,
-      });
+      };
+      if (currency !== undefined) filters.currency = currency;
+      if (status !== undefined) filters.status = status;
+      if (categoryCode !== undefined) filters.categoryCode = categoryCode;
+      if (startDate !== undefined) filters.startDate = startDate;
+      if (endDate !== undefined) filters.endDate = endDate;
+
+      const data = await this.service.getBillPaymentTransactions(userId, filters);
 
       return res.json({
         success: true,

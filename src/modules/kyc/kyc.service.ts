@@ -77,14 +77,14 @@ export class KYCService {
       // Create new KYC
       const kyc = await prisma.kYC.create({
         data: {
-          userId,
-          firstName: data.firstName,
-          lastName: data.lastName,
-          middleName: data.middleName,
-          dateOfBirth: data.dateOfBirth,
-          idType: data.idType,
-          idNumber: data.idNumber,
-          idDocumentUrl: data.idDocumentUrl,
+          userId: parsedUserId,
+          ...(data.firstName && { firstName: data.firstName }),
+          ...(data.lastName && { lastName: data.lastName }),
+          ...(data.middleName && { middleName: data.middleName }),
+          ...(data.dateOfBirth && { dateOfBirth: data.dateOfBirth }),
+          ...(data.idType && { idType: data.idType }),
+          ...(data.idNumber && { idNumber: data.idNumber }),
+          ...(data.idDocumentUrl && { idDocumentUrl: data.idDocumentUrl }),
           status: 'pending',
           tier: 1,
         },

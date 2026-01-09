@@ -13,27 +13,37 @@ export class P2PChatService {
     senderId: string,
     message: string
   ) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedSenderId = typeof senderId === 'string' ? parseInt(senderId, 10) : senderId;
+    if (isNaN(parsedSenderId) || parsedSenderId <= 0) {
+      throw new Error('Invalid sender ID format');
+    }
+
     // Verify order exists and user is part of it
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
     });
 
     if (!order) {
       throw new Error('Order not found');
     }
 
-    if (order.buyerId !== senderId && order.vendorId !== senderId) {
+    if (order.buyerId !== parsedSenderId && order.vendorId !== parsedSenderId) {
       throw new Error('Unauthorized to send message in this order');
     }
 
     // Determine receiver
-    const receiverId = order.buyerId === senderId ? order.vendorId : order.buyerId;
+    const receiverId = order.buyerId === parsedSenderId ? order.vendorId : order.buyerId;
 
     // Create message
     const chatMessage = await prisma.p2PChatMessage.create({
       data: {
-        orderId,
-        senderId,
+        orderId: parsedOrderId,
+        senderId: parsedSenderId,
         receiverId,
         message,
       },
@@ -65,21 +75,31 @@ export class P2PChatService {
    * Get chat messages for an order
    */
   async getChatMessages(orderId: string, userId: string) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Verify order exists and user is part of it
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
     });
 
     if (!order) {
       throw new Error('Order not found');
     }
 
-    if (order.buyerId !== userId && order.vendorId !== userId) {
+    if (order.buyerId !== parsedUserId && order.vendorId !== parsedUserId) {
       throw new Error('Unauthorized to view messages for this order');
     }
 
     const messages = await prisma.p2PChatMessage.findMany({
-      where: { orderId },
+      where: { orderId: parsedOrderId },
       include: {
         sender: {
           select: {
@@ -111,24 +131,34 @@ export class P2PChatService {
    * Mark messages as read
    */
   async markAsRead(orderId: string, userId: string) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Verify order exists and user is part of it
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
     });
 
     if (!order) {
       throw new Error('Order not found');
     }
 
-    if (order.buyerId !== userId && order.vendorId !== userId) {
+    if (order.buyerId !== parsedUserId && order.vendorId !== parsedUserId) {
       throw new Error('Unauthorized to mark messages as read for this order');
     }
 
     // Mark all unread messages sent to this user as read
     await prisma.p2PChatMessage.updateMany({
       where: {
-        orderId,
-        receiverId: userId,
+        orderId: parsedOrderId,
+        receiverId: parsedUserId,
         isRead: false,
       },
       data: {
@@ -147,9 +177,14 @@ export class P2PChatService {
    * Get unread message count for user
    */
   async getUnreadCount(userId: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const count = await prisma.p2PChatMessage.count({
       where: {
-        receiverId: userId,
+        receiverId: parsedUserId,
         isRead: false,
       },
     });

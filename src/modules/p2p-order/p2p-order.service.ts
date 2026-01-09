@@ -1,4 +1,4 @@
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 import { Prisma } from '@prisma/client';
 import { generateOTP } from '../../core/utils/email.service.js';
@@ -76,11 +76,15 @@ export class P2POrderService {
 
     // If crypto, find or create Wallet
     if (data.isCrypto) {
-      const userId = walletIdOrUserId;
+      const parsedUserId = typeof walletIdOrUserId === 'string' ? parseInt(walletIdOrUserId, 10) : walletIdOrUserId;
+      if (isNaN(parsedUserId) || parsedUserId <= 0) {
+        throw new Error('Invalid user ID format');
+      }
+
       // Find existing crypto wallet
       let wallet = await prisma.wallet.findFirst({
         where: {
-          userId,
+          userId: parsedUserId,
           currency: data.currency,
           type: 'crypto',
         },
@@ -90,7 +94,7 @@ export class P2POrderService {
       if (!wallet) {
         wallet = await prisma.wallet.create({
           data: {
-            userId,
+            userId: parsedUserId,
             currency: data.currency,
             type: 'crypto',
             balance: new Decimal(0).toNumber(),
@@ -99,14 +103,29 @@ export class P2POrderService {
         });
       }
 
-      walletId = wallet.id;
+      walletId = wallet.id.toString();
+    }
+
+    const parsedWalletId = typeof walletId === 'string' ? parseInt(walletId, 10) : walletId;
+    if (isNaN(parsedWalletId) || parsedWalletId <= 0) {
+      throw new Error('Invalid wallet ID format');
+    }
+
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedAdId = typeof adId === 'string' ? parseInt(adId, 10) : adId;
+    if (isNaN(parsedAdId) || parsedAdId <= 0) {
+      throw new Error('Invalid ad ID format');
     }
 
     const reference = this.generateReference();
     
     return await prisma.transaction.create({
       data: {
-        walletId,
+        walletId: parsedWalletId,
         type: 'p2p',
         status: data.status,
         amount: data.amount.toNumber(),
@@ -237,7 +256,6 @@ export class P2POrderService {
    * API Visibility: Transform ad.type to user perspective
    */
   async getAdDetails(adId: string) {
-    // Parse adId to integer
     const parsedAdId = typeof adId === 'string' ? parseInt(adId, 10) : adId;
     if (isNaN(parsedAdId) || parsedAdId <= 0) {
       throw new Error('Invalid ad ID format');
@@ -263,10 +281,11 @@ export class P2POrderService {
     }
 
     // Get payment methods for this ad
-    const paymentMethodIds = ad.paymentMethodIds as string[];
+    const paymentMethodIds = (ad.paymentMethodIds as number[]) || [];
+    const parsedPaymentMethodIds = paymentMethodIds.map(id => typeof id === 'string' ? parseInt(id, 10) : id);
     const paymentMethods = await prisma.userPaymentMethod.findMany({
       where: {
-        id: { in: paymentMethodIds },
+        id: { in: parsedPaymentMethodIds },
         isActive: true,
       },
       include: {
@@ -336,7 +355,11 @@ export class P2POrderService {
       paymentMethodId: string;
     }
   ) {
-    // Parse adId to integer
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const parsedAdId = typeof data.adId === 'string' ? parseInt(data.adId, 10) : data.adId;
     if (isNaN(parsedAdId) || parsedAdId <= 0) {
       throw new Error('Invalid ad ID format');
@@ -363,7 +386,7 @@ export class P2POrderService {
     }
 
     // Resolve roles
-    const { buyerId, sellerId } = this.resolveRoles(ad.type, ad.userId, userId);
+    const { buyerId, sellerId } = this.resolveRoles(ad.type, ad.userId.toString(), parsedUserId.toString());
 
     // Validate payment method belongs to ad
     const paymentMethodIds = (ad.paymentMethodIds as number[]).map(id => id.toString());
@@ -405,9 +428,10 @@ export class P2POrderService {
     // Validate vendor has sufficient crypto balance (SELLER must have crypto)
     // For SELL ads: Vendor is SELLER, must have crypto
     // For BUY ads: User is SELLER, must have crypto
+    const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
     const sellerVirtualAccount = await prisma.virtualAccount.findFirst({
       where: {
-        userId: sellerId,
+        userId: parsedSellerId,
         currency: ad.cryptoCurrency,
       },
     });
@@ -450,9 +474,10 @@ export class P2POrderService {
 
     // For BUY ads: Validate buyer (vendor) has sufficient fiat balance for this order
     if (ad.type === 'buy') {
+      const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
       const buyerFiatWallet = await prisma.wallet.findFirst({
         where: {
-          userId: buyerId, // vendor is buyer for BUY ads
+          userId: parsedBuyerId, // vendor is buyer for BUY ads
           currency: ad.fiatCurrency,
         },
       });
@@ -474,10 +499,11 @@ export class P2POrderService {
     }
 
     // Create order
+    const parsedBuyerIdForOrder = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
     const order = await prisma.p2POrder.create({
       data: {
         adId: ad.id,
-        buyerId,
+        buyerId: parsedBuyerIdForOrder,
         vendorId: ad.userId,
         type: ad.type, // Keep ad.type for internal reference
         cryptoCurrency: ad.cryptoCurrency,
@@ -485,7 +511,7 @@ export class P2POrderService {
         cryptoAmount: cryptoAmount.toString(),
         fiatAmount: fiatAmount.toString(),
         price: price.toString(),
-        paymentMethodId: data.paymentMethodId,
+        paymentMethodId: parsedPaymentMethodId,
         paymentChannel: isRhinoxPayID ? 'rhinoxpay_id' : 'offline',
         status: initialStatus,
         metadata: {
@@ -521,9 +547,9 @@ export class P2POrderService {
 
     // Record transaction: Order created
     await this.recordTransaction(
-      sellerId, // userId for crypto
-      order.id,
-      ad.id,
+      sellerId.toString(), // userId for crypto
+      order.id.toString(),
+      ad.id.toString(),
       {
         type: 'p2p',
         status: 'pending',
@@ -556,7 +582,7 @@ export class P2POrderService {
     await prisma.p2PChatMessage.create({
       data: {
         orderId: order.id,
-        senderId: userId,
+        senderId: parsedUserId,
         receiverId: ad.userId,
         message: `Order created for ${cryptoAmount.toString()} ${ad.cryptoCurrency} at ${price.toString()} ${ad.fiatCurrency} per unit.`,
       },
@@ -564,7 +590,7 @@ export class P2POrderService {
 
     // Auto-accept if enabled
     if (ad.autoAccept) {
-      await this.acceptOrder(order.id, ad.userId);
+      await this.acceptOrder(order.id.toString(), ad.userId.toString());
     }
 
     return {
@@ -600,8 +626,18 @@ export class P2POrderService {
    * Freezes crypto from seller's VirtualAccount
    */
   async acceptOrder(orderId: string, vendorId: string) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedVendorId = typeof vendorId === 'string' ? parseInt(vendorId, 10) : vendorId;
+    if (isNaN(parsedVendorId) || parsedVendorId <= 0) {
+      throw new Error('Invalid vendor ID format');
+    }
+
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       include: {
         ad: true,
       },
@@ -611,7 +647,7 @@ export class P2POrderService {
       throw new Error('Order not found');
     }
 
-    if (order.vendorId !== vendorId) {
+    if (order.vendorId !== parsedVendorId) {
       throw new Error('Only vendor can accept this order');
     }
 
@@ -620,12 +656,13 @@ export class P2POrderService {
     }
 
     // Resolve roles
-    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId, order.buyerId);
+    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
 
     // Get seller's VirtualAccount
+    const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
     const sellerVirtualAccount = await prisma.virtualAccount.findFirst({
       where: {
-        userId: sellerId,
+        userId: parsedSellerId,
         currency: order.cryptoCurrency,
       },
     });
@@ -659,7 +696,7 @@ export class P2POrderService {
 
     // Update order status
     const updated = await prisma.p2POrder.update({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       data: {
         status: 'awaiting_payment',
         acceptedAt: new Date(),
@@ -670,9 +707,9 @@ export class P2POrderService {
 
     // Record transaction: Order accepted, crypto frozen
     await this.recordTransaction(
-      sellerId, // userId for crypto
-      order.id,
-      order.adId,
+      sellerId.toString(), // userId for crypto
+      order.id.toString(),
+      order.adId.toString(),
       {
         type: 'p2p',
         status: 'processing',
@@ -697,7 +734,7 @@ export class P2POrderService {
     await prisma.p2PChatMessage.create({
       data: {
         orderId: order.id,
-        senderId: vendorId,
+        senderId: parsedVendorId,
         receiverId: order.buyerId,
         message: 'Order accepted. Please make payment within the specified time.',
       },
@@ -715,15 +752,25 @@ export class P2POrderService {
    * Vendor declines order
    */
   async declineOrder(orderId: string, vendorId: string) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedVendorId = typeof vendorId === 'string' ? parseInt(vendorId, 10) : vendorId;
+    if (isNaN(parsedVendorId) || parsedVendorId <= 0) {
+      throw new Error('Invalid vendor ID format');
+    }
+
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
     });
 
     if (!order) {
       throw new Error('Order not found');
     }
 
-    if (order.vendorId !== vendorId) {
+    if (order.vendorId !== parsedVendorId) {
       throw new Error('Only vendor can decline this order');
     }
 
@@ -732,7 +779,7 @@ export class P2POrderService {
     }
 
     const updated = await prisma.p2POrder.update({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       data: {
         status: 'cancelled',
         cancelledAt: new Date(),
@@ -743,7 +790,7 @@ export class P2POrderService {
     await prisma.p2PChatMessage.create({
       data: {
         orderId: order.id,
-        senderId: vendorId,
+        senderId: parsedVendorId,
         receiverId: order.buyerId,
         message: 'Order has been declined.',
       },
@@ -760,8 +807,18 @@ export class P2POrderService {
    * Get order details
    */
   async getOrderDetails(orderId: string, userId: string) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       include: {
         ad: true,
         buyer: {
@@ -820,14 +877,16 @@ export class P2POrderService {
     }
 
     // Check if user is buyer or vendor
-    if (order.buyerId !== userId && order.vendorId !== userId) {
+    if (order.buyerId !== parsedUserId && order.vendorId !== parsedUserId) {
       throw new Error('Unauthorized to view this order');
     }
 
     // Resolve roles for display
-    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId, order.buyerId);
-    const isUserBuyer = buyerId === userId;
-    const isUserSeller = sellerId === userId;
+    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
+    const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
+    const isUserBuyer = parsedBuyerId === parsedUserId;
+    const isUserSeller = parsedSellerId === parsedUserId;
 
     return {
       id: order.id,
@@ -897,8 +956,18 @@ export class P2POrderService {
    * For RhinoxPay ID, this is automatic
    */
   async confirmPayment(orderId: string, userId: string) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       include: {
         ad: true,
       },
@@ -909,9 +978,10 @@ export class P2POrderService {
     }
 
     // Resolve roles
-    const { buyerId } = this.resolveRoles(order.type, order.vendorId, order.buyerId);
+    const { buyerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
 
-    if (buyerId !== userId) {
+    if (parsedBuyerId !== parsedUserId) {
       throw new Error('Only buyer can confirm payment');
     }
 
@@ -927,7 +997,7 @@ export class P2POrderService {
 
     // For offline payments, mark as payment_made
     const updated = await prisma.p2POrder.update({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       data: {
         status: 'payment_made',
         paymentConfirmedAt: new Date(),
@@ -937,16 +1007,16 @@ export class P2POrderService {
     // Record transaction: Payment confirmed
     const buyerWallet = await prisma.wallet.findFirst({
       where: {
-        userId: buyerId,
+        userId: parsedBuyerId,
         currency: order.fiatCurrency,
       },
     });
 
     if (buyerWallet) {
       await this.recordTransaction(
-        buyerWallet.id,
-        order.id,
-        order.adId,
+        buyerWallet.id.toString(),
+        order.id.toString(),
+        order.adId.toString(),
         {
           type: 'p2p',
           status: 'processing',
@@ -969,7 +1039,7 @@ export class P2POrderService {
     await prisma.p2PChatMessage.create({
       data: {
         orderId: order.id,
-        senderId: userId,
+        senderId: parsedUserId,
         receiverId: order.vendorId,
         message: 'I have made the payment. Please confirm receipt.',
       },
@@ -986,8 +1056,18 @@ export class P2POrderService {
    * Handle RhinoxPay ID payment (automatic)
    */
   private async handleRhinoxPayPayment(orderId: string, userId: string) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       include: {
         ad: true,
       },
@@ -998,12 +1078,14 @@ export class P2POrderService {
     }
 
     // Resolve roles
-    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId, order.buyerId);
+    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
+    const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
 
     // Get buyer's fiat wallet
     const buyerWallet = await prisma.wallet.findFirst({
       where: {
-        userId: buyerId,
+        userId: parsedBuyerId,
         currency: order.fiatCurrency,
       },
     });
@@ -1024,7 +1106,7 @@ export class P2POrderService {
     // For BUY ads: seller is user, buyer is vendor
     const sellerWallet = await prisma.wallet.findFirst({
       where: {
-        userId: sellerId, // Seller receives payment
+        userId: parsedSellerId, // Seller receives payment
         currency: order.fiatCurrency,
       },
     });
@@ -1053,9 +1135,9 @@ export class P2POrderService {
 
     // Record transactions
     await this.recordTransaction(
-      buyerWallet.id,
-      order.id,
-      order.adId,
+      buyerWallet.id.toString(),
+      order.id.toString(),
+      order.adId.toString(),
       {
         type: 'p2p',
         status: 'completed',
@@ -1075,9 +1157,9 @@ export class P2POrderService {
     });
 
     await this.recordTransaction(
-      sellerWallet.id,
-      order.id,
-      order.adId,
+      sellerWallet.id.toString(),
+      order.id.toString(),
+      order.adId.toString(),
       {
         type: 'p2p',
         status: 'completed',
@@ -1098,7 +1180,7 @@ export class P2POrderService {
 
     // Update order: Payment automatically confirmed and received
     const updated = await prisma.p2POrder.update({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       data: {
         status: 'awaiting_coin_release',
         paymentConfirmedAt: new Date(),
@@ -1123,8 +1205,18 @@ export class P2POrderService {
    * For BUY ads: User (seller) marks payment received
    */
   async markPaymentReceived(orderId: string, userId: string) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       include: {
         ad: true,
       },
@@ -1135,10 +1227,12 @@ export class P2POrderService {
     }
 
     // Resolve roles to determine who should mark payment received
-    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId, order.buyerId);
+    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
+    const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
 
     // Only seller can mark payment as received
-    if (sellerId !== userId) {
+    if (parsedSellerId !== parsedUserId) {
       throw new Error('Only seller can mark payment as received');
     }
 
@@ -1148,7 +1242,7 @@ export class P2POrderService {
 
     // Update status to awaiting_coin_release
     const updated = await prisma.p2POrder.update({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       data: {
         status: 'awaiting_coin_release',
         paymentReceivedAt: new Date(),
@@ -1158,16 +1252,16 @@ export class P2POrderService {
     // Record transaction: Payment received by seller
     const sellerWallet = await prisma.wallet.findFirst({
       where: {
-        userId: sellerId, // Seller receives payment
+        userId: parsedSellerId, // Seller receives payment
         currency: order.fiatCurrency,
       },
     });
 
     if (sellerWallet) {
       await this.recordTransaction(
-        sellerWallet.id,
-        order.id,
-        order.adId,
+        sellerWallet.id.toString(),
+        order.id.toString(),
+        order.adId.toString(),
         {
           type: 'p2p',
           status: 'completed',
@@ -1201,8 +1295,13 @@ export class P2POrderService {
    * Release crypto: ALWAYS from SELLER → BUYER
    */
   async releaseCrypto(orderId: string) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       include: {
         ad: true,
       },
@@ -1217,14 +1316,16 @@ export class P2POrderService {
     }
 
     // Resolve roles
-    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId, order.buyerId);
+    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
+    const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
 
     const cryptoAmount = new Decimal(order.cryptoAmount);
 
     // Get seller's VirtualAccount (crypto source)
     const sellerVirtualAccount = await prisma.virtualAccount.findFirst({
       where: {
-        userId: sellerId,
+        userId: parsedSellerId,
         currency: order.cryptoCurrency,
       },
     });
@@ -1236,7 +1337,7 @@ export class P2POrderService {
     // Get buyer's VirtualAccount (crypto destination)
     const buyerVirtualAccount = await prisma.virtualAccount.findFirst({
       where: {
-        userId: buyerId,
+        userId: parsedBuyerId,
         currency: order.cryptoCurrency,
       },
     });
@@ -1278,9 +1379,9 @@ export class P2POrderService {
 
     // Record transactions: Crypto debit and credit
     await this.recordTransaction(
-      sellerId, // userId for crypto
-      order.id,
-      order.adId,
+      sellerId.toString(), // userId for crypto
+      order.id.toString(),
+      order.adId.toString(),
       {
         type: 'p2p',
         status: 'completed',
@@ -1300,9 +1401,9 @@ export class P2POrderService {
     });
 
     await this.recordTransaction(
-      buyerId, // userId for crypto
-      order.id,
-      order.adId,
+      buyerId.toString(), // userId for crypto
+      order.id.toString(),
+      order.adId.toString(),
       {
         type: 'p2p',
         status: 'completed',
@@ -1323,7 +1424,7 @@ export class P2POrderService {
 
     // Update order status
     const updated = await prisma.p2POrder.update({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       data: {
         status: 'completed',
         coinReleasedAt: new Date(),
@@ -1353,8 +1454,18 @@ export class P2POrderService {
    * Cancel order
    */
   async cancelOrder(orderId: string, userId: string) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       include: {
         ad: true,
       },
@@ -1365,7 +1476,7 @@ export class P2POrderService {
     }
 
     // Only buyer or vendor can cancel
-    if (order.buyerId !== userId && order.vendorId !== userId) {
+    if (order.buyerId !== parsedUserId && order.vendorId !== parsedUserId) {
       throw new Error('Unauthorized to cancel this order');
     }
 
@@ -1377,11 +1488,12 @@ export class P2POrderService {
     // If order was accepted, unfreeze crypto
     if (order.status === 'awaiting_payment' && order.acceptedAt) {
       // Resolve roles
-      const { sellerId } = this.resolveRoles(order.type, order.vendorId, order.buyerId);
+      const { sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+      const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
 
       const sellerVirtualAccount = await prisma.virtualAccount.findFirst({
         where: {
-          userId: sellerId,
+          userId: parsedSellerId,
           currency: order.cryptoCurrency,
         },
       });
@@ -1404,7 +1516,7 @@ export class P2POrderService {
     }
 
     const updated = await prisma.p2POrder.update({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       data: {
         status: 'cancelled',
         cancelledAt: new Date(),
@@ -1415,8 +1527,8 @@ export class P2POrderService {
     await prisma.p2PChatMessage.create({
       data: {
         orderId: order.id,
-        senderId: userId,
-        receiverId: order.buyerId === userId ? order.vendorId : order.buyerId,
+        senderId: parsedUserId,
+        receiverId: order.buyerId === parsedUserId ? order.vendorId : order.buyerId,
         message: 'Order has been cancelled.',
       },
     });
@@ -1490,11 +1602,15 @@ export class P2POrderService {
       skip: offset,
     });
 
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+
     return orders.map(order => {
       // Resolve roles for display
-      const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId, order.buyerId);
-      const isUserBuyer = buyerId === userId;
-      const isUserSeller = sellerId === userId;
+      const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+      const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
+      const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
+      const isUserBuyer = parsedBuyerId === parsedUserId;
+      const isUserSeller = parsedSellerId === parsedUserId;
 
       return {
         id: order.id,

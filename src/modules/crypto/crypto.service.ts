@@ -130,8 +130,8 @@ export class CryptoService {
       
       // Generate deposit address
       depositAddress = await this.walletGenerator.generateDepositAddress(
-        virtualAccount.id,
-        userWallet.id,
+        virtualAccount.id.toString(),
+        userWallet.id.toString(),
         blockchain,
         currency
       );
@@ -217,8 +217,8 @@ export class CryptoService {
         // Generate deposit address
         try {
           await this.walletGenerator.generateDepositAddress(
-            virtualAccount.id,
-            userWallet.id,
+            virtualAccount.id.toString(),
+            userWallet.id.toString(),
             wc.blockchain,
             wc.currency
           );

@@ -728,7 +728,7 @@ async function main() {
     const categoryId = categoryMap[prov.category];
     let provider = await prisma.billPaymentProvider.findFirst({
       where: {
-        categoryId,
+        ...(categoryId && { categoryId }),
         code: prov.code,
       },
     });
@@ -739,20 +739,20 @@ async function main() {
         data: {
           name: prov.name,
           logoUrl: prov.logoUrl,
-          metadata: prov.metadata || null,
+          metadata: prov.metadata ? (prov.metadata as any) : null,
           isActive: true,
         },
       });
     } else {
       provider = await prisma.billPaymentProvider.create({
         data: {
-          categoryId,
+          ...(categoryId && { categoryId }),
           code: prov.code,
           name: prov.name,
           logoUrl: prov.logoUrl,
           countryCode: 'NG',
           currency: 'NGN',
-          metadata: prov.metadata || null,
+          metadata: prov.metadata ? (prov.metadata as any) : Prisma.JsonNull,
           isActive: true,
         },
       });

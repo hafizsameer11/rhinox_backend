@@ -49,8 +49,13 @@ export class CountryService {
    * Get country by ID
    */
   async getCountryById(id: string) {
+    const parsedId = typeof id === 'string' ? parseInt(id, 10) : id;
+    if (isNaN(parsedId) || parsedId <= 0) {
+      throw new Error('Invalid country ID format');
+    }
+
     const country = await prisma.country.findUnique({
-      where: { id },
+      where: { id: parsedId },
     });
 
     if (!country) {

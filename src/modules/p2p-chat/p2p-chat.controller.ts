@@ -108,6 +108,13 @@ export class P2PChatController {
         });
       }
 
+      if (!orderId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
       if (!message || message.trim().length === 0) {
         return res.status(400).json({
           success: false,
@@ -122,7 +129,7 @@ export class P2PChatController {
         });
       }
 
-      const chatMessage = await this.service.sendMessage(orderId, userId, message.trim());
+      const chatMessage = await this.service.sendMessage(orderId, userId.toString(), message.trim());
 
       return res.status(201).json({
         success: true,
@@ -215,7 +222,14 @@ export class P2PChatController {
         });
       }
 
-      const messages = await this.service.getChatMessages(orderId, userId);
+      if (!orderId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
+      const messages = await this.service.getChatMessages(orderId, userId.toString());
 
       return res.json({
         success: true,
@@ -274,7 +288,14 @@ export class P2PChatController {
         });
       }
 
-      const result = await this.service.markAsRead(orderId, userId);
+      if (!orderId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
+      const result = await this.service.markAsRead(orderId, userId.toString());
 
       return res.json({
         success: true,

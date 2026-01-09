@@ -1,4 +1,4 @@
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 import { randomBytes } from 'crypto';
 import prisma from '../../core/config/database.js';
 import { WalletService } from '../wallet/wallet.service.js';
@@ -657,9 +657,9 @@ export class BillPaymentService {
         userId: userIdNum,
         categoryId: category.id,
         providerId: data.providerId,
-        name: data.name,
+        name: data.name ?? null,
         accountNumber: data.accountNumber,
-        accountType: data.accountType,
+        accountType: data.accountType ?? null,
       },
       include: {
         category: true,

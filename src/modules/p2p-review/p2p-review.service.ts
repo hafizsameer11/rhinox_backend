@@ -16,9 +16,19 @@ export class P2PReviewService {
       comment?: string;
     }
   ) {
+    const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID format');
+    }
+
+    const parsedReviewerId = typeof reviewerId === 'string' ? parseInt(reviewerId, 10) : reviewerId;
+    if (isNaN(parsedReviewerId) || parsedReviewerId <= 0) {
+      throw new Error('Invalid reviewer ID format');
+    }
+
     // Verify order exists and is completed
     const order = await prisma.p2POrder.findUnique({
-      where: { id: orderId },
+      where: { id: parsedOrderId },
       include: {
         ad: true,
       },
@@ -33,13 +43,13 @@ export class P2PReviewService {
     }
 
     // Verify reviewer is the buyer
-    if (order.buyerId !== reviewerId) {
+    if (order.buyerId !== parsedReviewerId) {
       throw new Error('Only buyer can leave a review');
     }
 
     // Check if review already exists
     const existingReview = await prisma.p2PReview.findUnique({
-      where: { orderId },
+      where: { orderId: parsedOrderId },
     });
 
     if (existingReview) {
@@ -49,8 +59,8 @@ export class P2PReviewService {
     // Create review
     const review = await prisma.p2PReview.create({
       data: {
-        orderId,
-        reviewerId,
+        orderId: parsedOrderId,
+        reviewerId: parsedReviewerId,
         revieweeId: order.vendorId, // Vendor is being reviewed
         adId: order.adId,
         type: data.type,
@@ -86,8 +96,13 @@ export class P2PReviewService {
     limit?: number;
     offset?: number;
   }) {
+    const parsedVendorId = typeof vendorId === 'string' ? parseInt(vendorId, 10) : vendorId;
+    if (isNaN(parsedVendorId) || parsedVendorId <= 0) {
+      throw new Error('Invalid vendor ID format');
+    }
+
     const where: any = {
-      revieweeId: vendorId,
+      revieweeId: parsedVendorId,
     };
 
     if (filters?.type) {
@@ -150,8 +165,13 @@ export class P2PReviewService {
     limit?: number;
     offset?: number;
   }) {
+    const parsedAdId = typeof adId === 'string' ? parseInt(adId, 10) : adId;
+    if (isNaN(parsedAdId) || parsedAdId <= 0) {
+      throw new Error('Invalid ad ID format');
+    }
+
     const where: any = {
-      adId,
+      adId: parsedAdId,
     };
 
     if (filters?.type) {
@@ -217,15 +237,25 @@ export class P2PReviewService {
       comment?: string;
     }
   ) {
+    const parsedReviewId = typeof reviewId === 'string' ? parseInt(reviewId, 10) : reviewId;
+    if (isNaN(parsedReviewId) || parsedReviewId <= 0) {
+      throw new Error('Invalid review ID format');
+    }
+
+    const parsedReviewerId = typeof reviewerId === 'string' ? parseInt(reviewerId, 10) : reviewerId;
+    if (isNaN(parsedReviewerId) || parsedReviewerId <= 0) {
+      throw new Error('Invalid reviewer ID format');
+    }
+
     const review = await prisma.p2PReview.findUnique({
-      where: { id: reviewId },
+      where: { id: parsedReviewId },
     });
 
     if (!review) {
       throw new Error('Review not found');
     }
 
-    if (review.reviewerId !== reviewerId) {
+    if (review.reviewerId !== parsedReviewerId) {
       throw new Error('Only reviewer can update their review');
     }
 
@@ -236,7 +266,7 @@ export class P2PReviewService {
     }
 
     const updated = await prisma.p2PReview.update({
-      where: { id: reviewId },
+      where: { id: parsedReviewId },
       data: {
         type: data.type || review.type,
         comment: data.comment !== undefined ? data.comment : review.comment,
@@ -268,15 +298,25 @@ export class P2PReviewService {
    * Delete review
    */
   async deleteReview(reviewId: string, reviewerId: string) {
+    const parsedReviewId = typeof reviewId === 'string' ? parseInt(reviewId, 10) : reviewId;
+    if (isNaN(parsedReviewId) || parsedReviewId <= 0) {
+      throw new Error('Invalid review ID format');
+    }
+
+    const parsedReviewerId = typeof reviewerId === 'string' ? parseInt(reviewerId, 10) : reviewerId;
+    if (isNaN(parsedReviewerId) || parsedReviewerId <= 0) {
+      throw new Error('Invalid reviewer ID format');
+    }
+
     const review = await prisma.p2PReview.findUnique({
-      where: { id: reviewId },
+      where: { id: parsedReviewId },
     });
 
     if (!review) {
       throw new Error('Review not found');
     }
 
-    if (review.reviewerId !== reviewerId) {
+    if (review.reviewerId !== parsedReviewerId) {
       throw new Error('Only reviewer can delete their review');
     }
 
@@ -287,7 +327,7 @@ export class P2PReviewService {
     }
 
     await prisma.p2PReview.delete({
-      where: { id: reviewId },
+      where: { id: parsedReviewId },
     });
 
     return {

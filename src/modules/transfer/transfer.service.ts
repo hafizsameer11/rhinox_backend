@@ -1,5 +1,5 @@
 import { randomBytes } from 'crypto';
-import Decimal from 'decimal.js';
+import { Decimal, type Decimal as DecimalType } from 'decimal.js';
 import bcrypt from 'bcryptjs';
 import prisma from '../../core/config/database.js';
 import { WalletService } from '../wallet/wallet.service.js';
@@ -41,9 +41,14 @@ export class TransferService {
       };
     }
 
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Check if PIN is set
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: parsedUserId },
       select: { pinHash: true },
     });
 
@@ -140,7 +145,7 @@ export class TransferService {
   /**
    * Calculate transfer fee
    */
-  private calculateTransferFee(amount: Decimal, currency: string, channel: string): Decimal {
+  private calculateTransferFee(amount: DecimalType, currency: string, channel: string): DecimalType {
     // Fee structure: 0.1% or minimum fee
     const feePercent = 0.001; // 0.1%
     const calculatedFee = amount.times(feePercent);
@@ -159,7 +164,7 @@ export class TransferService {
     };
 
     const minFee = new Decimal(minFees[currency] || 1);
-    return Decimal.max(calculatedFee, minFee);
+    return calculatedFee.greaterThan(minFee) ? calculatedFee : minFee;
   }
 
   /**
@@ -181,6 +186,11 @@ export class TransferService {
       phoneNumber?: string; // For mobile money transfers
     }
   ) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Check transfer eligibility (KYC + PIN)
     const eligibility = await this.checkTransferEligibility(userId);
     if (!eligibility.eligible) {
@@ -228,7 +238,6 @@ export class TransferService {
           throw new Error('Payment method must be a bank account');
         }
         // Get decrypted account number for validation
-        const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
         const fullPaymentMethod = await prisma.userPaymentMethod.findFirst({
           where: {
             id: data.paymentMethodId,
@@ -327,7 +336,7 @@ export class TransferService {
       // Store OTP in database
       await prisma.oTP.create({
         data: {
-          userId,
+          userId: parsedUserId,
           code: otpCode,
           type: 'email',
           expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
@@ -359,9 +368,19 @@ export class TransferService {
     emailCode: string,
     pin: string
   ) {
+    const parsedTransactionId = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
+    if (isNaN(parsedTransactionId) || parsedTransactionId <= 0) {
+      throw new Error('Invalid transaction ID format');
+    }
+
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Get transaction
     const transaction = await prisma.transaction.findUnique({
-      where: { id: transactionId },
+      where: { id: parsedTransactionId },
       include: {
         wallet: {
           include: {
@@ -375,7 +394,7 @@ export class TransferService {
       throw new Error('Transaction not found');
     }
 
-    if (transaction.wallet.userId !== userId) {
+    if (transaction.wallet.userId !== parsedUserId) {
       throw new Error('Unauthorized access to transaction');
     }
 
@@ -390,7 +409,7 @@ export class TransferService {
     // Verify email OTP
     const otp = await prisma.oTP.findFirst({
       where: {
-        userId,
+        userId: parsedUserId,
         type: 'email',
         code: emailCode,
         isUsed: false,
@@ -458,7 +477,7 @@ export class TransferService {
     };
 
     const updatedTransaction = await prisma.transaction.update({
-      where: { id: transactionId },
+      where: { id: parsedTransactionId },
       data: {
         status: 'completed',
         completedAt: now,
@@ -523,7 +542,7 @@ export class TransferService {
             fee: 0,
             reference: `${transaction.reference}-CREDIT`,
             channel: 'rhionx_user',
-            description: `Received ${transaction.amount} ${transaction.currency} from ${transaction.wallet.user.firstName || 'User'}`,
+            description: `Received ${transaction.amount} ${transaction.currency} from ${transaction.wallet?.user?.firstName || 'User'}`,
             metadata: {
               senderUserId: userId,
               senderTransactionId: transaction.id,
@@ -559,8 +578,18 @@ export class TransferService {
    * Get transfer receipt
    */
   async getTransferReceipt(userId: string, transactionId: string) {
+    const parsedTransactionId = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
+    if (isNaN(parsedTransactionId) || parsedTransactionId <= 0) {
+      throw new Error('Invalid transaction ID format');
+    }
+
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const transaction = await prisma.transaction.findUnique({
-      where: { id: transactionId },
+      where: { id: parsedTransactionId },
       include: {
         wallet: {
           include: {
@@ -575,7 +604,7 @@ export class TransferService {
       throw new Error('Transaction not found');
     }
 
-    if (transaction.wallet.userId !== userId) {
+    if (transaction.wallet.userId !== parsedUserId) {
       throw new Error('Unauthorized access to transaction');
     }
 

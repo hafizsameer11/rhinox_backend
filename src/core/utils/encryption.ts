@@ -41,7 +41,7 @@ export function decryptPrivateKey(encryptedKey: string): string {
   }
   
   const parts = encryptedKey.split(':');
-  if (parts.length !== 2) {
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
     throw new Error('Invalid encrypted key format');
   }
   
@@ -49,8 +49,12 @@ export function decryptPrivateKey(encryptedKey: string): string {
   const encrypted = parts[1];
   
   const decipher = crypto.createDecipheriv(algorithm, key, iv);
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
+  const updateBuffer = decipher.update(encrypted, 'hex');
+  const finalBuffer = decipher.final();
+  const decrypted = Buffer.concat([
+    updateBuffer,
+    finalBuffer
+  ]).toString('utf8');
   
   return decrypted;
 }

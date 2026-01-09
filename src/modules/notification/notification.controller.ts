@@ -226,7 +226,14 @@ export class NotificationController {
         });
       }
 
-      const result = await this.service.markAsRead(userId, id);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Notification ID is required',
+        });
+      }
+
+      const result = await this.service.markAsRead(userId.toString(), id);
 
       return res.json({
         success: true,
@@ -318,7 +325,14 @@ export class NotificationController {
         });
       }
 
-      const result = await this.service.deleteNotification(userId, id);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Notification ID is required',
+        });
+      }
+
+      const result = await this.service.deleteNotification(userId.toString(), id);
 
       return res.json({
         success: true,

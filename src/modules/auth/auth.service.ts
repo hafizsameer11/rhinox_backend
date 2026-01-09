@@ -91,7 +91,7 @@ export class AuthService {
     await sendOTPEmail(user.email, otpCode, 'email');
 
     // Generate tokens immediately after registration
-    const tokens = this.generateTokens(user.id);
+    const tokens = this.generateTokens(user.id.toString());
 
     // Create session
     await prisma.session.create({
@@ -141,7 +141,7 @@ export class AuthService {
     }
 
     // Generate tokens
-    const tokens = this.generateTokens(user.id);
+    const tokens = this.generateTokens(user.id.toString());
 
     // Create session (long-lived to match token)
     const sessionData: any = {
@@ -196,8 +196,13 @@ export class AuthService {
    * Get current user
    */
   async getCurrentUser(userId: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: parsedUserId },
     });
     if (!user) {
       throw new Error('User not found');
@@ -219,10 +224,15 @@ export class AuthService {
    * Verify Email OTP
    */
   async verifyEmailOTP(userId: string, code: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Find valid OTP
     const otp = await prisma.oTP.findFirst({
       where: {
-        userId,
+        userId: parsedUserId,
         code,
         type: 'email',
         isUsed: false,
@@ -247,7 +257,7 @@ export class AuthService {
 
     // Update user email verification status
     const user = await prisma.user.update({
-      where: { id: userId },
+      where: { id: parsedUserId },
       data: {
         isEmailVerified: true,
       },
@@ -264,7 +274,7 @@ export class AuthService {
     });
 
     // Generate tokens after verification
-    const tokens = this.generateTokens(user.id);
+    const tokens = this.generateTokens(user.id.toString());
 
     // Create session
     await prisma.session.create({
@@ -293,8 +303,13 @@ export class AuthService {
    * Resend Email OTP
    */
   async resendEmailOTP(userId: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: parsedUserId },
     });
 
     if (!user) {
@@ -308,7 +323,7 @@ export class AuthService {
     // Invalidate old unused OTPs
     await prisma.oTP.updateMany({
       where: {
-        userId,
+        userId: parsedUserId,
         type: 'email',
         isUsed: false,
       },
@@ -348,8 +363,13 @@ export class AuthService {
       throw new Error('PIN must be exactly 5 digits');
     }
 
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: parsedUserId },
     });
 
     if (!user) {
@@ -365,7 +385,7 @@ export class AuthService {
 
     // Update user
     await prisma.user.update({
-      where: { id: userId },
+      where: { id: parsedUserId },
       data: { pinHash },
     });
 
@@ -378,8 +398,13 @@ export class AuthService {
    * Verify password for PIN setup/change
    */
   async verifyPasswordForPIN(userId: string, password: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: parsedUserId },
       select: { id: true, passwordHash: true },
     });
 
@@ -403,13 +428,18 @@ export class AuthService {
    * Set or update PIN after password verification
    */
   async setPINAfterVerification(userId: string, pin: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Validate PIN (must be 5 digits)
     if (!/^\d{5}$/.test(pin)) {
       throw new Error('PIN must be exactly 5 digits');
     }
 
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: parsedUserId },
       select: { id: true, pinHash: true },
     });
 
@@ -422,7 +452,7 @@ export class AuthService {
 
     // Update user PIN (can be setting new or updating existing)
     await prisma.user.update({
-      where: { id: userId },
+      where: { id: parsedUserId },
       data: { pinHash },
     });
 
@@ -436,13 +466,18 @@ export class AuthService {
    * Change PIN
    */
   async changePIN(userId: string, oldPin: string, newPin: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     // Validate new PIN
     if (!/^\d{5}$/.test(newPin)) {
       throw new Error('New PIN must be exactly 5 digits');
     }
 
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: parsedUserId },
     });
 
     if (!user) {
@@ -464,7 +499,7 @@ export class AuthService {
 
     // Update user
     await prisma.user.update({
-      where: { id: userId },
+      where: { id: parsedUserId },
       data: { pinHash },
     });
 

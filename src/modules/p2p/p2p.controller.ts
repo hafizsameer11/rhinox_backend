@@ -500,7 +500,14 @@ export class P2PController {
         });
       }
 
-      const result = await this.service.getAd(userId, id);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ad ID is required',
+        });
+      }
+
+      const result = await this.service.getAd(userId.toString(), id);
 
       return res.json({
         success: true,
@@ -565,6 +572,13 @@ export class P2PController {
         });
       }
 
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ad ID is required',
+        });
+      }
+
       if (!status) {
         return res.status(400).json({
           success: false,
@@ -579,7 +593,7 @@ export class P2PController {
         });
       }
 
-      const result = await this.service.updateAdStatus(userId, id, status, isOnline);
+      const result = await this.service.updateAdStatus(userId.toString(), id, status, isOnline);
 
       return res.json({
         success: true,
@@ -662,7 +676,14 @@ export class P2PController {
         });
       }
 
-      const result = await this.service.updateAd(userId, id, {
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ad ID is required',
+        });
+      }
+
+      const result = await this.service.updateAd(userId.toString(), id, {
         price,
         volume,
         minOrder,

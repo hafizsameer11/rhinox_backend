@@ -84,13 +84,13 @@ export class WebhookController {
         data: {
           rawData: JSON.stringify(req.body),
           headers: JSON.stringify(req.headers),
-          ipAddress: req.ip || req.socket.remoteAddress,
-          userAgent: req.get('user-agent'),
+          ipAddress: (req.ip || req.socket.remoteAddress) ?? null,
+          userAgent: req.get('user-agent') ?? null,
         },
       });
 
       // Process webhook asynchronously
-      this.processWebhook(req.body, rawWebhook.id).catch(error => {
+      this.processWebhook(req.body, rawWebhook.id.toString()).catch(error => {
         console.error('Webhook processing error:', error);
       });
 
@@ -112,6 +112,11 @@ export class WebhookController {
    * Process webhook event
    */
   private async processWebhook(webhookData: any, rawWebhookId: string) {
+    const parsedRawWebhookId = typeof rawWebhookId === 'string' ? parseInt(rawWebhookId, 10) : rawWebhookId;
+    if (isNaN(parsedRawWebhookId) || parsedRawWebhookId <= 0) {
+      throw new Error('Invalid raw webhook ID format');
+    }
+
     try {
       // Save webhook response
       await prisma.webhookResponse.create({
@@ -145,7 +150,7 @@ export class WebhookController {
         // Find deposit address in database
         const depositAddress = await prisma.depositAddress.findFirst({
           where: {
-            address: { equals: webhookAddr, mode: 'insensitive' },
+            address: { equals: webhookAddr },
           },
           include: {
             virtualAccount: true,
@@ -169,7 +174,7 @@ export class WebhookController {
 
         if (existingTx) {
           await prisma.tatumRawWebhook.update({
-            where: { id: rawWebhookId },
+            where: { id: parsedRawWebhookId },
             data: { processed: true, processedAt: new Date() },
           });
           return { processed: false, reason: 'duplicate_tx' };
@@ -206,7 +211,7 @@ export class WebhookController {
 
       // Mark as processed
       await prisma.tatumRawWebhook.update({
-        where: { id: rawWebhookId },
+        where: { id: parsedRawWebhookId },
         data: { processed: true, processedAt: new Date() },
       });
 
@@ -214,7 +219,7 @@ export class WebhookController {
     } catch (error: any) {
       // Mark as processed with error
       await prisma.tatumRawWebhook.update({
-        where: { id: rawWebhookId },
+        where: { id: parsedRawWebhookId },
         data: {
           processed: true,
           processedAt: new Date(),

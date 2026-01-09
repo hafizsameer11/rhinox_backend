@@ -155,14 +155,14 @@ export class P2POrderController {
   async browseAds(req: Request, res: Response) {
     try {
       const filters = {
-        type: req.query.type as 'buy' | 'sell' | undefined,
-        cryptoCurrency: req.query.cryptoCurrency as string | undefined,
-        fiatCurrency: req.query.fiatCurrency as string | undefined,
-        countryCode: req.query.countryCode as string | undefined,
-        minPrice: req.query.minPrice as string | undefined,
-        maxPrice: req.query.maxPrice as string | undefined,
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
-        offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
+        ...(req.query.type && { type: req.query.type as 'buy' | 'sell' }),
+        ...(req.query.cryptoCurrency && { cryptoCurrency: req.query.cryptoCurrency as string }),
+        ...(req.query.fiatCurrency && { fiatCurrency: req.query.fiatCurrency as string }),
+        ...(req.query.countryCode && { countryCode: req.query.countryCode as string }),
+        ...(req.query.minPrice && { minPrice: req.query.minPrice as string }),
+        ...(req.query.maxPrice && { maxPrice: req.query.maxPrice as string }),
+        ...(req.query.limit && { limit: parseInt(req.query.limit as string, 10) }),
+        ...(req.query.offset && { offset: parseInt(req.query.offset as string, 10) }),
       };
 
       const ads = await this.service.browseAds(filters);
@@ -273,6 +273,13 @@ export class P2POrderController {
     try {
       const { id } = req.params;
 
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ad ID is required',
+        });
+      }
+
       // Reject common route names that might accidentally match
       if (id === 'browse' || id === 'buy' || id === 'sell') {
         return res.status(404).json({
@@ -363,13 +370,13 @@ export class P2POrderController {
     try {
       const filters = {
         type: 'buy' as const, // User wants to buy = show vendor sell ads
-        cryptoCurrency: req.query.cryptoCurrency as string | undefined,
-        fiatCurrency: req.query.fiatCurrency as string | undefined,
-        countryCode: req.query.countryCode as string | undefined,
-        minPrice: req.query.minPrice as string | undefined,
-        maxPrice: req.query.maxPrice as string | undefined,
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
-        offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
+        ...(req.query.cryptoCurrency && { cryptoCurrency: req.query.cryptoCurrency as string }),
+        ...(req.query.fiatCurrency && { fiatCurrency: req.query.fiatCurrency as string }),
+        ...(req.query.countryCode && { countryCode: req.query.countryCode as string }),
+        ...(req.query.minPrice && { minPrice: req.query.minPrice as string }),
+        ...(req.query.maxPrice && { maxPrice: req.query.maxPrice as string }),
+        ...(req.query.limit && { limit: parseInt(req.query.limit as string, 10) }),
+        ...(req.query.offset && { offset: parseInt(req.query.offset as string, 10) }),
       };
 
       const ads = await this.service.browseAds(filters);
@@ -447,13 +454,13 @@ export class P2POrderController {
     try {
       const filters = {
         type: 'sell' as const, // User wants to sell = show vendor buy ads
-        cryptoCurrency: req.query.cryptoCurrency as string | undefined,
-        fiatCurrency: req.query.fiatCurrency as string | undefined,
-        countryCode: req.query.countryCode as string | undefined,
-        minPrice: req.query.minPrice as string | undefined,
-        maxPrice: req.query.maxPrice as string | undefined,
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
-        offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
+        ...(req.query.cryptoCurrency && { cryptoCurrency: req.query.cryptoCurrency as string }),
+        ...(req.query.fiatCurrency && { fiatCurrency: req.query.fiatCurrency as string }),
+        ...(req.query.countryCode && { countryCode: req.query.countryCode as string }),
+        ...(req.query.minPrice && { minPrice: req.query.minPrice as string }),
+        ...(req.query.maxPrice && { maxPrice: req.query.maxPrice as string }),
+        ...(req.query.limit && { limit: parseInt(req.query.limit as string, 10) }),
+        ...(req.query.offset && { offset: parseInt(req.query.offset as string, 10) }),
       };
 
       const ads = await this.service.browseAds(filters);
@@ -697,7 +704,14 @@ export class P2POrderController {
         });
       }
 
-      const result = await this.service.acceptOrder(id, userId);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
+      const result = await this.service.acceptOrder(id, userId.toString());
 
       return res.json({
         success: true,
@@ -761,7 +775,14 @@ export class P2POrderController {
         });
       }
 
-      const result = await this.service.declineOrder(id, userId);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
+      const result = await this.service.declineOrder(id, userId.toString());
 
       return res.json({
         success: true,
@@ -877,13 +898,13 @@ export class P2POrderController {
       }
 
       const filters = {
-        role: req.query.role as 'buyer' | 'vendor' | undefined,
-        status: req.query.status as string | undefined,
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
-        offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
+        ...(req.query.role && { role: req.query.role as 'buyer' | 'vendor' }),
+        ...(req.query.status && { status: req.query.status as string }),
+        ...(req.query.limit && { limit: parseInt(req.query.limit as string, 10) }),
+        ...(req.query.offset && { offset: parseInt(req.query.offset as string, 10) }),
       };
 
-      const orders = await this.service.getUserOrders(userId, filters);
+      const orders = await this.service.getUserOrders(userId.toString(), filters);
 
       return res.json({
         success: true,
@@ -993,12 +1014,12 @@ export class P2POrderController {
 
       const filters = {
         role: 'vendor' as const,
-        status: req.query.status as string | undefined,
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
-        offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
+        ...(req.query.status && { status: req.query.status as string }),
+        ...(req.query.limit && { limit: parseInt(req.query.limit as string, 10) }),
+        ...(req.query.offset && { offset: parseInt(req.query.offset as string, 10) }),
       };
 
-      const orders = await this.service.getUserOrders(userId, filters);
+      const orders = await this.service.getUserOrders(userId.toString(), filters);
 
       return res.json({
         success: true,
@@ -1098,7 +1119,14 @@ export class P2POrderController {
         });
       }
 
-      const order = await this.service.getOrderDetails(id, userId);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
+      const order = await this.service.getOrderDetails(id, userId.toString());
 
       return res.json({
         success: true,
@@ -1211,7 +1239,14 @@ export class P2POrderController {
         });
       }
 
-      const result = await this.service.confirmPayment(id, userId);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
+      const result = await this.service.confirmPayment(id, userId.toString());
 
       return res.json({
         success: true,
@@ -1331,7 +1366,14 @@ export class P2POrderController {
         });
       }
 
-      const result = await this.service.markPaymentReceived(id, userId);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
+      const result = await this.service.markPaymentReceived(id, userId.toString());
 
       return res.json({
         success: true,
@@ -1442,7 +1484,14 @@ export class P2POrderController {
         });
       }
 
-      const result = await this.service.markPaymentReceived(id, userId);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
+      const result = await this.service.markPaymentReceived(id, userId.toString());
 
       return res.json({
         success: true,
@@ -1504,7 +1553,14 @@ export class P2POrderController {
         });
       }
 
-      const result = await this.service.cancelOrder(id, userId);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
+      const result = await this.service.cancelOrder(id, userId.toString());
 
       return res.json({
         success: true,
@@ -1514,73 +1570,6 @@ export class P2POrderController {
       return res.status(400).json({
         success: false,
         message: error.message || 'Failed to cancel order',
-      });
-    }
-  }
-
-  /**
-   * @swagger
-   * /api/p2p/vendor/orders:
-   *   get:
-   *     summary: "[VENDOR] Get my vendor orders - Orders where I am the ad owner"
-   *     description: |
-   *       Get all orders for ads owned by the authenticated vendor.
-   *       This is a convenience endpoint that filters `getUserOrders` by `role=vendor`.
-   *     tags: ["P2P - VENDOR (Order Management)"]
-   *     security:
-   *       - bearerAuth: []
-   *       - cookieAuth: []
-   *     parameters:
-   *       - in: query
-   *         name: status
-   *         schema:
-   *           type: string
-   *           enum: [pending, awaiting_payment, payment_made, awaiting_coin_release, completed, cancelled, disputed, refunded, expired]
-   *         description: Filter by order status
-   *       - in: query
-   *         name: limit
-   *         schema:
-   *           type: integer
-   *           default: 50
-   *       - in: query
-   *         name: offset
-   *         schema:
-   *           type: integer
-   *           default: 0
-   *     responses:
-   *       200:
-   *         description: List of vendor orders
-   *       401:
-   *         description: Unauthorized
-   */
-  async getVendorOrders(req: Request, res: Response) {
-    try {
-      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
-
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          message: 'Unauthorized',
-        });
-      }
-
-      const filters = {
-        role: 'vendor' as const,
-        status: req.query.status as string | undefined,
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
-        offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
-      };
-
-      const orders = await this.service.getUserOrders(userId, filters);
-
-      return res.json({
-        success: true,
-        data: orders,
-      });
-    } catch (error: any) {
-      return res.status(400).json({
-        success: false,
-        message: error.message || 'Failed to get vendor orders',
       });
     }
   }
@@ -1723,8 +1712,15 @@ export class P2POrderController {
         });
       }
 
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
       // Use the same confirmPayment logic since vendor is the buyer
-      const result = await this.service.confirmPayment(id, userId);
+      const result = await this.service.confirmPayment(id, userId.toString());
 
       return res.json({
         success: true,

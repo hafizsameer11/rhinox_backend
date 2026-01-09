@@ -120,7 +120,14 @@ export class P2PReviewController {
         });
       }
 
-      const review = await this.service.createReview(orderId, userId, {
+      if (!orderId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
+
+      const review = await this.service.createReview(orderId, userId.toString(), {
         type: type as 'positive' | 'negative',
         comment: comment || undefined,
       });
@@ -209,10 +216,18 @@ export class P2PReviewController {
   async getVendorReviews(req: Request, res: Response) {
     try {
       const { vendorId } = req.params;
+
+      if (!vendorId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Vendor ID is required',
+        });
+      }
+
       const filters = {
-        type: req.query.type as 'positive' | 'negative' | undefined,
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
-        offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
+        ...(req.query.type && { type: req.query.type as 'positive' | 'negative' }),
+        ...(req.query.limit && { limit: parseInt(req.query.limit as string, 10) }),
+        ...(req.query.offset && { offset: parseInt(req.query.offset as string, 10) }),
       };
 
       const reviews = await this.service.getVendorReviews(vendorId, filters);
@@ -301,10 +316,18 @@ export class P2PReviewController {
   async getAdReviews(req: Request, res: Response) {
     try {
       const { adId } = req.params;
+
+      if (!adId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ad ID is required',
+        });
+      }
+
       const filters = {
-        type: req.query.type as 'positive' | 'negative' | undefined,
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
-        offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
+        ...(req.query.type && { type: req.query.type as 'positive' | 'negative' }),
+        ...(req.query.limit && { limit: parseInt(req.query.limit as string, 10) }),
+        ...(req.query.offset && { offset: parseInt(req.query.offset as string, 10) }),
       };
 
       const reviews = await this.service.getAdReviews(adId, filters);
@@ -397,9 +420,16 @@ export class P2PReviewController {
         });
       }
 
-      const review = await this.service.updateReview(id, userId, {
-        type: type as 'positive' | 'negative' | undefined,
-        comment: comment || undefined,
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Review ID is required',
+        });
+      }
+
+      const review = await this.service.updateReview(id, userId.toString(), {
+        ...(type && { type: type as 'positive' | 'negative' }),
+        ...(comment && { comment }),
       });
 
       return res.json({
@@ -460,7 +490,14 @@ export class P2PReviewController {
         });
       }
 
-      const result = await this.service.deleteReview(id, userId);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Review ID is required',
+        });
+      }
+
+      const result = await this.service.deleteReview(id, userId.toString());
 
       return res.json({
         success: true,

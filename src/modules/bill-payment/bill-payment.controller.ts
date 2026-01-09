@@ -557,8 +557,15 @@ export class BillPaymentController {
         });
       }
 
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Beneficiary ID is required',
+        });
+      }
+
       const beneficiary = await this.service.updateBeneficiary(
-        userId,
+        userId.toString(),
         parseInt(id, 10),
         req.body
       );
@@ -607,7 +614,14 @@ export class BillPaymentController {
         });
       }
 
-      const result = await this.service.deleteBeneficiary(userId, parseInt(id, 10));
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Beneficiary ID is required',
+        });
+      }
+
+      const result = await this.service.deleteBeneficiary(userId.toString(), parseInt(id, 10));
       return res.json(result);
     } catch (error: any) {
       return res.status(400).json({

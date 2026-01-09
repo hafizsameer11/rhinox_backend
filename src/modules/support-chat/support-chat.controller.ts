@@ -192,11 +192,17 @@ export class SupportChatController {
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
       const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
 
-      const chats = await this.service.getUserChats(userId, {
+      const filters: {
+        status: 'active' | 'resolved' | 'appealed' | 'all';
+        limit?: number;
+        offset?: number;
+      } = {
         status: status || 'all',
-        limit,
-        offset,
-      });
+      };
+      if (limit !== undefined) filters.limit = limit;
+      if (offset !== undefined) filters.offset = offset;
+
+      const chats = await this.service.getUserChats(userId, filters);
 
       return res.json({
         success: true,
@@ -276,6 +282,13 @@ export class SupportChatController {
         return res.status(401).json({
           success: false,
           message: 'Unauthorized',
+        });
+      }
+
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Chat ID is required',
         });
       }
 
@@ -391,6 +404,13 @@ export class SupportChatController {
         });
       }
 
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Chat ID is required',
+        });
+      }
+
       const chatMessage = await this.service.sendMessage(id, userId, message);
 
       return res.status(201).json({
@@ -454,6 +474,13 @@ export class SupportChatController {
         return res.status(401).json({
           success: false,
           message: 'Unauthorized',
+        });
+      }
+
+      if (!id || !userId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Chat ID and user ID are required',
         });
       }
 

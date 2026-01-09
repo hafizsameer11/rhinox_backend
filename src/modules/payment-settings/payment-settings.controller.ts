@@ -134,6 +134,13 @@ export class PaymentSettingsController {
         });
       }
 
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment method ID is required',
+        });
+      }
+
       const result = await this.service.getPaymentMethod(userId, id);
 
       return res.json({
@@ -513,6 +520,13 @@ export class PaymentSettingsController {
         });
       }
 
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment method ID is required',
+        });
+      }
+
       const result = await this.service.updatePaymentMethod(userId, id, {
         accountType,
         bankName,
@@ -568,6 +582,13 @@ export class PaymentSettingsController {
         });
       }
 
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment method ID is required',
+        });
+      }
+
       const result = await this.service.setDefaultPaymentMethod(userId, id);
 
       return res.json({
@@ -613,6 +634,13 @@ export class PaymentSettingsController {
         return res.status(401).json({
           success: false,
           message: 'Unauthorized',
+        });
+      }
+
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment method ID is required',
         });
       }
 

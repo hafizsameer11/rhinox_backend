@@ -179,8 +179,8 @@ export class DepositService {
         reference,
         channel: data.channel,
         country: data.countryCode,
-        bankAccountId,
-        providerId,
+        bankAccountId: bankAccountId ?? null,
+        providerId: providerId ?? null,
         paymentMethod,
         description: `Deposit ${data.amount} ${data.currency} via ${data.channel}`,
       },
@@ -289,7 +289,7 @@ export class DepositService {
 
     // Update transaction status to completed
     const updatedTransaction = await prisma.transaction.update({
-      where: { id: transactionId },
+      where: { id: parsedTransactionId },
       data: {
         status: 'completed',
         completedAt: new Date(),
@@ -326,7 +326,7 @@ export class DepositService {
         creditedAmount: creditedAmount.toString(),
         fee: updatedTransaction.fee.toString(),
         reference: updatedTransaction.reference,
-        transactionId: updatedTransaction.id,
+        transactionId: updatedTransaction.id.toString(),
         country: updatedTransaction.country || 'N/A',
         channel: updatedTransaction.channel || 'N/A',
         paymentMethod: updatedTransaction.paymentMethod || 'Bank Transfer',

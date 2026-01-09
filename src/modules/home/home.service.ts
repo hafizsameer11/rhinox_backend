@@ -1,4 +1,4 @@
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 
 /**
@@ -195,9 +195,14 @@ export class HomeService {
    * Get wallet balances summary
    */
   async getWalletBalances(userId: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const wallets = await prisma.wallet.findMany({
       where: {
-        userId,
+        userId: parsedUserId,
         isActive: true,
       },
       include: {
@@ -213,8 +218,8 @@ export class HomeService {
     return wallets.map((wallet) => ({
       id: wallet.id,
       currency: wallet.currency,
-      currencyName: wallet.currencyName || wallet.currencyRef?.name,
-      symbol: wallet.currencyRef?.symbol,
+      currencyName: wallet.currencyName || wallet.currencyRef?.name || null,
+      symbol: wallet.currencyRef?.symbol || null,
       type: wallet.type,
       balance: wallet.balance.toString(),
       lockedBalance: wallet.lockedBalance.toString(),

@@ -1,5 +1,5 @@
 import prisma from '../../core/config/database.js';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 /**
  * Notification Service

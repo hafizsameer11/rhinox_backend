@@ -1,4 +1,4 @@
-import Decimal from 'decimal.js';
+import { Decimal, type Decimal as DecimalType } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 
 /**
@@ -78,9 +78,9 @@ export class TransactionHistoryService {
   /**
    * Generate chart data (hourly breakdown)
    */
-  private generateChartData(transactions: Array<{ createdAt: Date; amount: Decimal }>, startDate: Date, endDate: Date): Array<{ hour: string; amount: string }> {
+  private generateChartData(transactions: Array<{ createdAt: Date; amount: DecimalType }>, startDate: Date, endDate: Date): Array<{ hour: string; amount: string }> {
     // Initialize hourly buckets (24 hours)
-    const hourlyData: Map<number, Decimal> = new Map();
+    const hourlyData: Map<number, DecimalType> = new Map();
     
     // Initialize all hours to 0
     for (let i = 0; i < 24; i++) {
@@ -310,7 +310,7 @@ export class TransactionHistoryService {
     const typeMap = new Map<string, {
       normalizedType: string;
       currency: string;
-      totalAmount: Decimal;
+      totalAmount: DecimalType;
       count: number;
       walletType: string;
     }>();
@@ -415,7 +415,7 @@ export class TransactionHistoryService {
       }
 
       typeSummary.push({
-        type: key.split('_')[0], // Original transaction type
+        type: key.split('_')[0] || key, // Original transaction type
         normalizedType: data.normalizedType,
         currency: data.currency,
         amount: data.totalAmount.toString(),

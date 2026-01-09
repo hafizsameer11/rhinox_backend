@@ -1,4 +1,4 @@
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 import { Prisma } from '@prisma/client';
 
@@ -97,8 +97,8 @@ export class P2PService {
         maxOrder: maxOrder.toNumber(),
         autoAccept: data.autoAccept || false,
         paymentMethodIds: parsedPaymentMethodIds as any,
-        countryCode: data.countryCode,
-        description: data.description,
+        countryCode: data.countryCode ?? null,
+        description: data.description ?? null,
         status: 'available',
         isOnline: true,
       },
@@ -218,8 +218,8 @@ export class P2PService {
         maxOrder: maxOrder.toNumber(),
         autoAccept: data.autoAccept || false,
         paymentMethodIds: parsedPaymentMethodIds as any,
-        countryCode: data.countryCode,
-        description: data.description,
+        countryCode: data.countryCode ?? null,
+        description: data.description ?? null,
         status: 'available',
         isOnline: true,
       },

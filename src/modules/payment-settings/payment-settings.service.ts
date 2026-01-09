@@ -263,8 +263,6 @@ export class PaymentSettingsService {
         userId: parsedUserId,
         type: 'mobile_money',
         providerId: parsedProviderId,
-        type: 'mobile_money',
-        providerId: data.providerId,
         phoneNumber: data.phoneNumber,
         countryCode: data.countryCode,
         currency: data.currency,

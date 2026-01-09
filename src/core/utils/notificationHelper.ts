@@ -25,13 +25,13 @@ export async function createTransactionNotification(
   return await notificationService.createNotification(userId, {
     type: 'transaction',
     title: data.title,
-    message: data.message,
+    ...(data.message !== undefined && { message: data.message }),
     status: data.status,
     amount: data.amount,
     currency: data.currency,
     reference: data.reference,
     link: data.link || `/transactions/${data.reference}`,
-    metadata: data.metadata,
+    ...(data.metadata !== undefined && { metadata: data.metadata }),
   });
 }
 
@@ -54,13 +54,13 @@ export async function createP2PNotification(
   return await notificationService.createNotification(userId, {
     type: 'p2p',
     title: data.title,
-    message: data.message,
+    ...(data.message !== undefined && { message: data.message }),
     status: data.status,
-    amount: data.amount,
-    currency: data.currency,
-    reference: data.reference,
-    link: data.link,
-    metadata: data.metadata,
+    ...(data.amount !== undefined && { amount: data.amount }),
+    ...(data.currency !== undefined && { currency: data.currency }),
+    ...(data.reference !== undefined && { reference: data.reference }),
+    ...(data.link !== undefined && { link: data.link }),
+    ...(data.metadata !== undefined && { metadata: data.metadata }),
   });
 }
 
@@ -83,13 +83,13 @@ export async function createConversionNotification(
   return await notificationService.createNotification(userId, {
     type: 'conversion',
     title: data.title,
-    message: data.message,
+    ...(data.message !== undefined && { message: data.message }),
     status: data.status,
-    amount: data.amount,
-    currency: data.currency,
-    reference: data.reference,
-    link: data.link,
-    metadata: data.metadata,
+    ...(data.amount !== undefined && { amount: data.amount }),
+    ...(data.currency !== undefined && { currency: data.currency }),
+    ...(data.reference !== undefined && { reference: data.reference }),
+    ...(data.link !== undefined && { link: data.link }),
+    ...(data.metadata !== undefined && { metadata: data.metadata }),
   });
 }
 
@@ -109,10 +109,10 @@ export async function createGeneralNotification(
   return await notificationService.createNotification(userId, {
     type: 'general',
     title: data.title,
-    message: data.message,
+    ...(data.message !== undefined && { message: data.message }),
     status: data.status || 'info',
-    link: data.link,
-    metadata: data.metadata,
+    ...(data.link !== undefined && { link: data.link }),
+    ...(data.metadata !== undefined && { metadata: data.metadata }),
   });
 }
 
@@ -131,10 +131,9 @@ export async function createPromotionalNotification(
   return await notificationService.createNotification(userId, {
     type: 'promotional',
     title: data.title,
-    message: data.message,
+    ...(data.message !== undefined && { message: data.message }),
     status: 'info',
-    link: data.link,
-    metadata: data.metadata,
+    ...(data.link !== undefined && { link: data.link }),
+    ...(data.metadata !== undefined && { metadata: data.metadata }),
   });
 }
-

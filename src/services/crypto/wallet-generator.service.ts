@@ -180,9 +180,14 @@ export class WalletGeneratorService {
     blockchain: string,
     currency: string
   ) {
+    const parsedUserWalletId = typeof userWalletId === 'string' ? parseInt(userWalletId, 10) : userWalletId;
+    if (isNaN(parsedUserWalletId) || parsedUserWalletId <= 0) {
+      throw new Error('Invalid user wallet ID format');
+    }
+
     // Get user wallet
     const userWallet = await prisma.userWallet.findUnique({
-      where: { id: userWalletId },
+      where: { id: parsedUserWalletId },
     });
 
     if (!userWallet) {
@@ -236,7 +241,10 @@ export class WalletGeneratorService {
         take: 1,
       });
 
-      const nextIndex = existingAddresses.length > 0 ? existingAddresses[0].index + 1 : 0;
+      const firstAddress = existingAddresses.length > 0 ? existingAddresses[0] : null;
+      const nextIndex = firstAddress && firstAddress.index !== null 
+        ? (firstAddress.index || 0) + 1 
+        : 0;
 
       address = await this.generateAddress(normalizedBlockchain, userWallet.xpub, nextIndex);
       
@@ -248,9 +256,14 @@ export class WalletGeneratorService {
     const encryptedPrivateKey = encryptPrivateKey(privateKey);
 
     // Store deposit address
+    const parsedVirtualAccountId = typeof virtualAccountId === 'string' ? parseInt(virtualAccountId, 10) : virtualAccountId;
+    if (isNaN(parsedVirtualAccountId) || parsedVirtualAccountId <= 0) {
+      throw new Error('Invalid virtual account ID format');
+    }
+
     const depositAddress = await prisma.depositAddress.create({
       data: {
-        virtualAccountId,
+        virtualAccountId: parsedVirtualAccountId,
         userWalletId: userWallet.id,
         blockchain: normalizedBlockchain,
         currency,

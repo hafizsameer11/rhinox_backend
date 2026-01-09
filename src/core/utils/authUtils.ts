@@ -85,11 +85,12 @@ export const verifyToken = async (token: string): Promise<{ id: string | number;
  * @returns JWT access token
  */
 export const generateAccessToken = (userId: string): string => {
-  return jwt.sign(
-    { userId },
-    process.env.JWT_SECRET || 'your-secret-key',
-    { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
-  );
+  const secret = process.env.JWT_SECRET || process.env.ACCESS_TOKEN_SECRET || 'your-secret-key';
+  if (!secret) {
+    throw new Error('JWT_SECRET or ACCESS_TOKEN_SECRET must be set');
+  }
+  const payload = { userId };
+  return jwt.sign(payload, secret, { expiresIn: '1h' });
 };
 
 
