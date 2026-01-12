@@ -118,12 +118,22 @@ export class BillPaymentService {
    * Get plans/bundles by provider
    */
   async getPlansByProvider(providerId: number) {
+    // Validate providerId is a positive integer
+    if (!providerId || providerId <= 0 || !Number.isInteger(providerId)) {
+      throw new Error('Invalid providerId. Must be a positive integer');
+    }
+
     const provider = await prisma.billPaymentProvider.findUnique({
       where: { id: providerId },
     });
 
     if (!provider) {
       throw new Error('Provider not found');
+    }
+
+    // Check if provider is active
+    if (!provider.isActive) {
+      throw new Error('Provider is not active');
     }
 
     const plans = await prisma.billPaymentPlan.findMany({

@@ -13,14 +13,16 @@ export class P2PChatService {
     senderId: string,
     message: string
   ) {
+    // Parse orderId and senderId to integers
     const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
-    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
-      throw new Error('Invalid order ID format');
-    }
-
     const parsedSenderId = typeof senderId === 'string' ? parseInt(senderId, 10) : senderId;
+    
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID');
+    }
+    
     if (isNaN(parsedSenderId) || parsedSenderId <= 0) {
-      throw new Error('Invalid sender ID format');
+      throw new Error('Invalid sender ID');
     }
 
     // Verify order exists and user is part of it
@@ -75,15 +77,18 @@ export class P2PChatService {
    * Get chat messages for an order
    */
   async getChatMessages(orderId: string, userId: string) {
+    // Parse orderId and userId to integers
     const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
-    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
-      throw new Error('Invalid order ID format');
-    }
-
     const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-    if (isNaN(parsedUserId) || parsedUserId <= 0) {
-      throw new Error('Invalid user ID format');
+    
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID');
     }
+    
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID');
+    }
+    
 
     // Verify order exists and user is part of it
     const order = await prisma.p2POrder.findUnique({
@@ -131,15 +136,18 @@ export class P2PChatService {
    * Mark messages as read
    */
   async markAsRead(orderId: string, userId: string) {
+    // Parse orderId and userId to integers
     const parsedOrderId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
-    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
-      throw new Error('Invalid order ID format');
-    }
-
     const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-    if (isNaN(parsedUserId) || parsedUserId <= 0) {
-      throw new Error('Invalid user ID format');
+    
+    if (isNaN(parsedOrderId) || parsedOrderId <= 0) {
+      throw new Error('Invalid order ID');
     }
+    
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID');
+    }
+    
 
     // Verify order exists and user is part of it
     const order = await prisma.p2POrder.findUnique({
@@ -177,11 +185,11 @@ export class P2PChatService {
    * Get unread message count for user
    */
   async getUnreadCount(userId: string) {
+    // Parse userId to integer
     const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(parsedUserId) || parsedUserId <= 0) {
-      throw new Error('Invalid user ID format');
+      throw new Error('Invalid user ID');
     }
-
     const count = await prisma.p2PChatMessage.count({
       where: {
         receiverId: parsedUserId,

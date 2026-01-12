@@ -235,9 +235,35 @@ export class TransactionHistoryController {
 
       // Parse query parameters
       const period = (req.query.period as 'D' | 'W' | 'M' | 'Custom') || 'M';
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+      
+      // Handle undefined string values from frontend
+      const startDateParam = req.query.startDate as string | undefined;
+      const endDateParam = req.query.endDate as string | undefined;
+      
+      // Check if values are the string "undefined" or actually undefined/null
+      const startDate = startDateParam && startDateParam !== 'undefined' && startDateParam !== 'null' 
+        ? new Date(startDateParam) 
+        : undefined;
+      const endDate = endDateParam && endDateParam !== 'undefined' && endDateParam !== 'null'
+        ? new Date(endDateParam)
+        : undefined;
+      
       const currency = req.query.currency as string | undefined;
+
+      // Validate dates if provided
+      if (startDate && isNaN(startDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid startDate format. Use YYYY-MM-DD',
+        });
+      }
+      
+      if (endDate && isNaN(endDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid endDate format. Use YYYY-MM-DD',
+        });
+      }
 
       // Validate custom date range
       if (period === 'Custom') {
@@ -245,12 +271,6 @@ export class TransactionHistoryController {
           return res.status(400).json({
             success: false,
             message: 'startDate and endDate are required for Custom period',
-          });
-        }
-        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-          return res.status(400).json({
-            success: false,
-            message: 'Invalid date format. Use YYYY-MM-DD',
           });
         }
         if (startDate > endDate) {
@@ -261,6 +281,9 @@ export class TransactionHistoryController {
         }
       }
 
+      // Log the parameters for debugging
+      console.log(`[TransactionHistory] userId: ${userId}, period: ${period}, startDate: ${startDate?.toISOString()}, endDate: ${endDate?.toISOString()}, currency: ${currency}`);
+
       const data = await this.service.getTransactionHistory(userId, {
         period,
         ...(startDate !== undefined && { startDate }),
@@ -268,11 +291,15 @@ export class TransactionHistoryController {
         ...(currency !== undefined && { currency }),
       });
 
+      // Log the result count for debugging
+      console.log(`[TransactionHistory] Found ${data.fiat.length} fiat and ${data.crypto.length} crypto transactions`);
+
       return res.json({
         success: true,
         data,
       });
     } catch (error: any) {
+      console.error('[TransactionHistory] Error:', error);
       return res.status(500).json({
         success: false,
         message: error.message || 'Failed to get transaction history',

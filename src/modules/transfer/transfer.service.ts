@@ -186,9 +186,10 @@ export class TransferService {
       phoneNumber?: string; // For mobile money transfers
     }
   ) {
+    // Parse userId to integer
     const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(parsedUserId) || parsedUserId <= 0) {
-      throw new Error('Invalid user ID format');
+      throw new Error('Invalid user ID');
     }
 
     // Check transfer eligibility (KYC + PIN)
@@ -197,16 +198,67 @@ export class TransferService {
       throw new Error(eligibility.message);
     }
 
-    // Get or create source wallet
+    // Check if currency is crypto by checking WalletCurrency table
+    const walletCurrency = await prisma.walletCurrency.findFirst({
+      where: {
+        currency: data.currency.toUpperCase(),
+      },
+    });
+
+    const isCrypto = !!walletCurrency;
     let sourceWallet;
-    try {
-      sourceWallet = await this.walletService.getWalletByCurrency(userId, data.currency);
-    } catch (error) {
-      throw new Error(`Source wallet for ${data.currency} not found`);
+    let sourceVirtualAccount = null;
+    let availableBalance: Decimal;
+
+    if (isCrypto) {
+      // For crypto, use VirtualAccount
+      sourceVirtualAccount = await prisma.virtualAccount.findFirst({
+        where: {
+          userId: parsedUserId,
+          currency: data.currency.toUpperCase(),
+          active: true,
+        },
+      });
+
+      if (!sourceVirtualAccount) {
+        throw new Error(`Source crypto wallet for ${data.currency} not found. Please initialize your crypto wallets.`);
+      }
+
+      // Check available balance from VirtualAccount
+      const accountBalance = new Decimal(sourceVirtualAccount.accountBalance || '0');
+      const lockedAmount = new Decimal(sourceVirtualAccount.accountBalance || '0').minus(new Decimal(sourceVirtualAccount.availableBalance || '0'));
+      availableBalance = new Decimal(sourceVirtualAccount.availableBalance || '0');
+
+      // Get or create Wallet with type='crypto' for transaction tracking
+      sourceWallet = await prisma.wallet.findFirst({
+        where: {
+          userId: parsedUserId,
+          currency: data.currency.toUpperCase(),
+          type: 'crypto',
+        },
+      });
+
+      if (!sourceWallet) {
+        sourceWallet = await prisma.wallet.create({
+          data: {
+            userId: parsedUserId,
+            currency: data.currency.toUpperCase(),
+            type: 'crypto',
+            balance: accountBalance.toNumber(),
+            lockedBalance: lockedAmount.toNumber(),
+          },
+        });
+      }
+    } else {
+      // For fiat, use Wallet
+      try {
+        sourceWallet = await this.walletService.getWalletByCurrency(userId, data.currency);
+      } catch (error) {
+        throw new Error(`Source wallet for ${data.currency} not found`);
+      }
+      availableBalance = new Decimal(sourceWallet.balance).minus(new Decimal(sourceWallet.lockedBalance));
     }
 
-    // Check available balance
-    const availableBalance = new Decimal(sourceWallet.balance).minus(new Decimal(sourceWallet.lockedBalance));
     const amountDecimal = new Decimal(data.amount);
     const fee = this.calculateTransferFee(amountDecimal, data.currency, data.channel);
     const totalDeduction = amountDecimal.plus(fee);
@@ -319,6 +371,9 @@ export class TransferService {
           countryCode: data.countryCode,
           transferType: data.channel, // rhionx_user, bank_account, mobile_money
           integrationStatus: 'pending', // pending, processing, completed, failed - for external API integration
+          // Crypto transfer fields
+          isCrypto: isCrypto,
+          sourceVirtualAccountId: sourceVirtualAccount?.id || null,
         },
       },
       include: {
@@ -442,6 +497,11 @@ export class TransferService {
       throw new Error('Invalid PIN');
     }
 
+    // Get metadata to check if it's crypto
+    const metadata = transaction.metadata as any;
+    const isCrypto = metadata?.isCrypto || false;
+    const sourceVirtualAccountId = metadata?.sourceVirtualAccountId;
+
     // Check balance again (in case it changed)
     const wallet = await prisma.wallet.findUnique({
       where: { id: transaction.walletId },
@@ -451,7 +511,25 @@ export class TransferService {
       throw new Error('Wallet not found');
     }
 
-    const availableBalance = new Decimal(wallet.balance).minus(new Decimal(wallet.lockedBalance));
+    let availableBalance: Decimal;
+    let sourceVirtualAccount = null;
+
+    if (isCrypto && sourceVirtualAccountId) {
+      // For crypto, check VirtualAccount balance
+      sourceVirtualAccount = await prisma.virtualAccount.findUnique({
+        where: { id: sourceVirtualAccountId },
+      });
+
+      if (!sourceVirtualAccount) {
+        throw new Error('Source crypto wallet not found');
+      }
+
+      availableBalance = new Decimal(sourceVirtualAccount.availableBalance || '0');
+    } else {
+      // For fiat, check Wallet balance
+      availableBalance = new Decimal(wallet.balance).minus(new Decimal(wallet.lockedBalance));
+    }
+
     const amountDecimal = new Decimal(transaction.amount);
     const fee = new Decimal(transaction.fee);
     const totalDeduction = amountDecimal.plus(fee);
@@ -464,7 +542,6 @@ export class TransferService {
     // Note: For bank_account and mobile_money transfers, external API integration
     // will be added later. Transaction is marked as completed after wallet debit.
     const now = new Date();
-    const metadata = transaction.metadata as any;
     const updatedMetadata = {
       ...metadata,
       integrationStatus: 'pending', // Will be updated when external API is integrated
@@ -492,44 +569,130 @@ export class TransferService {
       },
     });
 
-    // Debit source wallet
-    const newBalance = new Decimal(wallet.balance).minus(totalDeduction);
-    await prisma.wallet.update({
-      where: { id: transaction.walletId },
-      data: {
-        balance: newBalance.toNumber(),
-      },
-    });
+    // Debit source wallet/VirtualAccount
+    if (isCrypto && sourceVirtualAccount) {
+      // For crypto, update VirtualAccount
+      const currentBalance = new Decimal(sourceVirtualAccount.accountBalance || '0');
+      const currentAvailable = new Decimal(sourceVirtualAccount.availableBalance || '0');
+      const newBalance = currentBalance.minus(totalDeduction);
+      const newAvailable = currentAvailable.minus(totalDeduction);
 
-    // Credit recipient wallet if it's a RhionX user transfer
-    // metadata is already declared above
+      await prisma.virtualAccount.update({
+        where: { id: sourceVirtualAccountId },
+        data: {
+          accountBalance: newBalance.toString(),
+          availableBalance: newAvailable.toString(),
+        },
+      });
+
+      // Also update Wallet for transaction tracking
+      await prisma.wallet.update({
+        where: { id: transaction.walletId },
+        data: {
+          balance: newBalance.toNumber(),
+          lockedBalance: wallet.lockedBalance, // Keep locked balance same
+        },
+      });
+    } else {
+      // For fiat, update Wallet
+      const newBalance = new Decimal(wallet.balance).minus(totalDeduction);
+      await prisma.wallet.update({
+        where: { id: transaction.walletId },
+        data: {
+          balance: newBalance.toNumber(),
+        },
+      });
+    }
+
+    // Credit recipient wallet/VirtualAccount if it's a RhionX user transfer
     if (metadata?.recipientUserId) {
       try {
-        // Get or create recipient wallet
+        const recipientUserId = typeof metadata.recipientUserId === 'string' 
+          ? parseInt(metadata.recipientUserId, 10) 
+          : metadata.recipientUserId;
+
         let recipientWallet;
-        try {
-          recipientWallet = await this.walletService.getWalletByCurrency(
-            metadata.recipientUserId,
-            transaction.currency
-          );
-        } catch (error) {
-          recipientWallet = await this.walletService.createWallet(
-            metadata.recipientUserId,
-            transaction.currency,
-            'fiat'
-          );
+
+        if (isCrypto) {
+          // For crypto, credit recipient's VirtualAccount
+          let recipientVirtualAccount = await prisma.virtualAccount.findFirst({
+            where: {
+              userId: recipientUserId,
+              currency: transaction.currency.toUpperCase(),
+              active: true,
+            },
+          });
+
+          if (!recipientVirtualAccount) {
+            throw new Error(`Recipient crypto wallet for ${transaction.currency} not found`);
+          }
+
+          const recipientBalance = new Decimal(recipientVirtualAccount.accountBalance || '0');
+          const recipientAvailable = new Decimal(recipientVirtualAccount.availableBalance || '0');
+          const newRecipientBalance = recipientBalance.plus(amountDecimal);
+          const newRecipientAvailable = recipientAvailable.plus(amountDecimal);
+
+          await prisma.virtualAccount.update({
+            where: { id: recipientVirtualAccount.id },
+            data: {
+              accountBalance: newRecipientBalance.toString(),
+              availableBalance: newRecipientAvailable.toString(),
+            },
+          });
+
+          // Get or create recipient Wallet for transaction tracking
+          recipientWallet = await prisma.wallet.findFirst({
+            where: {
+              userId: recipientUserId,
+              currency: transaction.currency.toUpperCase(),
+              type: 'crypto',
+            },
+          });
+
+          if (!recipientWallet) {
+            recipientWallet = await prisma.wallet.create({
+              data: {
+                userId: recipientUserId,
+                currency: transaction.currency.toUpperCase(),
+                type: 'crypto',
+                balance: newRecipientBalance.toNumber(),
+                lockedBalance: new Decimal(0).toNumber(),
+              },
+            });
+          } else {
+            await prisma.wallet.update({
+              where: { id: recipientWallet.id },
+              data: {
+                balance: newRecipientBalance.toNumber(),
+              },
+            });
+          }
+        } else {
+          // For fiat, credit recipient's Wallet
+          try {
+            recipientWallet = await this.walletService.getWalletByCurrency(
+              metadata.recipientUserId,
+              transaction.currency
+            );
+          } catch (error) {
+            recipientWallet = await this.walletService.createWallet(
+              metadata.recipientUserId,
+              transaction.currency,
+              'fiat'
+            );
+          }
+
+          // Credit recipient wallet
+          const recipientBalance = new Decimal(recipientWallet.balance);
+          const newRecipientBalance = recipientBalance.plus(amountDecimal);
+
+          await prisma.wallet.update({
+            where: { id: recipientWallet.id },
+            data: {
+              balance: newRecipientBalance.toNumber(),
+            },
+          });
         }
-
-        // Credit recipient wallet
-        const recipientBalance = new Decimal(recipientWallet.balance);
-        const newRecipientBalance = recipientBalance.plus(amountDecimal);
-
-        await prisma.wallet.update({
-          where: { id: recipientWallet.id },
-          data: {
-            balance: newRecipientBalance.toNumber(),
-          },
-        });
 
         // Create credit transaction for recipient
         await prisma.transaction.create({

@@ -203,13 +203,14 @@ moduleLoader.registerMany([
     middleware: [authMiddleware],
   },
   {
-    module: new P2PModule(),
-    middleware: [authMiddleware],
-  },
-  {
     module: new P2POrderModule(),
     // Public routes (browse ads, get ad details) don't need auth - handled in module
     // Protected routes (create order, manage orders) require auth - handled in module
+    // Registered before P2PModule to ensure /ads/browse is matched before /ads/:id
+  },
+  {
+    module: new P2PModule(),
+    middleware: [authMiddleware],
   },
   {
     module: new P2PChatModule(),

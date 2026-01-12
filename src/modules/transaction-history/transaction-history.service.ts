@@ -139,6 +139,9 @@ export class TransactionHistoryService {
 
     // Get date range
     const { start, end } = this.getDateRange(filters.period || 'M', filters.startDate, filters.endDate);
+    
+    // Log date range for debugging
+    console.log(`[TransactionHistoryService] Date range: ${start.toISOString()} to ${end.toISOString()}`);
 
     // Get all user wallets
     const wallets = await prisma.wallet.findMany({
@@ -147,6 +150,8 @@ export class TransactionHistoryService {
         isActive: true,
       },
     });
+    
+    console.log(`[TransactionHistoryService] Found ${wallets.length} active wallets for user ${userIdNum}`);
 
     if (wallets.length === 0) {
       return {
@@ -155,11 +160,20 @@ export class TransactionHistoryService {
           incoming: '0',
           outgoing: '0',
         },
+        typeSummary: [],
         chartData: [],
         fiat: [],
         crypto: [],
       };
     }
+    
+    // Debug: Check total transactions for user (regardless of date)
+    const totalTxCount = await prisma.transaction.count({
+      where: {
+        walletId: { in: wallets.map((w) => w.id) },
+      },
+    });
+    console.log(`[TransactionHistoryService] Total transactions for user (all time): ${totalTxCount}`);
 
     let walletIds = wallets.map((w) => w.id);
 
@@ -192,6 +206,7 @@ export class TransactionHistoryService {
     };
 
     // Get all transactions in date range
+    console.log(`[TransactionHistoryService] Querying transactions with walletIds: [${walletIds.join(', ')}]`);
     const transactions = await prisma.transaction.findMany({
       where,
       include: {
@@ -207,6 +222,8 @@ export class TransactionHistoryService {
         createdAt: 'desc',
       },
     });
+    
+    console.log(`[TransactionHistoryService] Found ${transactions.length} transactions in date range`);
 
     // Separate fiat and crypto transactions
     const fiatTransactions = transactions.filter((tx) => tx.wallet.type === 'fiat');
