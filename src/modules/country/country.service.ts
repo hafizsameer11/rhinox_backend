@@ -13,7 +13,7 @@ export class CountryService {
       orderBy: { name: 'asc' },
     });
 
-    return countries.map((country) => ({
+    return countries.map((country: { id: number; name: string | null; code: string | null; flag: string | null; createdAt: Date; updatedAt: Date }) => ({
       id: country.id,
       name: country.name,
       code: country.code,

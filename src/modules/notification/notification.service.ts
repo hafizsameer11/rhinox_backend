@@ -83,7 +83,7 @@ export class NotificationService {
       skip: offset,
     });
 
-    return notifications.map(notification => ({
+    return notifications.map((notification: any) => ({
       id: notification.id,
       type: notification.type,
       title: notification.title,

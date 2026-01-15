@@ -1,4 +1,5 @@
 import { PrismaClient, Prisma } from '@prisma/client';
+import { Decimal } from 'decimal.js';
 
 const prisma = new PrismaClient();
 
@@ -627,8 +628,8 @@ async function main() {
   ];
 
   for (const rate of exchangeRates) {
-    const rateDecimal = new Prisma.Decimal(rate.rate);
-    const inverseRateDecimal = new Prisma.Decimal(1 / rate.rate);
+    const rateDecimal = new Decimal(rate.rate);
+    const inverseRateDecimal = new Decimal(1 / rate.rate);
     
     await prisma.exchangeRate.upsert({
       where: {
@@ -752,7 +753,7 @@ async function main() {
           logoUrl: prov.logoUrl,
           countryCode: 'NG',
           currency: 'NGN',
-          metadata: prov.metadata ? (prov.metadata as any) : Prisma.JsonNull,
+          metadata: prov.metadata ? (prov.metadata as any) : null,
           isActive: true,
         },
       });

@@ -128,7 +128,7 @@ export class SupportChatService {
     });
 
     // Get unread message counts for each chat
-    const chatIds = chats.map((c) => c.id);
+    const chatIds = chats.map((c: { id: number }) => c.id);
     const unreadCounts = await prisma.supportMessage.groupBy({
       by: ['chatId'],
       where: {
@@ -141,9 +141,9 @@ export class SupportChatService {
       },
     });
 
-    const unreadMap = new Map(unreadCounts.map((u) => [u.chatId, u._count.id]));
+    const unreadMap = new Map(unreadCounts.map((u: { chatId: number; _count: { id: number } }) => [u.chatId, u._count.id]));
 
-    return chats.map((chat) => {
+    return chats.map((chat: any) => {
       const lastMessage = chat.messages[0] || null;
       const unreadCount = unreadCounts.find((u) => u.chatId === chat.id)?._count.id || 0;
 
@@ -248,7 +248,7 @@ export class SupportChatService {
       assignee: chat.assignee,
       resolvedAt: chat.resolvedAt,
       appealedAt: chat.appealedAt,
-      messages: messages.map((msg) => ({
+      messages: messages.map((msg: any) => ({
         id: msg.id,
         senderId: msg.senderId,
         sender: msg.sender,
@@ -403,7 +403,7 @@ export class SupportChatService {
       select: { id: true },
     });
 
-    const chatIds = userChats.map((c) => c.id);
+    const chatIds = userChats.map((c: { id: number }) => c.id);
 
     if (chatIds.length === 0) {
       return {
@@ -425,9 +425,9 @@ export class SupportChatService {
       },
     });
 
-    const totalUnread = unreadCounts.reduce((sum, u) => sum + u._count.id, 0);
+    const totalUnread = unreadCounts.reduce((sum: number, u: { _count: { id: number } }) => sum + u._count.id, 0);
     const unreadByChat: { [key: number]: number } = {};
-    unreadCounts.forEach((u) => {
+    unreadCounts.forEach((u: { chatId: number; _count: { id: number } }) => {
       unreadByChat[u.chatId] = u._count.id;
     });
 

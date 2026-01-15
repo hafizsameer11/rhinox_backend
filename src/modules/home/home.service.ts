@@ -47,7 +47,7 @@ export class HomeService {
 
     // Calculate total balance across all wallets
     let totalBalance = 0;
-    const walletList = wallets.map((wallet) => {
+    const walletList = wallets.map((wallet: any) => {
       const balance = Number(wallet.balance);
       totalBalance += balance;
 
@@ -104,7 +104,7 @@ export class HomeService {
 
     // Format crypto balances and convert to USDT
     let totalCryptoInUSDT = new Decimal(0);
-    const cryptoWallets = virtualAccounts.map((va) => {
+    const cryptoWallets = virtualAccounts.map((va: any) => {
       const balance = new Decimal(va.accountBalance || '0');
       const availableBalance = new Decimal(va.availableBalance || '0');
       const lockedBalance = balance.minus(availableBalance);
@@ -215,7 +215,7 @@ export class HomeService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return wallets.map((wallet) => ({
+    return wallets.map((wallet: any) => ({
       id: wallet.id,
       currency: wallet.currency,
       currencyName: wallet.currencyName || wallet.currencyRef?.name || null,
@@ -274,12 +274,12 @@ export class HomeService {
 
     // Calculate total fiat balance
     let totalFiatBalance = new Decimal(0);
-    fiatWallets.forEach((wallet) => {
+    fiatWallets.forEach((wallet: { balance: any }) => {
       totalFiatBalance = totalFiatBalance.plus(new Decimal(wallet.balance));
     });
 
     // Get recent fiat transactions
-    const fiatWalletIds = fiatWallets.map(w => w.id);
+    const fiatWalletIds = fiatWallets.map((w: { id: number }) => w.id);
     const recentFiatTransactions = await prisma.transaction.findMany({
       where: {
         walletId: { in: fiatWalletIds },
@@ -298,7 +298,7 @@ export class HomeService {
     });
 
     // Format fiat transactions
-    const formattedFiatTransactions = recentFiatTransactions.map((tx) => {
+    const formattedFiatTransactions = recentFiatTransactions.map((tx: any) => {
       const amount = new Decimal(tx.amount);
       const isPositive = tx.type === 'deposit' || tx.type === 'transfer';
       
@@ -345,7 +345,7 @@ export class HomeService {
 
     // Calculate total crypto balance in USDT
     let totalCryptoInUSDT = new Decimal(0);
-    const cryptoBalances = cryptoVirtualAccounts.map((va) => {
+    const cryptoBalances = cryptoVirtualAccounts.map((va: any) => {
       const balance = new Decimal(va.accountBalance || '0');
       const priceInUSDT = va.walletCurrency?.price 
         ? new Decimal(va.walletCurrency.price.toString())
@@ -373,13 +373,13 @@ export class HomeService {
       select: { id: true },
     });
 
-    const cryptoCurrencyList = cryptoVirtualAccounts.map(va => va.currency);
+    const cryptoCurrencyList = cryptoVirtualAccounts.map((va: { currency: string }) => va.currency);
 
     const recentCryptoTransactions = await prisma.transaction.findMany({
       where: {
         OR: [
           // Transactions from crypto wallets
-          { walletId: { in: cryptoWalletIds.map(w => w.id) } },
+          { walletId: { in: cryptoWalletIds.map((w: { id: number }) => w.id) } },
           // Transactions with crypto currencies (even if wallet type is fiat, e.g., P2P)
           { currency: { in: cryptoCurrencyList.length > 0 ? cryptoCurrencyList : ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'TRX', 'DOGE', 'MATIC'] } },
           // Transactions with crypto channel
@@ -403,7 +403,7 @@ export class HomeService {
     });
 
     // Format crypto transactions
-    const formattedCryptoTransactions = recentCryptoTransactions.map((tx) => {
+    const formattedCryptoTransactions = recentCryptoTransactions.map((tx: any) => {
       const amount = new Decimal(tx.amount);
       const isPositive = tx.type === 'deposit';
       
@@ -411,7 +411,7 @@ export class HomeService {
       let amountInUSDT: string | null = null;
       if (tx.currency && ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'TRX', 'DOGE', 'MATIC'].includes(tx.currency)) {
         // Find wallet currency for this crypto
-        const cryptoBalance = cryptoBalances.find(cb => cb.currency === tx.currency);
+        const cryptoBalance = cryptoBalances.find((cb: { currency: string }) => cb.currency === tx.currency);
         if (cryptoBalance && cryptoBalance.priceInUSDT) {
           const priceInUSDT = new Decimal(cryptoBalance.priceInUSDT);
           amountInUSDT = amount.times(priceInUSDT).toString();

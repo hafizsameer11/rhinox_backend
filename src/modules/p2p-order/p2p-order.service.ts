@@ -185,10 +185,10 @@ export class P2POrderService {
     if (filters.minPrice || filters.maxPrice) {
       where.price = {};
       if (filters.minPrice) {
-        where.price.gte = new Prisma.Decimal(filters.minPrice);
+        where.price.gte = new Decimal(filters.minPrice);
       }
       if (filters.maxPrice) {
-        where.price.lte = new Prisma.Decimal(filters.maxPrice);
+        where.price.lte = new Decimal(filters.maxPrice);
       }
     }
 
@@ -215,7 +215,7 @@ export class P2POrderService {
       skip: offset,
     });
 
-    return ads.map(ad => {
+    return ads.map((ad: any) => {
       // Transform to user perspective
       const userAction = this.getUserAction(ad.type);
       
@@ -308,7 +308,7 @@ export class P2POrderService {
       maxOrder: ad.maxOrder.toString(),
       autoAccept: ad.autoAccept,
       paymentMethodIds: paymentMethodIds,
-      paymentMethods: paymentMethods.map(pm => ({
+      paymentMethods: paymentMethods.map((pm: any) => ({
         id: pm.id,
         type: pm.type,
         accountType: pm.accountType,
@@ -929,7 +929,7 @@ export class P2POrderService {
         countryCode: order.paymentMethod.countryCode,
         currency: order.paymentMethod.currency,
       } : null,
-      chatMessages: order.chatMessages.map(msg => ({
+      chatMessages: order.chatMessages.map((msg: any) => ({
         id: msg.id,
         message: msg.message,
         senderId: msg.senderId,
@@ -939,7 +939,7 @@ export class P2POrderService {
         readAt: msg.readAt,
         createdAt: msg.createdAt,
       })),
-      reviews: order.reviews.map(review => ({
+      reviews: order.reviews.map((review: any) => ({
         id: review.id,
         type: review.type,
         comment: review.comment,
@@ -1604,7 +1604,7 @@ export class P2POrderService {
 
     const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
 
-    return orders.map(order => {
+    return orders.map((order: any) => {
       // Resolve roles for display
       const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
       const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
@@ -1666,11 +1666,11 @@ export class P2POrderService {
 
     // Calculate statistics
     const totalOrders = allOrders.length;
-    const ordersAsBuyer = allOrders.filter(o => o.buyerId === userIdNum).length;
-    const ordersAsVendor = allOrders.filter(o => o.vendorId === userIdNum).length;
-    const completedOrders = allOrders.filter(o => o.status === 'completed').length;
-    const pendingOrders = allOrders.filter(o => ['pending', 'awaiting_payment', 'payment_made', 'awaiting_coin_release'].includes(o.status)).length;
-    const cancelledOrders = allOrders.filter(o => o.status === 'cancelled').length;
+    const ordersAsBuyer = allOrders.filter((o: { buyerId: number }) => o.buyerId === userIdNum).length;
+    const ordersAsVendor = allOrders.filter((o: { vendorId: number }) => o.vendorId === userIdNum).length;
+    const completedOrders = allOrders.filter((o: { status: string }) => o.status === 'completed').length;
+    const pendingOrders = allOrders.filter((o: { status: string }) => ['pending', 'awaiting_payment', 'payment_made', 'awaiting_coin_release'].includes(o.status)).length;
+    const cancelledOrders = allOrders.filter((o: { status: string }) => o.status === 'cancelled').length;
 
     // Get recent orders (last 10)
     const recentOrders = await prisma.p2POrder.findMany({
@@ -1712,7 +1712,7 @@ export class P2POrderService {
       take: 10,
     });
 
-    const formattedRecentOrders = recentOrders.map(order => {
+    const formattedRecentOrders = recentOrders.map((order: any) => {
       const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
       const isUserBuyer = buyerId === userIdNum.toString();
       const isUserSeller = sellerId === userIdNum.toString();

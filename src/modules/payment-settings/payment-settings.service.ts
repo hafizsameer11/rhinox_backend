@@ -44,7 +44,7 @@ export class PaymentSettingsService {
     });
 
     // Decrypt account numbers
-    return paymentMethods.map(method => ({
+    return paymentMethods.map((method: any) => ({
       id: method.id,
       type: method.type,
       accountType: method.accountType,
@@ -589,7 +589,7 @@ export class PaymentSettingsService {
       ],
     });
 
-    return providers.map(provider => ({
+    return providers.map((provider: any) => ({
       id: provider.id,
       name: provider.name,
       code: provider.code,
@@ -632,7 +632,7 @@ export class PaymentSettingsService {
     // Deduplicate banks by creating a Set of unique combinations
     const uniqueBanks = new Map<string, { name: string; countryCode: string; currency: string }>();
     
-    bankAccounts.forEach(account => {
+    bankAccounts.forEach((account: { bankName: string; countryCode: string; currency: string }) => {
       const key = `${account.bankName}-${account.countryCode}-${account.currency}`;
       if (!uniqueBanks.has(key)) {
         uniqueBanks.set(key, {

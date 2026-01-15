@@ -139,7 +139,7 @@ export class P2PReviewService {
       skip: offset,
     });
 
-    return reviews.map(review => ({
+    return reviews.map((review: any) => ({
       id: review.id,
       orderId: review.orderId,
       adId: review.adId,
@@ -208,7 +208,7 @@ export class P2PReviewService {
       skip: offset,
     });
 
-    return reviews.map(review => ({
+    return reviews.map((review: any) => ({
       id: review.id,
       orderId: review.orderId,
       adId: review.adId,

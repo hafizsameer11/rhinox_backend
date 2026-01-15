@@ -119,7 +119,7 @@ export class P2PChatService {
       },
     });
 
-    return messages.map(msg => ({
+    return messages.map((msg: { id: number; orderId: number; senderId: number; sender: any; receiverId: number; message: string; isRead: boolean; readAt: Date | null; createdAt: Date }) => ({
       id: msg.id,
       orderId: msg.orderId,
       senderId: msg.senderId,

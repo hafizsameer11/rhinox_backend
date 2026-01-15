@@ -276,7 +276,7 @@ export class P2PService {
       ],
     });
 
-    return ads.map(ad => ({
+    return ads.map((ad: any) => ({
       id: ad.id,
       type: ad.type,
       cryptoCurrency: ad.cryptoCurrency,

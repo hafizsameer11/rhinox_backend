@@ -1,5 +1,6 @@
 import { type Request, type Response } from 'express';
 import { Prisma } from '@prisma/client';
+import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 // TATUM SERVICES COMMENTED OUT - Using database-only approach
 // import { DepositAddressService } from '../../services/tatum/deposit-address.service.js';
@@ -123,7 +124,7 @@ export class WebhookController {
         data: {
           accountId: webhookData.accountId,
           subscriptionType: webhookData.subscriptionType,
-          amount: webhookData.amount ? new Prisma.Decimal(webhookData.amount) : null,
+          amount: webhookData.amount ? new Decimal(webhookData.amount) : null,
           reference: webhookData.reference,
           currency: webhookData.currency,
           txId: webhookData.txId,
@@ -196,8 +197,8 @@ export class WebhookController {
 
       // Update balance in database
       if (webhookData.amount) {
-        const currentBalance = new Prisma.Decimal(virtualAccount.accountBalance || '0');
-        const depositAmount = new Prisma.Decimal(webhookData.amount);
+        const currentBalance = new Decimal(virtualAccount.accountBalance || '0');
+        const depositAmount = new Decimal(webhookData.amount);
         const newBalance = currentBalance.plus(depositAmount);
 
         await prisma.virtualAccount.update({

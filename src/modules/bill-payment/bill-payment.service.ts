@@ -57,7 +57,7 @@ export class BillPaymentService {
       },
     });
 
-    return categories.map((cat) => ({
+    return categories.map((cat: { id: number; code: string; name: string; description: string | null }) => ({
       id: cat.id,
       code: cat.code,
       name: cat.name,
@@ -102,7 +102,7 @@ export class BillPaymentService {
       },
     });
 
-    return providers.map((provider) => ({
+    return providers.map((provider: { id: number; code: string; name: string; logoUrl: string | null; countryCode: string; currency: string; category: { id: number; code: string; name: string } | null; metadata: any }) => ({
       id: provider.id,
       code: provider.code,
       name: provider.name,
@@ -146,7 +146,7 @@ export class BillPaymentService {
       },
     });
 
-    return plans.map((plan) => ({
+    return plans.map((plan: { id: number; code: string; name: string; amount: any; currency: string; dataAmount: any; validity: any; description: any }) => ({
       id: plan.id,
       code: plan.code,
       name: plan.name,
@@ -599,7 +599,7 @@ export class BillPaymentService {
       },
     });
 
-    return beneficiaries.map((ben) => ({
+    return beneficiaries.map((ben: any) => ({
       id: ben.id,
       name: ben.name,
       accountNumber: ben.accountNumber,

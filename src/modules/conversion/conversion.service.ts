@@ -265,8 +265,8 @@ export class ConversionService {
     }
 
     // Identify debit and credit transactions
-    const debitTx = transactions.find(tx => tx.type === 'withdrawal');
-    const creditTx = transactions.find(tx => tx.type === 'deposit');
+    const debitTx = transactions.find((tx: { type: string }) => tx.type === 'withdrawal');
+    const creditTx = transactions.find((tx: { type: string }) => tx.type === 'deposit');
 
     if (!debitTx || !creditTx) {
       throw new Error('Invalid conversion transaction structure');
@@ -430,8 +430,8 @@ export class ConversionService {
       throw new Error('Conversion transactions not found');
     }
 
-    const debitTx = transactions.find(tx => tx.type === 'withdrawal');
-    const creditTx = transactions.find(tx => tx.type === 'deposit');
+    const debitTx = transactions.find((tx: { type: string }) => tx.type === 'withdrawal');
+    const creditTx = transactions.find((tx: { type: string }) => tx.type === 'deposit');
 
     if (!debitTx || !creditTx) {
       throw new Error('Invalid conversion transaction structure');

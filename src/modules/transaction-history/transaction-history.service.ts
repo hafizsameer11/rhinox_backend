@@ -170,17 +170,17 @@ export class TransactionHistoryService {
     // Debug: Check total transactions for user (regardless of date)
     const totalTxCount = await prisma.transaction.count({
       where: {
-        walletId: { in: wallets.map((w) => w.id) },
+        walletId: { in: wallets.map((w: { id: number }) => w.id) },
       },
     });
     console.log(`[TransactionHistoryService] Total transactions for user (all time): ${totalTxCount}`);
 
-    let walletIds = wallets.map((w) => w.id);
+    let walletIds = wallets.map((w: { id: number }) => w.id);
 
     // Optional currency filter - filter wallets first if currency specified
     if (filters.currency) {
-      const filteredWallets = wallets.filter((w) => w.currency === filters.currency);
-      walletIds = filteredWallets.map((w) => w.id);
+      const filteredWallets = wallets.filter((w: { currency: string }) => w.currency === filters.currency);
+      walletIds = filteredWallets.map((w: { id: number }) => w.id);
       if (walletIds.length === 0) {
         // No wallets for this currency, return empty result
         return {
@@ -226,8 +226,8 @@ export class TransactionHistoryService {
     console.log(`[TransactionHistoryService] Found ${transactions.length} transactions in date range`);
 
     // Separate fiat and crypto transactions
-    const fiatTransactions = transactions.filter((tx) => tx.wallet.type === 'fiat');
-    const cryptoTransactions = transactions.filter((tx) => tx.wallet.type === 'crypto');
+    const fiatTransactions = transactions.filter((tx: { wallet: { type: string } }) => tx.wallet.type === 'fiat');
+    const cryptoTransactions = transactions.filter((tx: { wallet: { type: string } }) => tx.wallet.type === 'crypto');
 
     // Calculate summary (total, incoming, outgoing)
     let totalIncoming = new Decimal(0);
@@ -264,7 +264,7 @@ export class TransactionHistoryService {
 
     // Generate chart data (using all transactions)
     const chartData = this.generateChartData(
-      transactions.map((tx) => ({
+      transactions.map((tx: any) => ({
         createdAt: tx.createdAt,
         amount: new Decimal(tx.amount),
       })),
@@ -307,8 +307,8 @@ export class TransactionHistoryService {
       },
       typeSummary,
       chartData,
-      fiat: fiatTransactions.map(normalizeTransaction),
-      crypto: cryptoTransactions.map(normalizeTransaction),
+      fiat: fiatTransactions.map((tx: any) => normalizeTransaction(tx)),
+      crypto: cryptoTransactions.map((tx: any) => normalizeTransaction(tx)),
     };
   }
 
@@ -487,12 +487,12 @@ export class TransactionHistoryService {
       };
     }
 
-    let walletIds = wallets.map((w) => w.id);
+    let walletIds = wallets.map((w: { id: number }) => w.id);
 
     // Filter by currency if provided
     if (filters.currency) {
-      const filteredWallets = wallets.filter((w) => w.currency === filters.currency);
-      walletIds = filteredWallets.map((w) => w.id);
+      const filteredWallets = wallets.filter((w: { currency: string }) => w.currency === filters.currency);
+      walletIds = filteredWallets.map((w: { id: number }) => w.id);
       if (walletIds.length === 0) {
         return {
           summary: { incoming: '0', count: 0 },
@@ -556,7 +556,7 @@ export class TransactionHistoryService {
     });
 
     // Normalize transactions
-    const normalizedTransactions = transactions.map((tx) => {
+    const normalizedTransactions = transactions.map((tx: any) => {
       const normalizedType = this.getDepositTypeLabel(tx.channel || '');
       const amount = new Decimal(tx.amount);
       const fee = new Decimal(tx.fee);
@@ -654,12 +654,12 @@ export class TransactionHistoryService {
       };
     }
 
-    let walletIds = wallets.map((w) => w.id);
+    let walletIds = wallets.map((w: { id: number }) => w.id);
 
     // Filter by currency if provided
     if (filters.currency) {
-      const filteredWallets = wallets.filter((w) => w.currency === filters.currency);
-      walletIds = filteredWallets.map((w) => w.id);
+      const filteredWallets = wallets.filter((w: { currency: string }) => w.currency === filters.currency);
+      walletIds = filteredWallets.map((w: { id: number }) => w.id);
       if (walletIds.length === 0) {
         return {
           summary: { outgoing: '0', count: 0 },
@@ -719,7 +719,7 @@ export class TransactionHistoryService {
     });
 
     // Normalize transactions
-    const normalizedTransactions = transactions.map((tx) => {
+    const normalizedTransactions = transactions.map((tx: any) => {
       const normalizedType = tx.type === 'transfer' ? 'Send Transactions' : 'Withdrawals';
       const amount = new Decimal(tx.amount);
       const fee = new Decimal(tx.fee);
@@ -795,12 +795,12 @@ export class TransactionHistoryService {
       };
     }
 
-    let walletIds = wallets.map((w) => w.id);
+    let walletIds = wallets.map((w: { id: number }) => w.id);
 
     // Filter by currency if provided
     if (filters.currency) {
-      const filteredWallets = wallets.filter((w) => w.currency === filters.currency);
-      walletIds = filteredWallets.map((w) => w.id);
+      const filteredWallets = wallets.filter((w: { currency: string }) => w.currency === filters.currency);
+      walletIds = filteredWallets.map((w: { id: number }) => w.id);
       if (walletIds.length === 0) {
         return {
           summary: { total: '0', count: 0 },
@@ -851,7 +851,7 @@ export class TransactionHistoryService {
     });
 
     // Normalize transactions
-    const normalizedTransactions = transactions.map((tx) => {
+    const normalizedTransactions = transactions.map((tx: any) => {
       const metadata = tx.metadata as any;
       const amount = new Decimal(tx.amount);
       const isIncoming = metadata?.p2pStep === 'fiat_received' || metadata?.p2pStep === 'fiat_credited';
@@ -1035,12 +1035,12 @@ export class TransactionHistoryService {
       };
     }
 
-    let walletIds = wallets.map((w) => w.id);
+    let walletIds = wallets.map((w: { id: number }) => w.id);
 
     // Filter by currency if provided
     if (filters.currency) {
-      const filteredWallets = wallets.filter((w) => w.currency === filters.currency);
-      walletIds = filteredWallets.map((w) => w.id);
+      const filteredWallets = wallets.filter((w: { currency: string }) => w.currency === filters.currency);
+      walletIds = filteredWallets.map((w: { id: number }) => w.id);
       if (walletIds.length === 0) {
         return {
           summary: { total: '0', count: 0 },
@@ -1084,7 +1084,7 @@ export class TransactionHistoryService {
 
     // Filter by category if provided (after fetching, since Prisma doesn't support JSON path queries in MySQL)
     if (filters.categoryCode) {
-      transactions = transactions.filter((tx) => {
+      transactions = transactions.filter((tx: any) => {
         const metadata = tx.metadata as any;
         return metadata?.categoryCode === filters.categoryCode;
       });
@@ -1102,7 +1102,7 @@ export class TransactionHistoryService {
     });
 
     // Normalize transactions
-    const normalizedTransactions = paginatedTransactions.map((tx) => {
+    const normalizedTransactions = paginatedTransactions.map((tx: any) => {
       const metadata = tx.metadata as any;
       const amount = new Decimal(tx.amount);
       const fee = new Decimal(tx.fee);

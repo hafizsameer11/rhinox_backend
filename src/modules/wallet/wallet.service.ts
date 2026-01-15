@@ -66,7 +66,7 @@ export class WalletService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return wallets.map((wallet) => ({
+    return wallets.map((wallet: any) => ({
       id: wallet.id,
       currency: wallet.currency,
       type: wallet.type,
@@ -178,7 +178,7 @@ export class WalletService {
       skip: offset,
     });
 
-    return transactions.map((tx) => ({
+    return transactions.map((tx: any) => ({
       id: tx.id,
       type: tx.type,
       status: tx.status,
@@ -255,7 +255,7 @@ export class WalletService {
     });
 
     // Format fiat wallets
-    const fiatBalances = fiatWallets.map((wallet) => ({
+    const fiatBalances = fiatWallets.map((wallet: any) => ({
       id: wallet.id,
       type: 'fiat' as const,
       currency: wallet.currency,
@@ -270,7 +270,7 @@ export class WalletService {
 
     // Format crypto balances and convert to USDT
     let totalCryptoInUSDT = new Decimal(0);
-    const cryptoBalances = virtualAccounts.map((va) => {
+    const cryptoBalances = virtualAccounts.map((va: { id: number; accountBalance: any; availableBalance: any; currency: string; blockchain: string; walletCurrency: any; active: boolean; frozen: boolean }) => {
       const balance = new Decimal(va.accountBalance || '0');
       const availableBalance = new Decimal(va.availableBalance || '0');
       const lockedBalance = balance.minus(availableBalance);

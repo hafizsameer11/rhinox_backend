@@ -59,7 +59,7 @@ export class DepositService {
       },
     });
 
-    return providers.map(provider => ({
+    return providers.map((provider: any) => ({
       id: provider.id,
       name: provider.name,
       code: provider.code,

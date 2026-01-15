@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 
 /**
@@ -110,15 +111,15 @@ export class ExchangeService {
         },
       },
       update: {
-        rate: new Prisma.Decimal(rate),
-        inverseRate: new Prisma.Decimal(calculatedInverseRate),
+        rate: new Decimal(rate),
+        inverseRate: new Decimal(calculatedInverseRate),
         isActive: true,
       },
       create: {
         fromCurrency: fromCurrency.toUpperCase(),
         toCurrency: toCurrency.toUpperCase(),
-        rate: new Prisma.Decimal(rate),
-        inverseRate: new Prisma.Decimal(calculatedInverseRate),
+        rate: new Decimal(rate),
+        inverseRate: new Decimal(calculatedInverseRate),
         isActive: true,
       },
     });
@@ -149,7 +150,7 @@ export class ExchangeService {
       ],
     });
 
-    return rates.map(rate => ({
+    return rates.map((rate: any) => ({
       id: rate.id,
       fromCurrency: rate.fromCurrency,
       toCurrency: rate.toCurrency,
@@ -173,7 +174,7 @@ export class ExchangeService {
       orderBy: { toCurrency: 'asc' },
     });
 
-    return rates.map(rate => ({
+    return rates.map((rate: any) => ({
       toCurrency: rate.toCurrency,
       rate: rate.rate.toString(),
       inverseRate: rate.inverseRate?.toString() || (1 / Number(rate.rate)).toString(),
@@ -217,7 +218,7 @@ export class ExchangeService {
       },
     });
 
-    return currencies.map(currency => ({
+    return currencies.map((currency: any) => ({
       id: currency.id,
       code: currency.code,
       name: currency.name,

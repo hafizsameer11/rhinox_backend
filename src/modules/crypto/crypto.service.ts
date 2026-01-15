@@ -64,7 +64,7 @@ export class CryptoService {
       ],
     });
 
-    return virtualAccounts.map(va => ({
+    return virtualAccounts.map((va: { id: number; userId: number; blockchain: string; currency: string; accountId: string; accountCode: string | null; active: boolean; frozen: boolean; accountBalance: any; availableBalance: any; walletCurrency: any; depositAddresses: any[] }) => ({
       id: va.id,
       userId: va.userId,
       blockchain: va.blockchain,
@@ -259,7 +259,7 @@ export class CryptoService {
       ],
     });
 
-    return usdtTokens.map(token => ({
+    return usdtTokens.map((token: any) => ({
       id: token.id,
       blockchain: token.blockchain,
       blockchainName: token.blockchainName || token.blockchain,
@@ -296,7 +296,7 @@ export class CryptoService {
       ],
     });
 
-    return tokens.map(token => ({
+    return tokens.map((token: any) => ({
       id: token.id,
       blockchain: token.blockchain,
       blockchainName: token.blockchainName || token.blockchain,
