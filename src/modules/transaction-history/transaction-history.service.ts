@@ -233,7 +233,7 @@ export class TransactionHistoryService {
     let totalIncoming = new Decimal(0);
     let totalOutgoing = new Decimal(0);
 
-    transactions.forEach((tx) => {
+    transactions.forEach((tx: any) => {
       const amount = new Decimal(tx.amount);
       const absAmount = amount.abs();
       
@@ -551,7 +551,7 @@ export class TransactionHistoryService {
 
     // Calculate summary
     let totalIncoming = new Decimal(0);
-    transactions.forEach((tx) => {
+    transactions.forEach((tx: any) => {
       totalIncoming = totalIncoming.plus(new Decimal(tx.amount).abs());
     });
 
@@ -714,7 +714,7 @@ export class TransactionHistoryService {
 
     // Calculate summary
     let totalOutgoing = new Decimal(0);
-    transactions.forEach((tx) => {
+    transactions.forEach((tx: any) => {
       totalOutgoing = totalOutgoing.plus(new Decimal(tx.amount).abs());
     });
 
@@ -846,7 +846,7 @@ export class TransactionHistoryService {
 
     // Calculate summary
     let totalAmount = new Decimal(0);
-    transactions.forEach((tx) => {
+    transactions.forEach((tx: any) => {
       totalAmount = totalAmount.plus(new Decimal(tx.amount).abs());
     });
 
@@ -1097,7 +1097,7 @@ export class TransactionHistoryService {
 
     // Calculate summary
     let totalAmount = new Decimal(0);
-    paginatedTransactions.forEach((tx) => {
+    paginatedTransactions.forEach((tx: any) => {
       totalAmount = totalAmount.plus(new Decimal(tx.amount).abs());
     });
 

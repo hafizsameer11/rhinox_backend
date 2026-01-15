@@ -145,7 +145,7 @@ export class SupportChatService {
 
     return chats.map((chat: any) => {
       const lastMessage = chat.messages[0] || null;
-      const unreadCount = unreadCounts.find((u) => u.chatId === chat.id)?._count.id || 0;
+      const unreadCount = unreadCounts.find((u: { chatId: number }) => u.chatId === chat.id)?._count.id || 0;
 
       return {
         id: chat.id,
