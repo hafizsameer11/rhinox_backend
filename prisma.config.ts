@@ -3,12 +3,30 @@
 import "dotenv/config";
 import { defineConfig, env } from "prisma/config";
 
+// Validate DATABASE_URL format
+const databaseUrl = env("DATABASE_URL");
+
+if (!databaseUrl) {
+  throw new Error(
+    "DATABASE_URL environment variable is not set. " +
+    "Please set it in your environment or .env file. " +
+    "Format: mysql://user:password@host:port/database"
+  );
+}
+
+if (!databaseUrl.startsWith("mysql://")) {
+  throw new Error(
+    `DATABASE_URL must start with 'mysql://'. Current value: ${databaseUrl ? "***" : "undefined"}. ` +
+    "Format: mysql://user:password@host:port/database"
+  );
+}
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    url: databaseUrl,
   },
 });
