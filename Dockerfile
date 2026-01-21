@@ -53,7 +53,9 @@ RUN npx prisma generate
 
 # Copy built files from builder stage
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma.config.* ./
+
+# Copy prisma config files if they exist (optional - may not be needed at runtime)
+# These are only needed if using custom Prisma config, otherwise Prisma uses schema.prisma directly
 
 # Copy uploads directory structure (empty, will be mounted as volume)
 RUN mkdir -p uploads/billpayments uploads/flags uploads/wallet_symbols
