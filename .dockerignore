@@ -54,8 +54,9 @@ tests
 
 # Development files
 nodemon.json
-tsconfig.json
-tsconfig.*.json
+# Keep tsconfig.json for TypeScript build
+# tsconfig.json
+# tsconfig.*.json
 
 # Temporary files
 tmp

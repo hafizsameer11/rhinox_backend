@@ -21,8 +21,12 @@ RUN npm ci
 # Generate Prisma Client
 RUN npx prisma generate
 
+# Copy TypeScript config (must be before source code)
+COPY tsconfig.json ./
+
 # Copy source code
-COPY . .
+COPY src ./src
+COPY server.ts ./
 
 # Build TypeScript to JavaScript
 RUN npm run build
