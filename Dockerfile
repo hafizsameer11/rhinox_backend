@@ -11,8 +11,8 @@ WORKDIR /app
 # Install build dependencies
 RUN apk add --no-cache python3 make g++
 
-# Copy package files
-COPY package*.json ./
+# Copy package files (including package-lock.json for npm ci)
+COPY package.json package-lock.json* ./
 COPY prisma ./prisma/
 
 # Install all dependencies (including devDependencies for build)
@@ -40,12 +40,13 @@ RUN apk add --no-cache dumb-init
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Copy package files
-COPY package*.json ./
+# Copy package files (including package-lock.json for npm ci)
+COPY package.json package-lock.json* ./
 COPY prisma ./prisma/
 
 # Install production dependencies only
-RUN npm ci --only=production && \
+# Note: package-lock.json must be present (not in .dockerignore)
+RUN npm ci --omit=dev && \
     npm cache clean --force
 
 # Generate Prisma Client (needed at runtime)
