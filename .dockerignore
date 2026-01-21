@@ -1,14 +1,76 @@
+# Dependencies
 node_modules
 npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# Environment files
 .env
 .env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+
+# Git
 .git
 .gitignore
+.gitattributes
+
+# Documentation
 *.md
+docs/
+README.md
+LICENSE
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
 .DS_Store
+
+# Build outputs (will be built in container)
 dist
 build
 coverage
 .nyc_output
-*.log
 
+# Logs
+*.log
+logs
+*.log.*
+
+# Testing
+test
+tests
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+
+# Development files
+nodemon.json
+tsconfig.json
+tsconfig.*.json
+
+# Temporary files
+tmp
+temp
+*.tmp
+
+# Docker files (don't copy into container)
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# Uploads (will be mounted as volume)
+uploads/*
+!uploads/.gitkeep
+
+# Misc
+.cache
+.eslintcache

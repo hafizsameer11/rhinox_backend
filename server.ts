@@ -139,10 +139,50 @@ app.get('/health', (_, res) => {
 // ============================================
 // Swagger Documentation
 // ============================================
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+// Trust proxy to detect HTTPS correctly (if behind reverse proxy)
+app.set('trust proxy', true);
+
+// Custom Swagger UI setup with HTTPS support
+const swaggerUiOptions: swaggerUi.SwaggerUiOptions = {
   customCss: '.swagger-ui .topbar { display: none }',
   customSiteTitle: 'Rhinox Pay API Documentation',
-}));
+  customCssUrl: undefined, // Use default, but ensure HTTPS
+  customJs: undefined, // Use default, but ensure HTTPS
+  swaggerOptions: {
+    // Ensure all URLs use HTTPS when page is served over HTTPS
+    persistAuthorization: true,
+    displayRequestDuration: true,
+    filter: true,
+    tryItOutEnabled: true,
+  },
+};
+
+// Custom handler to ensure HTTPS for Swagger UI assets
+app.use('/api-docs', swaggerUi.serveFiles(swaggerSpec, swaggerUiOptions), (req, res, next) => {
+  // Detect if request is HTTPS (check headers if behind proxy)
+  const isHttps = req.secure || 
+                   req.headers['x-forwarded-proto'] === 'https' ||
+                   req.headers['x-forwarded-ssl'] === 'on' ||
+                   (req.headers['x-forwarded-proto'] as string)?.includes('https');
+  
+  // If HTTPS, ensure Swagger UI uses HTTPS for assets
+  if (isHttps) {
+    // Override Swagger UI HTML to use HTTPS for assets
+    const swaggerHtml = swaggerUi.generateHTML(swaggerSpec, swaggerUiOptions);
+    // Replace HTTP with HTTPS in asset URLs
+    const secureHtml = swaggerHtml.replace(
+      /http:\/\/billspro\.hmstech\.xyz\/docs\/asset\//g,
+      'https://billspro.hmstech.xyz/docs/asset/'
+    ).replace(
+      /http:\/\//g,
+      'https://'
+    );
+    return res.send(secureHtml);
+  }
+  
+  // For HTTP, use default behavior
+  return swaggerUi.setup(swaggerSpec, swaggerUiOptions)(req, res, next);
+});
 
 // Swagger JSON endpoint
 app.get('/api-docs.json', (_, res) => {
