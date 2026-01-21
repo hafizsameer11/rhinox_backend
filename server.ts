@@ -158,7 +158,7 @@ const swaggerUiOptions: swaggerUi.SwaggerUiOptions = {
 };
 
 // Custom handler to ensure HTTPS for Swagger UI assets
-app.use('/api-docs', swaggerUi.serveFiles(swaggerSpec, swaggerUiOptions), (req, res, next) => {
+app.use('/api-docs', swaggerUi.serveFiles(swaggerSpec, swaggerUiOptions), (req: express.Request, res: express.Response, next: express.NextFunction) => {
   // Detect if request is HTTPS (check headers if behind proxy)
   const isHttps = req.secure || 
                    req.headers['x-forwarded-proto'] === 'https' ||
@@ -318,7 +318,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 // 404 Handler
-app.use((req, res) => {
+app.use((req: express.Request, res: express.Response) => {
   res.status(404).json({
     success: false,
     message: 'Route not found',
