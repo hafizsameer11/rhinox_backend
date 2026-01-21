@@ -727,9 +727,14 @@ async function main() {
   const providerMap: { [key: string]: number } = {};
   for (const prov of billProviders) {
     const categoryId = categoryMap[prov.category];
+    if (!categoryId) {
+      console.warn(`⚠️  Category not found for provider: ${prov.category} - ${prov.code}`);
+      continue;
+    }
+    
     let provider = await prisma.billPaymentProvider.findFirst({
       where: {
-        ...(categoryId && { categoryId }),
+        categoryId,
         code: prov.code,
       },
     });
@@ -747,7 +752,7 @@ async function main() {
     } else {
       provider = await prisma.billPaymentProvider.create({
         data: {
-          ...(categoryId && { categoryId }),
+          categoryId,
           code: prov.code,
           name: prov.name,
           logoUrl: prov.logoUrl,
