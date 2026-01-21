@@ -171,8 +171,8 @@ app.use('/api-docs', swaggerUi.serveFiles(swaggerSpec, swaggerUiOptions), (req: 
     const swaggerHtml = swaggerUi.generateHTML(swaggerSpec, swaggerUiOptions);
     // Replace HTTP with HTTPS in asset URLs
     const secureHtml = swaggerHtml.replace(
-      /http:\/\/billspro\.hmstech\.xyz\/docs\/asset\//g,
-      'https://billspro.hmstech.xyz/docs/asset/'
+      /http:\/\/rhinoxpay\.hmstech\.xyz\/docs\/asset\//g,
+      'https://rhinoxpay.hmstech.xyz/docs/asset/'
     ).replace(
       /http:\/\//g,
       'https://'

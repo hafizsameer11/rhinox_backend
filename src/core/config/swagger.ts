@@ -18,7 +18,7 @@ const options: swaggerJsdoc.Options = {
         description: 'Development server',
       },
       {
-        url: 'https://api.rhinoxpay.com',
+        url: 'https://rhinoxpay.hmstech.xyz',
         description: 'Production server',
       },
     ],

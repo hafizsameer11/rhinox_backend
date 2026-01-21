@@ -48,7 +48,8 @@
   "include": [
     "src/**/*",
     "server.ts",
-    "prisma.config.ts"
+    "prisma.config.ts",
+    "prisma/seed.ts"
   ],
   "exclude": [
     "node_modules",
