@@ -167,12 +167,15 @@ export class DepositService {
       };
     }
 
-    // Create pending transaction
+    // Check if in mock/test mode (immediate balance credit)
+    const isMockMode = process.env.MOCK_MODE === 'true' || process.env.NODE_ENV === 'development';
+    
+    // Create transaction (completed immediately in mock mode, pending otherwise)
     const transaction = await prisma.transaction.create({
       data: {
         walletId: wallet.id,
         type: 'deposit',
-        status: 'pending',
+        status: isMockMode ? 'completed' : 'pending',
         amount: parseFloat(data.amount),
         currency: data.currency,
         fee: fee,
@@ -183,12 +186,35 @@ export class DepositService {
         providerId: providerId ?? null,
         paymentMethod,
         description: `Deposit ${data.amount} ${data.currency} via ${data.channel}`,
+        completedAt: isMockMode ? new Date() : null,
       },
       include: {
         bankAccount: true,
         provider: true,
+        wallet: {
+          include: {
+            user: true,
+          },
+        },
       },
     });
+
+    // In mock mode, immediately credit the wallet balance
+    if (isMockMode) {
+      const currentBalance = Number(wallet.balance);
+      const depositAmount = Number(transaction.amount);
+      const feeAmount = Number(transaction.fee);
+      const creditedAmount = depositAmount - feeAmount;
+
+      await prisma.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          balance: currentBalance + creditedAmount,
+        },
+      });
+
+      console.log(`[MOCK MODE] Deposit credited immediately: ${creditedAmount} ${data.currency} to wallet ${wallet.id}`);
+    }
 
     // Get user email
     const user = await prisma.user.findUnique({
@@ -198,26 +224,47 @@ export class DepositService {
 
     // Send email notification
     if (user) {
-      if (data.channel === 'mobile_money') {
-        // Mobile money email (different template if needed)
-        await sendDepositInitiatedEmail(user.email, {
+      if (isMockMode) {
+        // In mock mode, send success email instead of initiated email
+        const creditedAmount = (parseFloat(data.amount) - fee).toString();
+        await sendDepositSuccessEmail(user.email, {
           amount: data.amount,
           currency: data.currency,
+          creditedAmount,
+          fee: fee.toString(),
           reference,
-          providerName: providerData.name,
+          transactionId: transaction.id.toString(),
+          country: data.countryCode,
+          channel: data.channel,
+          paymentMethod,
+          provider: providerData?.name || null,
+          date: transaction.completedAt?.toLocaleString() || new Date().toLocaleString(),
         });
       } else {
-        // Bank transfer email
-        await sendDepositInitiatedEmail(user.email, {
-          amount: data.amount,
-          currency: data.currency,
-          reference,
-          bankName: bankAccountData.bankName,
-          accountNumber: bankAccountData.accountNumber,
-          accountName: bankAccountData.accountName,
-        });
+        // Normal flow: send initiated email
+        if (data.channel === 'mobile_money') {
+          // Mobile money email (different template if needed)
+          await sendDepositInitiatedEmail(user.email, {
+            amount: data.amount,
+            currency: data.currency,
+            reference,
+            providerName: providerData.name,
+          });
+        } else {
+          // Bank transfer email
+          await sendDepositInitiatedEmail(user.email, {
+            amount: data.amount,
+            currency: data.currency,
+            reference,
+            bankName: bankAccountData.bankName,
+            accountNumber: bankAccountData.accountNumber,
+            accountName: bankAccountData.accountName,
+          });
+        }
       }
     }
+
+    const creditedAmount = isMockMode ? (parseFloat(data.amount) - fee).toString() : undefined;
 
     return {
       id: transaction.id,
@@ -225,10 +272,15 @@ export class DepositService {
       amount: transaction.amount.toString(),
       currency: transaction.currency,
       fee: transaction.fee.toString(),
+      ...(creditedAmount && { creditedAmount }),
       status: transaction.status,
       bankAccount: bankAccountData,
       provider: providerData,
       createdAt: transaction.createdAt,
+      ...(isMockMode && { 
+        message: 'Deposit credited immediately (Mock Mode)',
+        completedAt: transaction.completedAt,
+      }),
     };
   }
 

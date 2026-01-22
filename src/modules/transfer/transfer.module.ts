@@ -27,6 +27,7 @@ export class TransferModule implements IModule {
 
   private setupRoutes(): void {
     // Transfer routes (all require authentication)
+    this.router.get('/validate-recipient', this.controller.validateRecipient.bind(this.controller));
     this.router.get('/eligibility', this.controller.checkEligibility.bind(this.controller));
     this.router.post('/initiate', this.controller.initiateTransfer.bind(this.controller));
     this.router.post('/verify', this.controller.verifyTransfer.bind(this.controller));

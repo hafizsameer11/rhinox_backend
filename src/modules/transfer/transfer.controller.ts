@@ -10,6 +10,92 @@ export class TransferController {
 
   /**
    * @swagger
+   * /api/transfer/validate-recipient:
+   *   get:
+   *     summary: Get user details by email or user ID (for Rhinox Pay transfers)
+   *     description: |
+   *       Validates and returns recipient user information for Rhinox Pay user transfers.
+   *       Accepts either email address or user ID as query parameter.
+   *       Useful for validating recipients before initiating a transfer.
+   *     tags: [Transfer]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: email
+   *         schema:
+   *           type: string
+   *           format: email
+   *         description: Recipient's email address
+   *         example: "recipient@example.com"
+   *       - in: query
+   *         name: userId
+   *         schema:
+   *           type: integer
+   *         description: Recipient's user ID
+   *         example: 2
+   *     responses:
+   *       200:
+   *         description: User details found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     userId:
+   *                       type: integer
+   *                       example: 2
+   *                     email:
+   *                       type: string
+   *                       example: "recipient@example.com"
+   *                     name:
+   *                       type: string
+   *                       example: "John Doe"
+   *                     phone:
+   *                       type: string
+   *                       example: "+2348012345678"
+   *       400:
+   *         description: Email or userId parameter is required
+   *       404:
+   *         description: User not found or account is not active
+   *       401:
+   *         description: Unauthorized
+   */
+  async validateRecipient(req: Request, res: Response) {
+    try {
+      const { email, userId } = req.query;
+
+      if (!email && !userId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email or userId parameter is required',
+        });
+      }
+
+      const recipientIdentifier = (email as string) || (userId as string);
+      const recipientInfo = await this.service.validateRhionXUser(recipientIdentifier);
+
+      return res.json({
+        success: true,
+        data: recipientInfo,
+      });
+    } catch (error: any) {
+      return res.status(404).json({
+        success: false,
+        message: error.message || 'User not found',
+      });
+    }
+  }
+
+  /**
+   * @swagger
    * /api/transfer/eligibility:
    *   get:
    *     summary: Check if user is eligible to send funds (KYC verification)
