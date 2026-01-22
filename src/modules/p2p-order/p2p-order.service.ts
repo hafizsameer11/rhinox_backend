@@ -215,6 +215,36 @@ export class P2POrderService {
       skip: offset,
     });
 
+    // Get all payment method IDs from all ads to fetch in one query
+    const allPaymentMethodIds = new Set<number>();
+    ads.forEach((ad: any) => {
+      const paymentMethodIdsRaw = ad.paymentMethodIds as any;
+      if (Array.isArray(paymentMethodIdsRaw)) {
+        paymentMethodIdsRaw.forEach((id: any) => {
+          const num = typeof id === 'string' ? parseInt(id, 10) : id;
+          if (!isNaN(num) && num > 0) {
+            allPaymentMethodIds.add(num);
+          }
+        });
+      }
+    });
+
+    // Fetch all payment methods in one query
+    const allPaymentMethods = await prisma.userPaymentMethod.findMany({
+      where: {
+        id: { in: Array.from(allPaymentMethodIds) },
+        isActive: true,
+      },
+      include: {
+        provider: true,
+      },
+    });
+
+    // Create a map for quick lookup
+    const paymentMethodsMap = new Map(
+      allPaymentMethods.map((pm: any) => [pm.id, pm])
+    );
+
     return ads.map((ad: any) => {
       // Transform to user perspective
       const userAction = this.getUserAction(ad.type);
@@ -229,6 +259,27 @@ export class P2POrderService {
           return isNaN(num) ? null : num;
         }).filter((id: any) => id !== null) as number[];
       }
+
+      // Get payment methods for this ad
+      const paymentMethods = parsedPaymentMethodIds
+        .map((id: number) => paymentMethodsMap.get(id))
+        .filter((pm: any) => pm !== undefined)
+        .map((pm: any) => ({
+          id: pm.id,
+          type: pm.type,
+          accountType: pm.accountType,
+          bankName: pm.bankName,
+          accountNumber: pm.accountNumber ? this.maskAccountNumber(pm.accountNumber) : null,
+          accountName: pm.accountName,
+          provider: pm.provider ? {
+            id: pm.provider.id,
+            name: pm.provider.name,
+            code: pm.provider.code,
+          } : null,
+          phoneNumber: pm.phoneNumber ? this.maskPhoneNumber(pm.phoneNumber) : null,
+          countryCode: pm.countryCode,
+          currency: pm.currency,
+        }));
       
       return {
         id: ad.id,
@@ -242,6 +293,7 @@ export class P2POrderService {
         maxOrder: ad.maxOrder.toString(),
         autoAccept: ad.autoAccept,
         paymentMethodIds: parsedPaymentMethodIds, // Return parsed numbers for consistency
+        paymentMethods: paymentMethods, // Return full payment method objects
         status: ad.status,
         isOnline: ad.isOnline,
         ordersReceived: ad.ordersReceived,
