@@ -62,7 +62,11 @@ COPY --from=builder /app/dist ./dist
 # Copy prisma config files if they exist (optional - may not be needed at runtime)
 # These are only needed if using custom Prisma config, otherwise Prisma uses schema.prisma directly
 
-# Copy uploads directory structure (empty, will be mounted as volume)
+# Copy uploads directory with all images
+# This ensures images are available in the container
+COPY uploads ./uploads
+
+# Ensure uploads directory structure exists (create if COPY didn't work)
 RUN mkdir -p uploads/billpayments uploads/flags uploads/wallet_symbols
 
 # Set ownership to nodejs user
