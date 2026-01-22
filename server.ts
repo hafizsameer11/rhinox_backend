@@ -32,7 +32,7 @@ app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 // Serve static files from uploads directory
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, statSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,8 +47,7 @@ if (process.env.NODE_ENV === 'production') {
   uploadsPath = '/app/uploads';
   // Ensure directory exists (create if it doesn't)
   if (!existsSync(uploadsPath)) {
-    const fs = require('fs');
-    fs.mkdirSync(uploadsPath, { recursive: true });
+    mkdirSync(uploadsPath, { recursive: true });
     console.log(`📁 Created uploads directory: ${uploadsPath}`);
   }
 } else {
@@ -67,8 +66,7 @@ if (process.env.NODE_ENV === 'production') {
   } else {
     uploadsPath = uploadsPathRoot; // Default to project root
     // Create if it doesn't exist
-    const fs = require('fs');
-    fs.mkdirSync(uploadsPath, { recursive: true });
+    mkdirSync(uploadsPath, { recursive: true });
     console.log(`📁 Created uploads directory: ${uploadsPath}`);
   }
 }
@@ -79,8 +77,7 @@ console.log(`📁 Uploads directory exists: ${existsSync(uploadsPath)}`);
 // List directory contents for debugging (only in development)
 if (process.env.NODE_ENV !== 'production') {
   try {
-    const fs = require('fs');
-    const files = fs.readdirSync(uploadsPath, { recursive: true });
+    const files = readdirSync(uploadsPath, { recursive: true });
     console.log(`📁 Uploads directory contents:`, files);
   } catch (err) {
     console.log(`📁 Could not read uploads directory:`, err);
@@ -90,7 +87,6 @@ if (process.env.NODE_ENV !== 'production') {
 // Serve static files from uploads directory
 // This MUST be registered before any other routes that might match /uploads
 app.use('/uploads', (req, res, next) => {
-  const fs = require('fs');
   // Remove /uploads prefix and get the file path
   const filePath = req.path.replace(/^\/uploads/, '');
   const fullPath = path.join(uploadsPath, filePath);
@@ -99,7 +95,7 @@ app.use('/uploads', (req, res, next) => {
   console.log(`📁 Static file request: ${req.path} -> ${fullPath}`);
   
   // Check if file exists
-  if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+  if (existsSync(fullPath) && statSync(fullPath).isFile()) {
     // Determine content type
     const ext = path.extname(fullPath).toLowerCase();
     const contentType = 
@@ -200,11 +196,10 @@ app.get('/health', (_, res) => {
 
 // Debug endpoint to check uploads directory (remove in production if needed)
 app.get('/debug/uploads', (_, res) => {
-  const fs = require('fs');
   try {
     const files: string[] = [];
     const readDir = (dir: string, basePath: string = '') => {
-      const items = fs.readdirSync(dir, { withFileTypes: true });
+      const items = readdirSync(dir, { withFileTypes: true });
       for (const item of items) {
         const fullPath = path.join(dir, item.name);
         const relativePath = path.join(basePath, item.name);
