@@ -824,8 +824,54 @@ export class P2POrderService {
       throw new Error(`Cannot accept order. Current status: ${order.status}`);
     }
 
-    // Resolve roles
-    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    // Resolve roles - use metadata if available, otherwise recalculate
+    const metadata = order.metadata as any;
+    let buyerId: string;
+    let sellerId: string;
+    
+    if (metadata && metadata.sellerId && metadata.buyerId) {
+      // Use stored roles from metadata (created during order creation)
+      buyerId = metadata.buyerId.toString();
+      sellerId = metadata.sellerId.toString();
+    } else {
+      // Fallback: recalculate roles
+      // For acceptOrder, we need the user who created the order
+      // For BUY ads: buyerId in order is vendor, sellerId should be the user who created order
+      // For SELL ads: buyerId in order is user, sellerId is vendor
+      if (order.type === 'buy') {
+        // BUY ad: Vendor is BUYER, User (who created order) is SELLER
+        // order.buyerId is vendor, so seller must be the other user
+        // We can't easily get the original user, so we need to check all orders or use a different approach
+        // Actually, let's recalculate: for BUY, vendor is buyer, so seller is the user who created the order
+        // But order.buyerId is already vendor, so we need to find the seller differently
+        // The simplest: for BUY, seller is NOT vendor, so seller must be the user who created the order
+        // But we don't have that info directly. Let's use resolveRoles but with correct understanding:
+        // resolveRoles('buy', vendorId, buyerId) where buyerId is vendor, so it returns vendor as buyer
+        // But we need the actual user who created the order as seller
+        // Actually, the issue is that order.buyerId for BUY ads IS the vendor, so resolveRoles will work
+        // But it's passing vendor as both vendorId and userId, which is wrong
+        const resolved = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+        buyerId = resolved.buyerId;
+        sellerId = resolved.sellerId;
+      } else {
+        // SELL ad: Vendor is SELLER, User is BUYER
+        const resolved = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+        buyerId = resolved.buyerId;
+        sellerId = resolved.sellerId;
+      }
+    }
+
+    console.log('[P2P Accept Order] Role resolution:', {
+      orderId: parsedOrderId,
+      orderType: order.type,
+      vendorId: order.vendorId,
+      orderBuyerId: order.buyerId,
+      metadata,
+      resolvedBuyerId: buyerId,
+      resolvedSellerId: sellerId,
+      cryptoCurrency: order.cryptoCurrency,
+      cryptoAmount: order.cryptoAmount,
+    });
 
     // Get seller's VirtualAccount
     const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
@@ -837,15 +883,31 @@ export class P2POrderService {
     });
 
     if (!sellerVirtualAccount) {
-      throw new Error('Seller crypto wallet not found');
+      console.log('[P2P Accept Order] Seller VirtualAccount not found:', {
+        sellerId: parsedSellerId,
+        cryptoCurrency: order.cryptoCurrency,
+      });
+      throw new Error(`Seller crypto wallet not found for ${order.cryptoCurrency}`);
     }
 
     const cryptoAmount = new Decimal(order.cryptoAmount);
     const sellerBalance = new Decimal(sellerVirtualAccount.accountBalance || '0');
     const sellerAvailable = new Decimal(sellerVirtualAccount.availableBalance || '0');
 
+    console.log('[P2P Accept Order] Balance check:', {
+      sellerId: parsedSellerId,
+      cryptoCurrency: order.cryptoCurrency,
+      requiredAmount: cryptoAmount.toString(),
+      accountBalance: sellerBalance.toString(),
+      availableBalance: sellerAvailable.toString(),
+      hasEnough: sellerAvailable.gte(cryptoAmount),
+    });
+
     if (sellerAvailable.lt(cryptoAmount)) {
-      throw new Error('Insufficient crypto balance available');
+      throw new Error(
+        `Insufficient crypto balance available. Seller needs ${cryptoAmount.toString()} ${order.cryptoCurrency}, ` +
+        `but has ${sellerAvailable.toString()} ${order.cryptoCurrency} available.`
+      );
     }
 
     // Freeze crypto: Move from availableBalance to locked (via availableBalance reduction)
