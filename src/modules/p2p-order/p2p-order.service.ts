@@ -615,33 +615,18 @@ export class P2POrderService {
       throw new Error('Insufficient crypto balance available');
     }
 
-    // Validate maxOrder doesn't exceed vendor's balance
+    // Validate vendor has sufficient balance for the order
     if (ad.type === 'sell') {
-      // Vendor is SELLER, maxOrder should not exceed their crypto balance
+      // Vendor is SELLER, must have crypto balance
+      // Validate maxOrder doesn't exceed their crypto balance (ad limit check)
       const maxOrderCrypto = maxOrder.div(price);
       if (sellerBalance.lt(maxOrderCrypto)) {
         throw new Error(`Maximum order amount exceeds vendor's available crypto balance`);
       }
+      // Actual order amount is already validated above (sellerAvailable.lt(cryptoAmount))
     } else {
       // For BUY ads: Vendor is BUYER, they need fiat to pay
-      // Validate vendor has sufficient fiat balance for max order
-      const vendorFiatWallet = await prisma.wallet.findFirst({
-        where: {
-          userId: ad.userId, // vendor
-          currency: ad.fiatCurrency,
-        },
-      });
-
-      if (vendorFiatWallet) {
-        const vendorFiatBalance = new Decimal(vendorFiatWallet.balance || '0');
-        if (vendorFiatBalance.lt(maxOrder)) {
-          throw new Error(`Maximum order amount exceeds vendor's available fiat balance`);
-        }
-      }
-    }
-
-    // For BUY ads: Validate buyer (vendor) has sufficient fiat balance for this order
-    if (ad.type === 'buy') {
+      // Validate vendor has sufficient fiat balance for THIS ORDER (not maxOrder)
       const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
       const buyerFiatWallet = await prisma.wallet.findFirst({
         where: {
@@ -655,8 +640,23 @@ export class P2POrderService {
       }
 
       const buyerFiatBalance = new Decimal(buyerFiatWallet.balance || '0');
-      if (buyerFiatBalance.lt(fiatAmount)) {
-        throw new Error('Buyer has insufficient fiat balance');
+      const buyerLockedBalance = new Decimal(buyerFiatWallet.lockedBalance || '0');
+      const buyerAvailableBalance = buyerFiatBalance.minus(buyerLockedBalance);
+      
+      // Check actual order amount, not maxOrder
+      if (buyerAvailableBalance.lt(fiatAmount)) {
+        console.log('[P2P Order] Fiat balance check:', {
+          adId: parsedAdId,
+          adType: ad.type,
+          buyerId: parsedBuyerId,
+          fiatCurrency: ad.fiatCurrency,
+          fiatAmount: fiatAmount.toString(),
+          buyerFiatBalance: buyerFiatBalance.toString(),
+          buyerLockedBalance: buyerLockedBalance.toString(),
+          buyerAvailableBalance: buyerAvailableBalance.toString(),
+          maxOrder: maxOrder.toString(),
+        });
+        throw new Error(`Insufficient fiat balance. You need ${fiatAmount.toString()} ${ad.fiatCurrency}, but you have ${buyerAvailableBalance.toString()} ${ad.fiatCurrency} available.`);
       }
     }
 
