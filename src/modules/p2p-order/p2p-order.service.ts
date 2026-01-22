@@ -1792,11 +1792,22 @@ export class P2POrderService {
     const where: any = {};
 
     if (filters.role === 'buyer') {
+      // User wants only orders where they are the buyer
       where.buyerId = parsedUserId;
     } else if (filters.role === 'vendor') {
+      // User wants only orders where they are the vendor (ad owner)
       where.vendorId = parsedUserId;
     } else {
-      // Get all orders where user is buyer or vendor
+      // Get all orders where user is involved (either as buyer, vendor, or seller)
+      // For BUY ads: buyerId = vendor, sellerId (in metadata) = user
+      // For SELL ads: buyerId = user, sellerId (in metadata) = vendor
+      // So we need to check:
+      // 1. buyerId = user (for SELL ads where user is buyer)
+      // 2. vendorId = user (for any ad where user is vendor)
+      // 3. metadata.sellerId = user (for BUY ads where user is seller)
+      
+      // Use OR to check buyerId and vendorId
+      // Then we'll filter by metadata.sellerId in memory after fetching
       where.OR = [
         { buyerId: parsedUserId },
         { vendorId: parsedUserId },
@@ -1810,7 +1821,7 @@ export class P2POrderService {
     const limit = filters.limit || 50;
     const offset = filters.offset || 0;
 
-    const orders = await prisma.p2POrder.findMany({
+    let orders = await prisma.p2POrder.findMany({
       where,
       include: {
         ad: true,
@@ -1835,9 +1846,71 @@ export class P2POrderService {
       orderBy: {
         createdAt: 'desc',
       },
-      take: limit,
-      skip: offset,
     });
+
+    // If no role filter, also check orders where user is seller (in metadata)
+    // This handles BUY ads where user is seller but buyerId = vendor
+    if (!filters.role) {
+      // Get order IDs we already have
+      const existingOrderIds = orders.map((o: any) => o.id);
+      
+      // Get additional orders where user might be seller (check metadata)
+      // Only fetch orders not already in our results
+      const additionalOrders = await prisma.p2POrder.findMany({
+        where: {
+          NOT: {
+            id: existingOrderIds.length > 0 ? { in: existingOrderIds } : undefined,
+          },
+          ...(filters.status ? { status: filters.status } : {}),
+        },
+        include: {
+          ad: true,
+          buyer: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+          vendor: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+          paymentMethod: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      // Filter by metadata.sellerId in memory
+      const sellerOrders = additionalOrders.filter((order: any) => {
+        const metadata = order.metadata as any;
+        if (metadata && metadata.sellerId) {
+          const sellerId = typeof metadata.sellerId === 'string' 
+            ? parseInt(metadata.sellerId, 10) 
+            : metadata.sellerId;
+          return sellerId === parsedUserId;
+        }
+        return false;
+      });
+
+      // Combine orders
+      orders = [...orders, ...sellerOrders];
+      
+      // Sort by createdAt desc
+      orders.sort((a: any, b: any) => {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+    }
+
+    // Apply pagination
+    orders = orders.slice(offset, offset + limit);
 
     return orders.map((order: any) => {
       // Resolve roles for display
