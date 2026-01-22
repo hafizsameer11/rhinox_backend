@@ -89,18 +89,47 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Serve static files from uploads directory
 // This MUST be registered before any other routes that might match /uploads
-app.use('/uploads', express.static(uploadsPath, {
-  setHeaders: (res, filePath) => {
-    // Set proper content type for images
-    if (filePath.endsWith('.png')) {
-      res.setHeader('Content-Type', 'image/png');
-    } else if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
-      res.setHeader('Content-Type', 'image/jpeg');
-    } else if (filePath.endsWith('.svg')) {
-      res.setHeader('Content-Type', 'image/svg+xml');
-    }
-  },
-}));
+app.use('/uploads', (req, res, next) => {
+  const fs = require('fs');
+  // Remove /uploads prefix and get the file path
+  const filePath = req.path.replace(/^\/uploads/, '');
+  const fullPath = path.join(uploadsPath, filePath);
+  
+  // Log the request for debugging
+  console.log(`📁 Static file request: ${req.path} -> ${fullPath}`);
+  
+  // Check if file exists
+  if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+    // Determine content type
+    const ext = path.extname(fullPath).toLowerCase();
+    const contentType = 
+      ext === '.png' ? 'image/png' :
+      ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+      ext === '.svg' ? 'image/svg+xml' :
+      ext === '.gif' ? 'image/gif' :
+      ext === '.webp' ? 'image/webp' :
+      'application/octet-stream';
+    
+    res.setHeader('Content-Type', contentType);
+    res.sendFile(fullPath, (err) => {
+      if (err) {
+        console.error(`📁 Error sending file ${fullPath}:`, err.message);
+        next(err);
+      }
+    });
+  } else {
+    console.log(`📁 File not found: ${fullPath}`);
+    // Try express.static as fallback
+    express.static(uploadsPath, {
+      setHeaders: (res, filePath) => {
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext === '.png') res.setHeader('Content-Type', 'image/png');
+        else if (ext === '.jpg' || ext === '.jpeg') res.setHeader('Content-Type', 'image/jpeg');
+        else if (ext === '.svg') res.setHeader('Content-Type', 'image/svg+xml');
+      },
+    })(req, res, next);
+  }
+});
 
 // ============================================
 // Health Check
@@ -167,6 +196,41 @@ app.get('/health', (_, res) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
   });
+});
+
+// Debug endpoint to check uploads directory (remove in production if needed)
+app.get('/debug/uploads', (_, res) => {
+  const fs = require('fs');
+  try {
+    const files: string[] = [];
+    const readDir = (dir: string, basePath: string = '') => {
+      const items = fs.readdirSync(dir, { withFileTypes: true });
+      for (const item of items) {
+        const fullPath = path.join(dir, item.name);
+        const relativePath = path.join(basePath, item.name);
+        if (item.isDirectory()) {
+          readDir(fullPath, relativePath);
+        } else {
+          files.push(relativePath);
+        }
+      }
+    };
+    readDir(uploadsPath);
+    res.json({
+      success: true,
+      uploadsPath,
+      exists: existsSync(uploadsPath),
+      fileCount: files.length,
+      files: files.slice(0, 50), // Limit to first 50 files
+    });
+  } catch (err: any) {
+    res.json({
+      success: false,
+      uploadsPath,
+      exists: existsSync(uploadsPath),
+      error: err.message,
+    });
+  }
 });
 
 // ============================================
