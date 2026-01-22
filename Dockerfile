@@ -64,13 +64,14 @@ COPY --from=builder /app/dist ./dist
 
 # Copy uploads directory with all images
 # This ensures images are available in the container
-COPY uploads ./uploads
+# Copy as root user first, then change ownership
+COPY --chown=nodejs:nodejs uploads ./uploads
 
 # Ensure uploads directory structure exists (create if COPY didn't work)
-RUN mkdir -p uploads/billpayments uploads/flags uploads/wallet_symbols
+RUN mkdir -p uploads/billpayments uploads/flags uploads/wallet_symbols || true
 
-# Set ownership to nodejs user
-RUN chown -R nodejs:nodejs /app
+# Set ownership to nodejs user (ensure all files are owned correctly)
+RUN chown -R nodejs:nodejs /app/uploads || true
 
 # Switch to nodejs user
 USER nodejs
