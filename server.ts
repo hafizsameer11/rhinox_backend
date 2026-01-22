@@ -37,25 +37,58 @@ import { existsSync } from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Handle both development (tsx) and production (compiled) paths
-// In development: __dirname = backend/src (if running from src) or backend (if compiled)
-// In production: __dirname = backend/dist (compiled location)
-const uploadsPathDev = path.join(__dirname, '../uploads');
-const uploadsPathProd = path.join(__dirname, './uploads');
-const uploadsPathRoot = path.join(process.cwd(), 'uploads');
+// Determine uploads directory path
+// In production (Docker): use /app/uploads (explicit)
+// In development: try multiple paths
+let uploadsPath: string;
 
-// Try multiple paths to find uploads directory
-let uploadsPath = uploadsPathRoot; // Default to project root
-if (existsSync(uploadsPathDev)) {
-  uploadsPath = uploadsPathDev;
-} else if (existsSync(uploadsPathProd)) {
-  uploadsPath = uploadsPathProd;
-} else if (existsSync(uploadsPathRoot)) {
-  uploadsPath = uploadsPathRoot;
+if (process.env.NODE_ENV === 'production') {
+  // In production, explicitly use /app/uploads (Docker working directory)
+  uploadsPath = '/app/uploads';
+  // Ensure directory exists (create if it doesn't)
+  if (!existsSync(uploadsPath)) {
+    const fs = require('fs');
+    fs.mkdirSync(uploadsPath, { recursive: true });
+    console.log(`📁 Created uploads directory: ${uploadsPath}`);
+  }
+} else {
+  // Development: try multiple paths
+  const uploadsPathDev = path.join(__dirname, '../uploads');
+  const uploadsPathProd = path.join(__dirname, './uploads');
+  const uploadsPathRoot = path.join(process.cwd(), 'uploads');
+  
+  // Try multiple paths to find uploads directory
+  if (existsSync(uploadsPathDev)) {
+    uploadsPath = uploadsPathDev;
+  } else if (existsSync(uploadsPathProd)) {
+    uploadsPath = uploadsPathProd;
+  } else if (existsSync(uploadsPathRoot)) {
+    uploadsPath = uploadsPathRoot;
+  } else {
+    uploadsPath = uploadsPathRoot; // Default to project root
+    // Create if it doesn't exist
+    const fs = require('fs');
+    fs.mkdirSync(uploadsPath, { recursive: true });
+    console.log(`📁 Created uploads directory: ${uploadsPath}`);
+  }
 }
 
 console.log(`📁 Serving static files from: ${uploadsPath}`);
+console.log(`📁 Uploads directory exists: ${existsSync(uploadsPath)}`);
 
+// List directory contents for debugging (only in development)
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    const fs = require('fs');
+    const files = fs.readdirSync(uploadsPath, { recursive: true });
+    console.log(`📁 Uploads directory contents:`, files);
+  } catch (err) {
+    console.log(`📁 Could not read uploads directory:`, err);
+  }
+}
+
+// Serve static files from uploads directory
+// This MUST be registered before any other routes that might match /uploads
 app.use('/uploads', express.static(uploadsPath, {
   setHeaders: (res, filePath) => {
     // Set proper content type for images
