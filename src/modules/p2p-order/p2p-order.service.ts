@@ -1107,8 +1107,30 @@ export class P2POrderService {
       throw new Error('Order not found');
     }
 
-    // Check if user is buyer or vendor
-    if (order.buyerId !== parsedUserId && order.vendorId !== parsedUserId) {
+    // Check if user is buyer, vendor, or seller (from metadata)
+    // For BUY ads: buyerId = vendor, sellerId (in metadata) = user
+    // For SELL ads: buyerId = user, sellerId (in metadata) = vendor
+    const metadata = order.metadata as any;
+    const isBuyer = order.buyerId === parsedUserId;
+    const isVendor = order.vendorId === parsedUserId;
+    const isSeller = metadata && metadata.sellerId && 
+      (typeof metadata.sellerId === 'string' 
+        ? parseInt(metadata.sellerId, 10) 
+        : metadata.sellerId) === parsedUserId;
+    
+    console.log('[P2P Order Details] Authorization check:', {
+      orderId: parsedOrderId,
+      userId: parsedUserId,
+      orderBuyerId: order.buyerId,
+      orderVendorId: order.vendorId,
+      metadataSellerId: metadata?.sellerId,
+      isBuyer,
+      isVendor,
+      isSeller,
+      authorized: isBuyer || isVendor || isSeller,
+    });
+    
+    if (!isBuyer && !isVendor && !isSeller) {
       throw new Error('Unauthorized to view this order');
     }
 
