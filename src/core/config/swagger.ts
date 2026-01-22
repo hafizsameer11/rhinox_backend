@@ -1,4 +1,42 @@
 import swaggerJsdoc from 'swagger-jsdoc';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Determine if we're running from dist/ (production) or src/ (development)
+const isProduction = process.env.NODE_ENV === 'production';
+const isCompiled = __dirname.includes('dist');
+
+// Build API paths based on environment
+const apiPaths: string[] = [];
+
+if (isCompiled || isProduction) {
+  // Running from compiled code (dist/)
+  const distPath = path.resolve(__dirname, '../..');
+  apiPaths.push(
+    path.join(distPath, 'src/modules/**/*.controller.js'),
+    path.join(distPath, 'server.js')
+  );
+} else {
+  // Running from source code (development)
+  apiPaths.push(
+    path.resolve(__dirname, '../../src/modules/**/*.controller.ts'),
+    path.resolve(__dirname, '../../server.ts')
+  );
+}
+
+// Add fallback paths
+apiPaths.push(
+  './dist/src/modules/**/*.controller.js',
+  './dist/server.js',
+  './src/modules/**/*.controller.ts',
+  './server.ts',
+  './src/modules/**/*.controller.js',
+  './server.js'
+);
 
 const options: swaggerJsdoc.Options = {
   definition: {
@@ -150,13 +188,22 @@ const options: swaggerJsdoc.Options = {
       { name: 'Health', description: 'Health check endpoints' },
     ],
   },
-  apis: [
-    './src/modules/**/*.controller.ts',
-    './src/modules/**/*.controller.js',
-    './server.ts',
-    './server.js',
-  ],
+  apis: apiPaths,
 };
+
+// Log Swagger configuration for debugging
+console.log('[Swagger] Configuration:', {
+  isProduction,
+  isCompiled,
+  __dirname,
+  apiPaths: apiPaths.slice(0, 3), // Log first 3 paths
+  totalPaths: apiPaths.length,
+});
 
 export const swaggerSpec = swaggerJsdoc(options);
 
+// Log Swagger spec generation result
+console.log('[Swagger] Spec generated:', {
+  pathsCount: Object.keys(swaggerSpec.paths || {}).length,
+  tagsCount: swaggerSpec.tags?.length || 0,
+});

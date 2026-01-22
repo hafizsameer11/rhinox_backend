@@ -16,7 +16,7 @@
     // Emit
     "declaration": false,
     "sourceMap": false,
-    "removeComments": true,
+    "removeComments": false, // Keep comments for Swagger JSDoc annotations
     
     // Type Checking
     "strict": true,

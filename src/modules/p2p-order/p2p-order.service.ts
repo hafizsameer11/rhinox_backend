@@ -219,6 +219,17 @@ export class P2POrderService {
       // Transform to user perspective
       const userAction = this.getUserAction(ad.type);
       
+      // Parse payment method IDs for consistency (same logic as getAdDetails and createOrder)
+      const paymentMethodIdsRaw = ad.paymentMethodIds as any;
+      let parsedPaymentMethodIds: number[] = [];
+      
+      if (Array.isArray(paymentMethodIdsRaw)) {
+        parsedPaymentMethodIds = paymentMethodIdsRaw.map((id: any) => {
+          const num = typeof id === 'string' ? parseInt(id, 10) : id;
+          return isNaN(num) ? null : num;
+        }).filter((id: any) => id !== null) as number[];
+      }
+      
       return {
         id: ad.id,
         type: ad.type, // Keep original for internal use
@@ -230,7 +241,7 @@ export class P2POrderService {
         minOrder: ad.minOrder.toString(),
         maxOrder: ad.maxOrder.toString(),
         autoAccept: ad.autoAccept,
-        paymentMethodIds: ad.paymentMethodIds as string[],
+        paymentMethodIds: parsedPaymentMethodIds, // Return parsed numbers for consistency
         status: ad.status,
         isOnline: ad.isOnline,
         ordersReceived: ad.ordersReceived,
@@ -281,8 +292,18 @@ export class P2POrderService {
     }
 
     // Get payment methods for this ad
-    const paymentMethodIds = (ad.paymentMethodIds as number[]) || [];
-    const parsedPaymentMethodIds = paymentMethodIds.map(id => typeof id === 'string' ? parseInt(id, 10) : id);
+    // paymentMethodIds is stored as JSON, could be array of numbers or strings
+    const paymentMethodIdsRaw = ad.paymentMethodIds as any;
+    let parsedPaymentMethodIds: number[] = [];
+    
+    if (Array.isArray(paymentMethodIdsRaw)) {
+      // Convert all to numbers for consistent comparison
+      parsedPaymentMethodIds = paymentMethodIdsRaw.map((id: any) => {
+        const num = typeof id === 'string' ? parseInt(id, 10) : id;
+        return isNaN(num) ? null : num;
+      }).filter((id: any) => id !== null) as number[];
+    }
+    
     const paymentMethods = await prisma.userPaymentMethod.findMany({
       where: {
         id: { in: parsedPaymentMethodIds },
@@ -307,7 +328,7 @@ export class P2POrderService {
       minOrder: ad.minOrder.toString(),
       maxOrder: ad.maxOrder.toString(),
       autoAccept: ad.autoAccept,
-      paymentMethodIds: paymentMethodIds,
+      paymentMethodIds: parsedPaymentMethodIds, // Return parsed numbers for consistency
       paymentMethods: paymentMethods.map((pm: any) => ({
         id: pm.id,
         type: pm.type,
@@ -407,20 +428,21 @@ export class P2POrderService {
       }).filter((id: any) => id !== null) as number[];
     }
     
-    // Debug logging in development
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[P2P Order] Payment method validation:', {
-        adId: parsedAdId,
-        vendorId: ad.userId,
-        requestedPaymentMethodId: parsedPaymentMethodId,
-        adPaymentMethodIds: paymentMethodIds,
-        paymentMethodIdsRaw,
-        isIncluded: paymentMethodIds.includes(parsedPaymentMethodId),
-      });
-    }
+    // Debug logging (always log for troubleshooting)
+    console.log('[P2P Order] Payment method validation:', {
+      adId: parsedAdId,
+      vendorId: ad.userId,
+      requestedPaymentMethodId: parsedPaymentMethodId,
+      requestedPaymentMethodIdType: typeof parsedPaymentMethodId,
+      adPaymentMethodIds: paymentMethodIds,
+      adPaymentMethodIdsTypes: paymentMethodIds.map(id => typeof id),
+      paymentMethodIdsRaw,
+      paymentMethodIdsRawType: typeof paymentMethodIdsRaw,
+      isIncluded: paymentMethodIds.includes(parsedPaymentMethodId),
+    });
     
     if (!paymentMethodIds.includes(parsedPaymentMethodId)) {
-      throw new Error(`Payment method not accepted for this ad. Accepted methods: ${paymentMethodIds.join(', ')}`);
+      throw new Error(`Payment method ${parsedPaymentMethodId} not accepted for this ad. Accepted methods: ${paymentMethodIds.join(', ')}`);
     }
 
     // Get payment method and validate it belongs to vendor (ad owner)
@@ -435,15 +457,15 @@ export class P2POrderService {
     // Validate payment method belongs to vendor (ad owner)
     // Payment methods in ad should belong to vendor who will receive payment
     if (paymentMethod.userId !== ad.userId) {
-      // Debug logging in development
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[P2P Order] Payment method ownership mismatch:', {
-          paymentMethodId: parsedPaymentMethodId,
-          paymentMethodUserId: paymentMethod.userId,
-          adVendorId: ad.userId,
-        });
-      }
-      throw new Error('Payment method does not belong to the ad owner (vendor). Please select a payment method from the ad\'s accepted methods.');
+      console.log('[P2P Order] Payment method ownership mismatch:', {
+        paymentMethodId: parsedPaymentMethodId,
+        paymentMethodUserId: paymentMethod.userId,
+        paymentMethodUserIdType: typeof paymentMethod.userId,
+        adVendorId: ad.userId,
+        adVendorIdType: typeof ad.userId,
+        paymentMethodActive: paymentMethod.isActive,
+      });
+      throw new Error(`Payment method ${parsedPaymentMethodId} does not belong to the ad owner (vendor ID: ${ad.userId}). Payment method belongs to user ID: ${paymentMethod.userId}. Please select a payment method from the ad's accepted methods.`);
     }
 
     // Check if payment method is RhinoxPay ID
