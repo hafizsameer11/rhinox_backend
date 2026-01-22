@@ -204,6 +204,6 @@ export const swaggerSpec = swaggerJsdoc(options);
 
 // Log Swagger spec generation result
 console.log('[Swagger] Spec generated:', {
-  pathsCount: Object.keys(swaggerSpec.paths || {}).length,
-  tagsCount: swaggerSpec.tags?.length || 0,
+  pathsCount: Object.keys((swaggerSpec as any).paths || {}).length,
+  tagsCount: (swaggerSpec as any).tags?.length || 0,
 });
