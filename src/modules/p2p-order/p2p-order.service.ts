@@ -388,21 +388,62 @@ export class P2POrderService {
     // Resolve roles
     const { buyerId, sellerId } = this.resolveRoles(ad.type, ad.userId.toString(), parsedUserId.toString());
 
-    // Validate payment method belongs to ad
-    const paymentMethodIds = (ad.paymentMethodIds as number[]).map(id => id.toString());
+    // Parse payment method ID
     const parsedPaymentMethodId = typeof data.paymentMethodId === 'string' ? parseInt(data.paymentMethodId, 10) : data.paymentMethodId;
-    
-    if (!paymentMethodIds.includes(parsedPaymentMethodId.toString())) {
-      throw new Error('Payment method not accepted for this ad');
+    if (isNaN(parsedPaymentMethodId) || parsedPaymentMethodId <= 0) {
+      throw new Error('Invalid payment method ID format');
     }
 
-    // Get payment method
+    // Validate payment method belongs to ad
+    // paymentMethodIds is stored as JSON, could be array of numbers or strings
+    const paymentMethodIdsRaw = ad.paymentMethodIds as any;
+    let paymentMethodIds: number[] = [];
+    
+    if (Array.isArray(paymentMethodIdsRaw)) {
+      // Convert all to numbers for consistent comparison
+      paymentMethodIds = paymentMethodIdsRaw.map((id: any) => {
+        const num = typeof id === 'string' ? parseInt(id, 10) : id;
+        return isNaN(num) ? null : num;
+      }).filter((id: any) => id !== null) as number[];
+    }
+    
+    // Debug logging in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[P2P Order] Payment method validation:', {
+        adId: parsedAdId,
+        vendorId: ad.userId,
+        requestedPaymentMethodId: parsedPaymentMethodId,
+        adPaymentMethodIds: paymentMethodIds,
+        paymentMethodIdsRaw,
+        isIncluded: paymentMethodIds.includes(parsedPaymentMethodId),
+      });
+    }
+    
+    if (!paymentMethodIds.includes(parsedPaymentMethodId)) {
+      throw new Error(`Payment method not accepted for this ad. Accepted methods: ${paymentMethodIds.join(', ')}`);
+    }
+
+    // Get payment method and validate it belongs to vendor (ad owner)
     const paymentMethod = await prisma.userPaymentMethod.findUnique({
       where: { id: parsedPaymentMethodId },
     });
 
     if (!paymentMethod || !paymentMethod.isActive) {
       throw new Error('Payment method not found or inactive');
+    }
+
+    // Validate payment method belongs to vendor (ad owner)
+    // Payment methods in ad should belong to vendor who will receive payment
+    if (paymentMethod.userId !== ad.userId) {
+      // Debug logging in development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[P2P Order] Payment method ownership mismatch:', {
+          paymentMethodId: parsedPaymentMethodId,
+          paymentMethodUserId: paymentMethod.userId,
+          adVendorId: ad.userId,
+        });
+      }
+      throw new Error('Payment method does not belong to the ad owner (vendor). Please select a payment method from the ad\'s accepted methods.');
     }
 
     // Check if payment method is RhinoxPay ID
