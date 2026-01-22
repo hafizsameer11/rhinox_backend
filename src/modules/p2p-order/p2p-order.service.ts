@@ -1544,7 +1544,7 @@ export class P2POrderService {
    * Get user's orders
    */
   async getUserOrders(
-    userId: string,
+    userId: string | number,
     filters: {
       role?: 'buyer' | 'vendor';
       status?: string;
@@ -1552,17 +1552,23 @@ export class P2POrderService {
       offset?: number;
     }
   ) {
+    // Parse userId to integer for Prisma query
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
     const where: any = {};
 
     if (filters.role === 'buyer') {
-      where.buyerId = userId;
+      where.buyerId = parsedUserId;
     } else if (filters.role === 'vendor') {
-      where.vendorId = userId;
+      where.vendorId = parsedUserId;
     } else {
       // Get all orders where user is buyer or vendor
       where.OR = [
-        { buyerId: userId },
-        { vendorId: userId },
+        { buyerId: parsedUserId },
+        { vendorId: parsedUserId },
       ];
     }
 
@@ -1601,8 +1607,6 @@ export class P2POrderService {
       take: limit,
       skip: offset,
     });
-
-    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
 
     return orders.map((order: any) => {
       // Resolve roles for display
