@@ -467,58 +467,111 @@ export class P2POrderService {
       throw new Error('Invalid payment method ID format');
     }
 
-    // Validate payment method belongs to ad
-    // paymentMethodIds is stored as JSON, could be array of numbers or strings
+    // Get vendor's accepted payment methods from ad
     const paymentMethodIdsRaw = ad.paymentMethodIds as any;
-    let paymentMethodIds: number[] = [];
+    let vendorPaymentMethodIds: number[] = [];
     
     if (Array.isArray(paymentMethodIdsRaw)) {
-      // Convert all to numbers for consistent comparison
-      paymentMethodIds = paymentMethodIdsRaw.map((id: any) => {
+      vendorPaymentMethodIds = paymentMethodIdsRaw.map((id: any) => {
         const num = typeof id === 'string' ? parseInt(id, 10) : id;
         return isNaN(num) ? null : num;
       }).filter((id: any) => id !== null) as number[];
     }
-    
-    // Debug logging (always log for troubleshooting)
-    console.log('[P2P Order] Payment method validation:', {
-      adId: parsedAdId,
-      vendorId: ad.userId,
-      requestedPaymentMethodId: parsedPaymentMethodId,
-      requestedPaymentMethodIdType: typeof parsedPaymentMethodId,
-      adPaymentMethodIds: paymentMethodIds,
-      adPaymentMethodIdsTypes: paymentMethodIds.map(id => typeof id),
-      paymentMethodIdsRaw,
-      paymentMethodIdsRawType: typeof paymentMethodIdsRaw,
-      isIncluded: paymentMethodIds.includes(parsedPaymentMethodId),
-    });
-    
-    if (!paymentMethodIds.includes(parsedPaymentMethodId)) {
-      throw new Error(`Payment method ${parsedPaymentMethodId} not accepted for this ad. Accepted methods: ${paymentMethodIds.join(', ')}`);
-    }
 
-    // Get payment method and validate it belongs to vendor (ad owner)
-    const paymentMethod = await prisma.userPaymentMethod.findUnique({
+    // Get vendor's payment methods to match against
+    const vendorPaymentMethods = await prisma.userPaymentMethod.findMany({
+      where: {
+        id: { in: vendorPaymentMethodIds },
+        isActive: true,
+      },
+    });
+
+    // Get user's payment method (the one they want to use)
+    const userPaymentMethod = await prisma.userPaymentMethod.findUnique({
       where: { id: parsedPaymentMethodId },
     });
 
-    if (!paymentMethod || !paymentMethod.isActive) {
+    if (!userPaymentMethod || !userPaymentMethod.isActive) {
       throw new Error('Payment method not found or inactive');
     }
 
-    // Validate payment method belongs to vendor (ad owner)
-    // Payment methods in ad should belong to vendor who will receive payment
-    if (paymentMethod.userId !== ad.userId) {
-      console.log('[P2P Order] Payment method ownership mismatch:', {
-        paymentMethodId: parsedPaymentMethodId,
-        paymentMethodUserId: paymentMethod.userId,
-        paymentMethodUserIdType: typeof paymentMethod.userId,
-        adVendorId: ad.userId,
-        adVendorIdType: typeof ad.userId,
-        paymentMethodActive: paymentMethod.isActive,
-      });
-      throw new Error(`Payment method ${parsedPaymentMethodId} does not belong to the ad owner (vendor ID: ${ad.userId}). Payment method belongs to user ID: ${paymentMethod.userId}. Please select a payment method from the ad's accepted methods.`);
+    // Validate user's payment method belongs to them
+    if (userPaymentMethod.userId !== parsedUserId) {
+      throw new Error('Payment method does not belong to you. Please select your own payment method.');
     }
+
+    // Match user's payment method with vendor's accepted payment methods
+    // Match by: bankName (for bank_account) or provider (for mobile_money) or type (for rhinoxpay_id)
+    // This allows users to use their own payment method as long as it matches vendor's accepted type/bank/provider
+    
+    console.log('[P2P Order] Payment method matching:', {
+      userId: parsedUserId,
+      userPaymentMethodId: parsedPaymentMethodId,
+      userPaymentMethodType: userPaymentMethod.type,
+      userPaymentMethodBank: userPaymentMethod.bankName,
+      userPaymentMethodProvider: userPaymentMethod.providerId,
+      vendorPaymentMethodsCount: vendorPaymentMethods.length,
+      vendorPaymentMethods: vendorPaymentMethods.map((pm: any) => ({
+        id: pm.id,
+        type: pm.type,
+        bankName: pm.bankName,
+        providerId: pm.providerId,
+      })),
+    });
+
+    const matchedVendorMethod = vendorPaymentMethods.find((vendorPm: any) => {
+      // For bank accounts: match by bankName (case-insensitive)
+      if (userPaymentMethod.type === 'bank_account' && vendorPm.type === 'bank_account') {
+        const userBank = (userPaymentMethod.bankName || '').toLowerCase().trim();
+        const vendorBank = (vendorPm.bankName || '').toLowerCase().trim();
+        return userBank === vendorBank && userBank !== '';
+      }
+      // For mobile money: match by provider
+      if (userPaymentMethod.type === 'mobile_money' && vendorPm.type === 'mobile_money') {
+        return userPaymentMethod.providerId === vendorPm.providerId;
+      }
+      // For rhinoxpay_id: match by type
+      if (userPaymentMethod.type === 'rhinoxpay_id' && vendorPm.type === 'rhinoxpay_id') {
+        return true;
+      }
+      return false;
+    });
+
+    console.log('[P2P Order] Matching result:', {
+      matched: !!matchedVendorMethod,
+      matchedVendorMethodId: matchedVendorMethod?.id,
+    });
+
+    if (!matchedVendorMethod) {
+      const vendorMethodTypes = vendorPaymentMethods.map((pm: any) => {
+        if (pm.type === 'bank_account') return pm.bankName || 'Unknown Bank';
+        if (pm.type === 'mobile_money') return `Mobile Money (Provider ID: ${pm.providerId})`;
+        return pm.type;
+      }).join(', ');
+      
+      const userMethodDisplay = userPaymentMethod.type === 'bank_account' 
+        ? (userPaymentMethod.bankName || 'Unknown Bank')
+        : userPaymentMethod.type;
+      
+      throw new Error(
+        `Your payment method (${userMethodDisplay}) does not match any of the vendor's accepted payment methods. ` +
+        `Vendor accepts: ${vendorMethodTypes}. Please use a payment method that matches one of these (same bank for bank accounts, same provider for mobile money).`
+      );
+    }
+
+    // Use the matched vendor payment method ID for the order
+    // This ensures the order references the vendor's payment method
+    const paymentMethod = matchedVendorMethod;
+    const vendorPaymentMethodId = matchedVendorMethod.id;
+
+    // Store user's payment method in metadata for reference
+    const userPaymentMethodInfo = {
+      id: userPaymentMethod.id,
+      type: userPaymentMethod.type,
+      bankName: userPaymentMethod.bankName,
+      accountName: userPaymentMethod.accountName,
+      accountNumber: userPaymentMethod.accountNumber ? this.maskAccountNumber(userPaymentMethod.accountNumber) : null,
+    };
 
     // Check if payment method is RhinoxPay ID
     const isRhinoxPayID = paymentMethod.type === 'rhinoxpay_id';
@@ -626,7 +679,7 @@ export class P2POrderService {
         cryptoAmount: cryptoAmount.toString(),
         fiatAmount: fiatAmount.toString(),
         price: price.toString(),
-        paymentMethodId: parsedPaymentMethodId,
+        paymentMethodId: vendorPaymentMethodId, // Use vendor's payment method ID (matched from user's payment method)
         paymentChannel: isRhinoxPayID ? 'rhinoxpay_id' : 'offline',
         status: initialStatus,
         metadata: {
@@ -636,6 +689,7 @@ export class P2POrderService {
             vendorIsBuyer: ad.type === 'buy',
             vendorIsSeller: ad.type === 'sell',
           },
+          userPaymentMethod: userPaymentMethodInfo, // Store user's payment method for reference
         },
       },
       include: {
