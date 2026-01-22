@@ -69,9 +69,9 @@ Dockerfile
 docker-compose.yml
 docker-compose.*.yml
 
-# Uploads (will be mounted as volume)
-uploads/*
-!uploads/.gitkeep
+# Uploads - Keep images in git and copy to container
+# uploads/*
+# !uploads/.gitkeep
 
 # Misc
 .cache
