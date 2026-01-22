@@ -204,7 +204,10 @@ export class KYCController {
         });
       }
 
-      const result = await this.service.getKYCStatus(userId);
+      // Convert userId to string for consistency (parseId expects string)
+      const userIdString = userId.toString();
+      
+      const result = await this.service.getKYCStatus(userIdString);
 
       return res.json({
         success: true,

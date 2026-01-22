@@ -111,11 +111,22 @@ export class KYCService {
   /**
    * Get user KYC status
    */
-  async getKYCStatus(userId: string) {
+  async getKYCStatus(userId: string | number) {
     const parsedUserId = parseId(userId, 'userId');
+    
+    // Debug logging in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[KYC Service] getKYCStatus - userId:', userId, 'parsedUserId:', parsedUserId);
+    }
+    
     const kyc = await prisma.kYC.findUnique({
       where: { userId: parsedUserId },
     });
+
+    // Debug logging in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[KYC Service] getKYCStatus - KYC found:', !!kyc, kyc ? { id: kyc.id, status: kyc.status, userId: kyc.userId } : null);
+    }
 
     if (!kyc) {
       return {
