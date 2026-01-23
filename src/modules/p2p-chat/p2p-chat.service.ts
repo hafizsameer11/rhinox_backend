@@ -34,12 +34,13 @@ export class P2PChatService {
       throw new Error('Order not found');
     }
 
-    if (order.buyerId !== parsedSenderId && order.vendorId !== parsedSenderId) {
+    // Check if sender is vendor or user (order creator)
+    if (order.vendorId !== parsedSenderId && order.userId !== parsedSenderId) {
       throw new Error('Unauthorized to send message in this order');
     }
 
-    // Determine receiver
-    const receiverId = order.buyerId === parsedSenderId ? order.vendorId : order.buyerId;
+    // Determine receiver (the other party)
+    const receiverId = order.vendorId === parsedSenderId ? order.userId : order.vendorId;
 
     // Create message
     const chatMessage = await prisma.p2PChatMessage.create({
@@ -99,7 +100,7 @@ export class P2PChatService {
       throw new Error('Order not found');
     }
 
-    if (order.buyerId !== parsedUserId && order.vendorId !== parsedUserId) {
+    if (order.vendorId !== parsedUserId && order.userId !== parsedUserId) {
       throw new Error('Unauthorized to view messages for this order');
     }
 
@@ -158,7 +159,7 @@ export class P2PChatService {
       throw new Error('Order not found');
     }
 
-    if (order.buyerId !== parsedUserId && order.vendorId !== parsedUserId) {
+    if (order.vendorId !== parsedUserId && order.userId !== parsedUserId) {
       throw new Error('Unauthorized to mark messages as read for this order');
     }
 

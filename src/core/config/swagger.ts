@@ -203,7 +203,8 @@ console.log('[Swagger] Configuration:', {
 export const swaggerSpec = swaggerJsdoc(options);
 
 // Log Swagger spec generation result
+const spec = swaggerSpec as any;
 console.log('[Swagger] Spec generated:', {
-  pathsCount: Object.keys((swaggerSpec as any).paths || {}).length,
-  tagsCount: (swaggerSpec as any).tags?.length || 0,
+  pathsCount: Object.keys(spec.paths || {}).length,
+  tagsCount: spec.tags?.length || 0,
 });

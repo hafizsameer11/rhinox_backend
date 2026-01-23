@@ -1,6 +1,21 @@
 import prisma from '../../core/config/database.js';
 
 /**
+ * Resolve buyer and seller roles from ad type, vendorId, and userId
+ */
+function resolveRoles(adType: string, vendorId: string, userId: string): { buyerId: string; sellerId: string } {
+  if (adType === 'buy') {
+    // Vendor BUY ad: Vendor wants to BUY crypto
+    // Vendor is BUYER, User is SELLER
+    return { buyerId: vendorId, sellerId: userId };
+  } else {
+    // Vendor SELL ad: Vendor wants to SELL crypto
+    // Vendor is SELLER, User is BUYER
+    return { buyerId: userId, sellerId: vendorId };
+  }
+}
+
+/**
  * P2P Review Service
  * Manages reviews left by users after order completion
  */
@@ -42,8 +57,13 @@ export class P2PReviewService {
       throw new Error('Can only review completed orders');
     }
 
-    // Verify reviewer is the buyer
-    if (order.buyerId !== parsedReviewerId) {
+    // Verify reviewer is the buyer (derive from vendorId and userId)
+    const { buyerId } = resolveRoles(
+      order.type,
+      order.vendorId.toString(),
+      order.userId.toString()
+    );
+    if (parseInt(buyerId) !== parsedReviewerId) {
       throw new Error('Only buyer can leave a review');
     }
 

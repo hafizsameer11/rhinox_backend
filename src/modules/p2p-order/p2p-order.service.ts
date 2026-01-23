@@ -667,12 +667,13 @@ export class P2POrderService {
     }
 
     // Create order
-    const parsedBuyerIdForOrder = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
+    // Store vendorId (ad owner) and userId (order creator)
+    // Buyer/seller roles are derived from ad type in resolveRoles()
     const order = await prisma.p2POrder.create({
       data: {
         adId: ad.id,
-        buyerId: parsedBuyerIdForOrder,
-        vendorId: ad.userId,
+        vendorId: ad.userId, // Ad owner
+        userId: parsedUserId, // User who created the order
         type: ad.type, // Keep ad.type for internal reference
         cryptoCurrency: ad.cryptoCurrency,
         fiatCurrency: ad.fiatCurrency,
@@ -694,7 +695,7 @@ export class P2POrderService {
       },
       include: {
         ad: true,
-        buyer: {
+        vendor: {
           select: {
             id: true,
             firstName: true,
@@ -702,7 +703,7 @@ export class P2POrderService {
             email: true,
           },
         },
-        vendor: {
+        user: {
           select: {
             id: true,
             firstName: true,
@@ -762,6 +763,17 @@ export class P2POrderService {
       await this.acceptOrder(order.id.toString(), ad.userId.toString());
     }
 
+    // Resolve buyer and seller for response
+    const { buyerId: resolvedBuyerId, sellerId: resolvedSellerId } = this.resolveRoles(
+      order.type,
+      order.vendorId.toString(),
+      order.userId.toString()
+    );
+    
+    // Get buyer and seller user objects
+    const buyerUser = resolvedBuyerId === order.vendorId.toString() ? order.vendor : order.user;
+    const sellerUser = resolvedSellerId === order.vendorId.toString() ? order.vendor : order.user;
+
     return {
       id: order.id,
       adId: order.adId,
@@ -775,8 +787,10 @@ export class P2POrderService {
       paymentMethodId: order.paymentMethodId,
       paymentChannel: order.paymentChannel,
       status: order.status,
-      buyer: order.buyer,
+      buyer: buyerUser,
+      seller: sellerUser,
       vendor: order.vendor,
+      user: order.user,
       paymentMethod: order.paymentMethod ? {
         id: order.paymentMethod.id,
         type: order.paymentMethod.type,
@@ -824,49 +838,18 @@ export class P2POrderService {
       throw new Error(`Cannot accept order. Current status: ${order.status}`);
     }
 
-    // Resolve roles - use metadata if available, otherwise recalculate
-    const metadata = order.metadata as any;
-    let buyerId: string;
-    let sellerId: string;
-    
-    if (metadata && metadata.sellerId && metadata.buyerId) {
-      // Use stored roles from metadata (created during order creation)
-      buyerId = metadata.buyerId.toString();
-      sellerId = metadata.sellerId.toString();
-    } else {
-      // Fallback: recalculate roles
-      // For acceptOrder, we need the user who created the order
-      // For BUY ads: buyerId in order is vendor, sellerId should be the user who created order
-      // For SELL ads: buyerId in order is user, sellerId is vendor
-      if (order.type === 'buy') {
-        // BUY ad: Vendor is BUYER, User (who created order) is SELLER
-        // order.buyerId is vendor, so seller must be the other user
-        // We can't easily get the original user, so we need to check all orders or use a different approach
-        // Actually, let's recalculate: for BUY, vendor is buyer, so seller is the user who created the order
-        // But order.buyerId is already vendor, so we need to find the seller differently
-        // The simplest: for BUY, seller is NOT vendor, so seller must be the user who created the order
-        // But we don't have that info directly. Let's use resolveRoles but with correct understanding:
-        // resolveRoles('buy', vendorId, buyerId) where buyerId is vendor, so it returns vendor as buyer
-        // But we need the actual user who created the order as seller
-        // Actually, the issue is that order.buyerId for BUY ads IS the vendor, so resolveRoles will work
-        // But it's passing vendor as both vendorId and userId, which is wrong
-        const resolved = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
-        buyerId = resolved.buyerId;
-        sellerId = resolved.sellerId;
-      } else {
-        // SELL ad: Vendor is SELLER, User is BUYER
-        const resolved = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
-        buyerId = resolved.buyerId;
-        sellerId = resolved.sellerId;
-      }
-    }
+    // Resolve roles - now we have vendorId and userId, derive buyer/seller from ad type
+    const { buyerId, sellerId } = this.resolveRoles(
+      order.type,
+      order.vendorId.toString(),
+      order.userId.toString()
+    );
 
     console.log('[P2P Accept Order] Role resolution:', {
       orderId: parsedOrderId,
       orderType: order.type,
       vendorId: order.vendorId,
-      orderBuyerId: order.buyerId,
-      metadata,
+      userId: order.userId,
       resolvedBuyerId: buyerId,
       resolvedSellerId: sellerId,
       cryptoCurrency: order.cryptoCurrency,
@@ -966,7 +949,7 @@ export class P2POrderService {
       data: {
         orderId: order.id,
         senderId: parsedVendorId,
-        receiverId: order.buyerId,
+        receiverId: order.userId,
         message: 'Order accepted. Please make payment within the specified time.',
       },
     });
@@ -1022,7 +1005,7 @@ export class P2POrderService {
       data: {
         orderId: order.id,
         senderId: parsedVendorId,
-        receiverId: order.buyerId,
+        receiverId: order.userId,
         message: 'Order has been declined.',
       },
     });
@@ -1052,7 +1035,7 @@ export class P2POrderService {
       where: { id: parsedOrderId },
       include: {
         ad: true,
-        buyer: {
+        vendor: {
           select: {
             id: true,
             firstName: true,
@@ -1061,7 +1044,7 @@ export class P2POrderService {
             phone: true,
           },
         },
-        vendor: {
+        user: {
           select: {
             id: true,
             firstName: true,
@@ -1107,35 +1090,21 @@ export class P2POrderService {
       throw new Error('Order not found');
     }
 
-    // Check if user is buyer, vendor, or seller (from metadata)
-    // For BUY ads: buyerId = vendor, sellerId (in metadata) = user
-    // For SELL ads: buyerId = user, sellerId (in metadata) = vendor
-    const metadata = order.metadata as any;
-    const isBuyer = order.buyerId === parsedUserId;
+    // Check if user is vendor (ad owner) or user (order creator)
     const isVendor = order.vendorId === parsedUserId;
-    const isSeller = metadata && metadata.sellerId && 
-      (typeof metadata.sellerId === 'string' 
-        ? parseInt(metadata.sellerId, 10) 
-        : metadata.sellerId) === parsedUserId;
+    const isUser = order.userId === parsedUserId;
     
-    console.log('[P2P Order Details] Authorization check:', {
-      orderId: parsedOrderId,
-      userId: parsedUserId,
-      orderBuyerId: order.buyerId,
-      orderVendorId: order.vendorId,
-      metadataSellerId: metadata?.sellerId,
-      isBuyer,
-      isVendor,
-      isSeller,
-      authorized: isBuyer || isVendor || isSeller,
-    });
-    
-    if (!isBuyer && !isVendor && !isSeller) {
+    if (!isVendor && !isUser) {
       throw new Error('Unauthorized to view this order');
     }
 
-    // Resolve roles for display
-    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    // Resolve roles for display - derive from vendorId and userId
+    const { buyerId, sellerId } = this.resolveRoles(
+      order.type,
+      order.vendorId.toString(),
+      order.userId.toString()
+    );
+    
     const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
     const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
     const isUserBuyer = parsedBuyerId === parsedUserId;
@@ -1163,8 +1132,10 @@ export class P2POrderService {
       completedAt: order.completedAt,
       cancelledAt: order.cancelledAt,
       txId: order.txId,
-      buyer: order.buyer,
+      buyer: parsedBuyerId === order.vendorId ? order.vendor : order.user,
+      seller: parsedSellerId === order.vendorId ? order.vendor : order.user,
       vendor: order.vendor,
+      user: order.user,
       isUserBuyer,
       isUserSeller,
       paymentMethod: order.paymentMethod ? {
@@ -1231,7 +1202,7 @@ export class P2POrderService {
     }
 
     // Resolve roles
-    const { buyerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    const { buyerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.userId.toString());
     const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
 
     if (parsedBuyerId !== parsedUserId) {
@@ -1331,7 +1302,7 @@ export class P2POrderService {
     }
 
     // Resolve roles
-    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.userId.toString());
     const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
     const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
 
@@ -1480,7 +1451,7 @@ export class P2POrderService {
     }
 
     // Resolve roles to determine who should mark payment received
-    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.userId.toString());
     const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
     const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
 
@@ -1569,7 +1540,7 @@ export class P2POrderService {
     }
 
     // Resolve roles
-    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+    const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.userId.toString());
     const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
     const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
 
@@ -1690,7 +1661,7 @@ export class P2POrderService {
       data: {
         orderId: order.id,
         senderId: order.vendorId,
-        receiverId: order.buyerId,
+        receiverId: order.userId,
         message: `Crypto has been released. Order completed.`,
       },
     });
@@ -1729,7 +1700,7 @@ export class P2POrderService {
     }
 
     // Only buyer or vendor can cancel
-    if (order.buyerId !== parsedUserId && order.vendorId !== parsedUserId) {
+    if (order.userId !== parsedUserId && order.vendorId !== parsedUserId) {
       throw new Error('Unauthorized to cancel this order');
     }
 
@@ -1741,7 +1712,7 @@ export class P2POrderService {
     // If order was accepted, unfreeze crypto
     if (order.status === 'awaiting_payment' && order.acceptedAt) {
       // Resolve roles
-      const { sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+      const { sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.userId.toString());
       const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
 
       const sellerVirtualAccount = await prisma.virtualAccount.findFirst({
@@ -1781,7 +1752,7 @@ export class P2POrderService {
       data: {
         orderId: order.id,
         senderId: parsedUserId,
-        receiverId: order.buyerId === parsedUserId ? order.vendorId : order.buyerId,
+        receiverId: order.userId === parsedUserId ? order.vendorId : order.userId,
         message: 'Order has been cancelled.',
       },
     });
@@ -1799,7 +1770,7 @@ export class P2POrderService {
   async getUserOrders(
     userId: string | number,
     filters: {
-      role?: 'buyer' | 'vendor';
+      role?: 'vendor' | 'user';
       status?: string;
       limit?: number;
       offset?: number;
@@ -1813,26 +1784,17 @@ export class P2POrderService {
 
     const where: any = {};
 
-    if (filters.role === 'buyer') {
-      // User wants only orders where they are the buyer
-      where.buyerId = parsedUserId;
-    } else if (filters.role === 'vendor') {
+    if (filters.role === 'vendor') {
       // User wants only orders where they are the vendor (ad owner)
       where.vendorId = parsedUserId;
+    } else if (filters.role === 'user') {
+      // User wants only orders where they created the order
+      where.userId = parsedUserId;
     } else {
-      // Get all orders where user is involved (either as buyer, vendor, or seller)
-      // For BUY ads: buyerId = vendor, sellerId (in metadata) = user
-      // For SELL ads: buyerId = user, sellerId (in metadata) = vendor
-      // So we need to check:
-      // 1. buyerId = user (for SELL ads where user is buyer)
-      // 2. vendorId = user (for any ad where user is vendor)
-      // 3. metadata.sellerId = user (for BUY ads where user is seller)
-      
-      // Use OR to check buyerId and vendorId
-      // Then we'll filter by metadata.sellerId in memory after fetching
+      // Get all orders where user is involved (either as vendor or order creator)
       where.OR = [
-        { buyerId: parsedUserId },
         { vendorId: parsedUserId },
+        { userId: parsedUserId },
       ];
     }
 
@@ -1847,14 +1809,6 @@ export class P2POrderService {
       where,
       include: {
         ad: true,
-        buyer: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
         vendor: {
           select: {
             id: true,
@@ -1887,7 +1841,7 @@ export class P2POrderService {
         },
         include: {
           ad: true,
-          buyer: {
+          user: {
             select: {
               id: true,
               firstName: true,
@@ -1936,9 +1890,24 @@ export class P2POrderService {
 
     return orders.map((order: any) => {
       // Resolve roles for display
-      const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
-      const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
-      const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
+      // Use metadata if available (more accurate), otherwise recalculate
+      const orderMetadata = order.metadata as any;
+      let actualBuyerId: string;
+      let actualSellerId: string;
+      
+      if (orderMetadata && orderMetadata.buyerId && orderMetadata.sellerId) {
+        // Use stored roles from metadata (created during order creation)
+        actualBuyerId = orderMetadata.buyerId.toString();
+        actualSellerId = orderMetadata.sellerId.toString();
+      } else {
+        // Fallback: recalculate roles
+        const resolved = this.resolveRoles(order.type, order.vendorId.toString(), order.userId.toString());
+        actualBuyerId = resolved.buyerId;
+        actualSellerId = resolved.sellerId;
+      }
+      
+      const parsedBuyerId = typeof actualBuyerId === 'string' ? parseInt(actualBuyerId, 10) : actualBuyerId;
+      const parsedSellerId = typeof actualSellerId === 'string' ? parseInt(actualSellerId, 10) : actualSellerId;
       const isUserBuyer = parsedBuyerId === parsedUserId;
       const isUserSeller = parsedSellerId === parsedUserId;
 
@@ -1977,14 +1946,14 @@ export class P2POrderService {
     const allOrders = await prisma.p2POrder.findMany({
       where: {
         OR: [
-          { buyerId: userIdNum },
+          { userId: userIdNum },
           { vendorId: userIdNum },
         ],
       },
       select: {
         id: true,
         status: true,
-        buyerId: true,
+        userId: true,
         vendorId: true,
         type: true,
         cryptoAmount: true,
@@ -1996,7 +1965,11 @@ export class P2POrderService {
 
     // Calculate statistics
     const totalOrders = allOrders.length;
-    const ordersAsBuyer = allOrders.filter((o: { buyerId: number }) => o.buyerId === userIdNum).length;
+    // Count orders where user is buyer (derived from type)
+    const ordersAsBuyer = allOrders.filter((o: any) => {
+      const { buyerId } = this.resolveRoles(o.type, o.vendorId.toString(), o.userId.toString());
+      return parseInt(buyerId) === userIdNum;
+    }).length;
     const ordersAsVendor = allOrders.filter((o: { vendorId: number }) => o.vendorId === userIdNum).length;
     const completedOrders = allOrders.filter((o: { status: string }) => o.status === 'completed').length;
     const pendingOrders = allOrders.filter((o: { status: string }) => ['pending', 'awaiting_payment', 'payment_made', 'awaiting_coin_release'].includes(o.status)).length;
@@ -2006,7 +1979,7 @@ export class P2POrderService {
     const recentOrders = await prisma.p2POrder.findMany({
       where: {
         OR: [
-          { buyerId: userIdNum },
+          { userId: userIdNum },
           { vendorId: userIdNum },
         ],
       },
@@ -2017,14 +1990,6 @@ export class P2POrderService {
             type: true,
             cryptoCurrency: true,
             fiatCurrency: true,
-          },
-        },
-        buyer: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
           },
         },
         vendor: {
@@ -2043,7 +2008,7 @@ export class P2POrderService {
     });
 
     const formattedRecentOrders = recentOrders.map((order: any) => {
-      const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.buyerId.toString());
+      const { buyerId, sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.userId.toString());
       const isUserBuyer = buyerId === userIdNum.toString();
       const isUserSeller = sellerId === userIdNum.toString();
 

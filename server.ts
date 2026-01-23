@@ -52,17 +52,17 @@ if (process.env.NODE_ENV === 'production') {
   }
 } else {
   // Development: try multiple paths
-  const uploadsPathDev = path.join(__dirname, '../uploads');
-  const uploadsPathProd = path.join(__dirname, './uploads');
-  const uploadsPathRoot = path.join(process.cwd(), 'uploads');
-  
-  // Try multiple paths to find uploads directory
-  if (existsSync(uploadsPathDev)) {
-    uploadsPath = uploadsPathDev;
-  } else if (existsSync(uploadsPathProd)) {
-    uploadsPath = uploadsPathProd;
-  } else if (existsSync(uploadsPathRoot)) {
-    uploadsPath = uploadsPathRoot;
+const uploadsPathDev = path.join(__dirname, '../uploads');
+const uploadsPathProd = path.join(__dirname, './uploads');
+const uploadsPathRoot = path.join(process.cwd(), 'uploads');
+
+// Try multiple paths to find uploads directory
+if (existsSync(uploadsPathDev)) {
+  uploadsPath = uploadsPathDev;
+} else if (existsSync(uploadsPathProd)) {
+  uploadsPath = uploadsPathProd;
+} else if (existsSync(uploadsPathRoot)) {
+  uploadsPath = uploadsPathRoot;
   } else {
     uploadsPath = uploadsPathRoot; // Default to project root
     // Create if it doesn't exist
@@ -117,7 +117,7 @@ app.use('/uploads', (req, res, next) => {
     console.log(`📁 File not found: ${fullPath}`);
     // Try express.static as fallback
     express.static(uploadsPath, {
-      setHeaders: (res, filePath) => {
+  setHeaders: (res, filePath) => {
         const ext = path.extname(filePath).toLowerCase();
         if (ext === '.png') res.setHeader('Content-Type', 'image/png');
         else if (ext === '.jpg' || ext === '.jpeg') res.setHeader('Content-Type', 'image/jpeg');

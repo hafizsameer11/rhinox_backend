@@ -898,7 +898,7 @@ export class P2POrderController {
       }
 
       const filters = {
-        ...(req.query.role && { role: req.query.role as 'buyer' | 'vendor' }),
+        ...(req.query.role && { role: req.query.role as 'vendor' | 'user' }),
         ...(req.query.status && { status: req.query.status as string }),
         ...(req.query.limit && { limit: parseInt(req.query.limit as string, 10) }),
         ...(req.query.offset && { offset: parseInt(req.query.offset as string, 10) }),

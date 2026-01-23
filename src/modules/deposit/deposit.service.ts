@@ -242,26 +242,26 @@ export class DepositService {
         });
       } else {
         // Normal flow: send initiated email
-        if (data.channel === 'mobile_money') {
-          // Mobile money email (different template if needed)
-          await sendDepositInitiatedEmail(user.email, {
-            amount: data.amount,
-            currency: data.currency,
-            reference,
-            providerName: providerData.name,
-          });
-        } else {
-          // Bank transfer email
-          await sendDepositInitiatedEmail(user.email, {
-            amount: data.amount,
-            currency: data.currency,
-            reference,
-            bankName: bankAccountData.bankName,
-            accountNumber: bankAccountData.accountNumber,
-            accountName: bankAccountData.accountName,
-          });
-        }
+      if (data.channel === 'mobile_money') {
+        // Mobile money email (different template if needed)
+        await sendDepositInitiatedEmail(user.email, {
+          amount: data.amount,
+          currency: data.currency,
+          reference,
+          providerName: providerData.name,
+        });
+      } else {
+        // Bank transfer email
+        await sendDepositInitiatedEmail(user.email, {
+          amount: data.amount,
+          currency: data.currency,
+          reference,
+          bankName: bankAccountData.bankName,
+          accountNumber: bankAccountData.accountNumber,
+          accountName: bankAccountData.accountName,
+        });
       }
+    }
     }
 
     const creditedAmount = isMockMode ? (parseFloat(data.amount) - fee).toString() : undefined;

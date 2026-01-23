@@ -43,8 +43,8 @@ model User {
   virtualAccounts         VirtualAccount[]
   paymentMethods          UserPaymentMethod[]
   p2pAds                  P2PAd[]
-  p2pOrdersAsBuyer        P2POrder[]          @relation("P2POrdersAsBuyer")
   p2pOrdersAsVendor       P2POrder[]          @relation("P2POrdersAsVendor")
+  p2pOrdersAsUser         P2POrder[]          @relation("P2POrdersAsUser")
   p2pMessagesAsSender     P2PChatMessage[]    @relation("P2PMessagesAsSender")
   p2pMessagesAsReceiver   P2PChatMessage[]    @relation("P2PMessagesAsReceiver")
   p2pReviewsAsReviewer    P2PReview[]         @relation("P2PReviewsAsReviewer")
@@ -574,8 +574,8 @@ model P2PAd {
 model P2POrder {
   id                    Int       @id @default(autoincrement())
   adId                  Int       @map("ad_id")
-  buyerId               Int       @map("buyer_id")
-  vendorId              Int       @map("vendor_id")
+  vendorId              Int       @map("vendor_id") // Ad owner (who created the ad)
+  userId                Int       @map("user_id") // User who created the order
   type                  String // 'buy' or 'sell' (from ad perspective)
   cryptoCurrency        String    @map("crypto_currency") @db.VarChar(50)
   fiatCurrency          String    @map("fiat_currency") @db.VarChar(10)
@@ -600,15 +600,15 @@ model P2POrder {
 
   // Relations
   ad            P2PAd              @relation(fields: [adId], references: [id], onDelete: Cascade)
-  buyer         User               @relation("P2POrdersAsBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
   vendor        User               @relation("P2POrdersAsVendor", fields: [vendorId], references: [id], onDelete: Cascade)
+  user          User               @relation("P2POrdersAsUser", fields: [userId], references: [id], onDelete: Cascade)
   paymentMethod UserPaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
   chatMessages  P2PChatMessage[]
   reviews       P2PReview[]
 
   @@index([adId])
-  @@index([buyerId])
   @@index([vendorId])
+  @@index([userId])
   @@index([status])
   @@index([createdAt])
   @@map("p2p_orders")
