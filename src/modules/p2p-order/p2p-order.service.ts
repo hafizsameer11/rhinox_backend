@@ -491,13 +491,36 @@ export class P2POrderService {
       where: { id: parsedPaymentMethodId },
     });
 
-    if (!userPaymentMethod || !userPaymentMethod.isActive) {
-      throw new Error('Payment method not found or inactive');
+    if (!userPaymentMethod) {
+      throw new Error(`Payment method with ID ${parsedPaymentMethodId} not found. Please select a valid payment method.`);
+    }
+
+    if (!userPaymentMethod.isActive) {
+      throw new Error('Payment method is inactive. Please select an active payment method.');
     }
 
     // Validate user's payment method belongs to them
-    if (userPaymentMethod.userId !== parsedUserId) {
-      throw new Error('Payment method does not belong to you. Please select your own payment method.');
+    // Convert both to numbers for comparison to avoid type mismatch issues
+    const userPaymentMethodUserId = typeof userPaymentMethod.userId === 'string' 
+      ? parseInt(userPaymentMethod.userId, 10) 
+      : userPaymentMethod.userId;
+    
+    if (userPaymentMethodUserId !== parsedUserId) {
+      console.error('[P2P Order] Payment method ownership check failed:', {
+        userId: parsedUserId,
+        paymentMethodId: parsedPaymentMethodId,
+        paymentMethodUserId: userPaymentMethodUserId,
+        paymentMethodType: userPaymentMethod.type,
+        paymentMethodOwner: userPaymentMethodUserId,
+        expectedOwner: parsedUserId,
+      });
+      
+      throw new Error(
+        `Payment method does not belong to you. ` +
+        `You selected payment method ID ${parsedPaymentMethodId} which belongs to user ${userPaymentMethodUserId}, ` +
+        `but you are user ${parsedUserId}. Please select your own payment method. ` +
+        `For RhinoxPay ID, make sure you're selecting YOUR RhinoxPay ID payment method, not the vendor's.`
+      );
     }
 
     // Match user's payment method with vendor's accepted payment methods
@@ -530,8 +553,16 @@ export class P2POrderService {
       if (userPaymentMethod.type === 'mobile_money' && vendorPm.type === 'mobile_money') {
         return userPaymentMethod.providerId === vendorPm.providerId;
       }
-      // For rhinoxpay_id: match by type
+      // For rhinoxpay_id: match by type (both must be rhinoxpay_id)
+      // Note: For RhinoxPay ID, we only match by type since each user has their own RhinoxPay ID
+      // The actual payment will use the user's wallet, but we match to ensure vendor accepts RhinoxPay ID
       if (userPaymentMethod.type === 'rhinoxpay_id' && vendorPm.type === 'rhinoxpay_id') {
+        // Additional validation: ensure currency matches if specified
+        // This ensures user's RhinoxPay ID currency matches vendor's accepted currency
+        if (userPaymentMethod.currency && vendorPm.currency) {
+          return userPaymentMethod.currency === vendorPm.currency;
+        }
+        // If currency not specified, just match by type
         return true;
       }
       return false;
@@ -546,16 +577,40 @@ export class P2POrderService {
       const vendorMethodTypes = vendorPaymentMethods.map((pm: any) => {
         if (pm.type === 'bank_account') return pm.bankName || 'Unknown Bank';
         if (pm.type === 'mobile_money') return `Mobile Money (Provider ID: ${pm.providerId})`;
+        if (pm.type === 'rhinoxpay_id') {
+          return `RhinoxPay ID${pm.currency ? ` (${pm.currency})` : ''}`;
+        }
         return pm.type;
       }).join(', ');
       
       const userMethodDisplay = userPaymentMethod.type === 'bank_account' 
         ? (userPaymentMethod.bankName || 'Unknown Bank')
+        : userPaymentMethod.type === 'rhinoxpay_id'
+        ? `RhinoxPay ID${userPaymentMethod.currency ? ` (${userPaymentMethod.currency})` : ''}`
         : userPaymentMethod.type;
+      
+      // Special message for RhinoxPay ID
+      if (userPaymentMethod.type === 'rhinoxpay_id') {
+        const vendorHasRhinoxPay = vendorPaymentMethods.some((pm: any) => pm.type === 'rhinoxpay_id');
+        if (!vendorHasRhinoxPay) {
+          throw new Error(
+            `You selected RhinoxPay ID as your payment method, but the vendor does not accept RhinoxPay ID. ` +
+            `Vendor accepts: ${vendorMethodTypes}. Please select a different payment method or choose a different ad.`
+          );
+        } else {
+          // Vendor accepts RhinoxPay ID but currency might not match
+          throw new Error(
+            `Your RhinoxPay ID payment method${userPaymentMethod.currency ? ` (${userPaymentMethod.currency})` : ''} ` +
+            `does not match the vendor's accepted RhinoxPay ID payment methods. ` +
+            `Vendor accepts: ${vendorMethodTypes}. ` +
+            `Please ensure your RhinoxPay ID currency matches the vendor's accepted currency.`
+          );
+        }
+      }
       
       throw new Error(
         `Your payment method (${userMethodDisplay}) does not match any of the vendor's accepted payment methods. ` +
-        `Vendor accepts: ${vendorMethodTypes}. Please use a payment method that matches one of these (same bank for bank accounts, same provider for mobile money).`
+        `Vendor accepts: ${vendorMethodTypes}. Please use a payment method that matches one of these (same bank for bank accounts, same provider for mobile money, same currency for RhinoxPay ID).`
       );
     }
 
@@ -1842,26 +1897,26 @@ export class P2POrderService {
         include: {
           ad: true,
           user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
           },
-          vendor: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
+        },
+        vendor: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
           },
-          paymentMethod: true,
         },
-        orderBy: {
-          createdAt: 'desc',
-        },
+        paymentMethod: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
       });
 
       // Filter by metadata.sellerId in memory
