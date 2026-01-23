@@ -196,7 +196,16 @@ export class P2POrderController {
    *       **Response includes:**
    *       - `type`: Original ad type (for internal use)
    *       - `userAction`: What user can do (buy/sell) - use this for UI labels
-   *       - `paymentMethods`: List of accepted payment methods with masked account numbers
+   *       - `paymentMethods`: List of vendor's accepted payment methods (for display only)
+   *       
+   *       **IMPORTANT - Payment Method Selection:**
+   *       - The `paymentMethods` array contains the VENDOR's payment methods
+   *       - Users must select their OWN payment method that matches one of these types
+   *       - For RhinoxPay ID: User needs their own RhinoxPay ID payment method
+   *       - For bank accounts: User needs a bank account with the same bank name
+   *       - For mobile money: User needs mobile money with the same provider
+   *       - DO NOT use the vendor's payment method IDs when creating an order
+   *       - Use GET /api/payment-settings to get user's own payment methods
    *       
    *       This endpoint is public and does not require authentication.
    *       Use this to display ad details before user creates an order.
@@ -914,6 +923,104 @@ export class P2POrderController {
       return res.status(400).json({
         success: false,
         message: error.message || 'Failed to get orders',
+      });
+    }
+  }
+
+  /**
+   * @swagger
+   * /api/p2p/ads/{adId}/user-payment-methods:
+   *   get:
+   *     summary: "[USER] Get my payment methods that match vendor's accepted methods"
+   *     description: |
+   *       **UI Flow: View Ad → Get My Matching Payment Methods**
+   *       
+   *       Get the user's own payment methods that match the vendor's accepted payment methods.
+   *       This helps the frontend show the user their own payment methods instead of vendor's.
+   *       
+   *       **Use Case:**
+   *       - User views an ad
+   *       - Frontend calls this endpoint to get user's matching payment methods
+   *       - Frontend shows user's own payment methods (not vendor's)
+   *       - User selects their own payment method when creating order
+   *       
+   *       **For RhinoxPay ID:**
+   *       - If user has RhinoxPay ID and vendor accepts it → returns user's RhinoxPay ID
+   *       - If user doesn't have RhinoxPay ID → returns empty array (user needs to create one)
+   *     tags: ["P2P - USER (Browse & Order)"]
+   *     security:
+   *       - bearerAuth: []
+   *       - cookieAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: adId
+   *         required: true
+   *         schema:
+   *           type: integer
+   *         example: 1
+   *         description: Ad ID
+   *     responses:
+   *       200:
+   *         description: User's payment methods that match vendor's accepted methods
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: array
+   *                   items:
+   *                     type: object
+   *                     properties:
+   *                       id:
+   *                         type: integer
+   *                         example: 3
+   *                         description: User's own payment method ID (use this when creating order)
+   *                       type:
+   *                         type: string
+   *                         enum: [bank_account, mobile_money, rhinoxpay_id]
+   *                       bankName:
+   *                         type: string
+   *                         nullable: true
+   *                       accountNumber:
+   *                         type: string
+   *                         nullable: true
+   *                         description: Masked account number
+   *                       currency:
+   *                         type: string
+   *                         example: "NGN"
+   *       400:
+   *         description: Invalid ad ID or ad not found
+   *         $ref: '#/components/schemas/Error'
+   *       401:
+   *         description: Unauthorized
+   *         $ref: '#/components/schemas/Error'
+   */
+  async getUserMatchingPaymentMethods(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
+      const { adId } = req.params;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      const matchingMethods = await this.service.getUserMatchingPaymentMethods(userId, adId);
+
+      return res.json({
+        success: true,
+        data: matchingMethods,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to get matching payment methods',
       });
     }
   }

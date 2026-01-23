@@ -381,8 +381,13 @@ export class P2POrderService {
       maxOrder: ad.maxOrder.toString(),
       autoAccept: ad.autoAccept,
       paymentMethodIds: parsedPaymentMethodIds, // Return parsed numbers for consistency
+      // IMPORTANT: These are the VENDOR's payment methods (for display only)
+      // User must select their OWN payment method that matches one of these types
+      // For RhinoxPay ID: User needs their own RhinoxPay ID payment method
+      // For bank accounts: User needs a bank account with the same bank name
+      // For mobile money: User needs mobile money with the same provider
       paymentMethods: paymentMethods.map((pm: any) => ({
-        id: pm.id,
+        id: pm.id, // VENDOR's payment method ID - DO NOT USE THIS for order creation
         type: pm.type,
         accountType: pm.accountType,
         bankName: pm.bankName,
@@ -396,6 +401,7 @@ export class P2POrderService {
         phoneNumber: pm.phoneNumber ? this.maskPhoneNumber(pm.phoneNumber) : null,
         countryCode: pm.countryCode,
         currency: pm.currency,
+        _isVendorMethod: true, // Flag to indicate this is vendor's method
       })),
       status: ad.status,
       isOnline: ad.isOnline,
@@ -506,21 +512,47 @@ export class P2POrderService {
       : userPaymentMethod.userId;
     
     if (userPaymentMethodUserId !== parsedUserId) {
+      // User selected vendor's payment method - help them find their own
+      // Check if user has a matching payment method type
+      const userMatchingMethods = await prisma.userPaymentMethod.findMany({
+        where: {
+          userId: parsedUserId,
+          type: userPaymentMethod.type,
+          isActive: true,
+        },
+      });
+
+      let helpfulMessage = '';
+      if (userMatchingMethods.length > 0) {
+        // User has matching payment methods - suggest using one of those
+        helpfulMessage = `You selected the vendor's ${userPaymentMethod.type} payment method. ` +
+          `You have ${userMatchingMethods.length} ${userPaymentMethod.type} payment method(s) of your own. ` +
+          `Please select one of your own payment methods (IDs: ${userMatchingMethods.map((m: any) => m.id).join(', ')}) instead.`;
+      } else {
+        // User doesn't have a matching payment method - guide them to create one
+        if (userPaymentMethod.type === 'rhinoxpay_id') {
+          helpfulMessage = `You selected the vendor's RhinoxPay ID payment method. ` +
+            `You need to create your own RhinoxPay ID payment method first. ` +
+            `Please go to Payment Settings and add your RhinoxPay ID, then select it when creating the order.`;
+        } else if (userPaymentMethod.type === 'bank_account') {
+          helpfulMessage = `You selected the vendor's bank account payment method. ` +
+            `You need to add a bank account with the same bank (${userPaymentMethod.bankName || 'same bank'}) to your payment methods first.`;
+        } else {
+          helpfulMessage = `You selected the vendor's ${userPaymentMethod.type} payment method. ` +
+            `You need to add your own ${userPaymentMethod.type} payment method first.`;
+        }
+      }
+      
       console.error('[P2P Order] Payment method ownership check failed:', {
         userId: parsedUserId,
         paymentMethodId: parsedPaymentMethodId,
         paymentMethodUserId: userPaymentMethodUserId,
         paymentMethodType: userPaymentMethod.type,
-        paymentMethodOwner: userPaymentMethodUserId,
-        expectedOwner: parsedUserId,
+        userHasMatchingMethods: userMatchingMethods.length,
+        userMatchingMethodIds: userMatchingMethods.map((m: any) => m.id),
       });
       
-      throw new Error(
-        `Payment method does not belong to you. ` +
-        `You selected payment method ID ${parsedPaymentMethodId} which belongs to user ${userPaymentMethodUserId}, ` +
-        `but you are user ${parsedUserId}. Please select your own payment method. ` +
-        `For RhinoxPay ID, make sure you're selecting YOUR RhinoxPay ID payment method, not the vendor's.`
-      );
+      throw new Error(helpfulMessage);
     }
 
     // Match user's payment method with vendor's accepted payment methods
@@ -1817,6 +1849,103 @@ export class P2POrderService {
       status: updated.status,
       cancelledAt: updated.cancelledAt,
     };
+  }
+
+  /**
+   * Get user's payment methods that match vendor's accepted payment methods
+   * This helps frontend show user's own payment methods instead of vendor's
+   */
+  async getUserMatchingPaymentMethods(userId: string, adId: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    const parsedAdId = typeof adId === 'string' ? parseInt(adId, 10) : adId;
+    if (isNaN(parsedAdId) || parsedAdId <= 0) {
+      throw new Error('Invalid ad ID format');
+    }
+
+    // Get ad
+    const ad = await prisma.p2PAd.findUnique({
+      where: { id: parsedAdId },
+    });
+
+    if (!ad) {
+      throw new Error('Ad not found');
+    }
+
+    // Get vendor's accepted payment methods
+    const paymentMethodIdsRaw = ad.paymentMethodIds as any;
+    let vendorPaymentMethodIds: number[] = [];
+    
+    if (Array.isArray(paymentMethodIdsRaw)) {
+      vendorPaymentMethodIds = paymentMethodIdsRaw.map((id: any) => {
+        const num = typeof id === 'string' ? parseInt(id, 10) : id;
+        return isNaN(num) ? null : num;
+      }).filter((id: any) => id !== null) as number[];
+    }
+
+    // Get vendor's payment methods to see what types they accept
+    const vendorPaymentMethods = await prisma.userPaymentMethod.findMany({
+      where: {
+        id: { in: vendorPaymentMethodIds },
+        isActive: true,
+      },
+    });
+
+    // Get user's payment methods
+    const userPaymentMethods = await prisma.userPaymentMethod.findMany({
+      where: {
+        userId: parsedUserId,
+        isActive: true,
+      },
+      include: {
+        provider: true,
+      },
+    });
+
+    // Match user's payment methods with vendor's accepted types
+    const matchingMethods = userPaymentMethods.filter((userPm: any) => {
+      return vendorPaymentMethods.some((vendorPm: any) => {
+        // For bank accounts: match by bankName
+        if (userPm.type === 'bank_account' && vendorPm.type === 'bank_account') {
+          const userBank = (userPm.bankName || '').toLowerCase().trim();
+          const vendorBank = (vendorPm.bankName || '').toLowerCase().trim();
+          return userBank === vendorBank && userBank !== '';
+        }
+        // For mobile money: match by provider
+        if (userPm.type === 'mobile_money' && vendorPm.type === 'mobile_money') {
+          return userPm.providerId === vendorPm.providerId;
+        }
+        // For rhinoxpay_id: match by type (and currency if specified)
+        if (userPm.type === 'rhinoxpay_id' && vendorPm.type === 'rhinoxpay_id') {
+          if (userPm.currency && vendorPm.currency) {
+            return userPm.currency === vendorPm.currency;
+          }
+          return true;
+        }
+        return false;
+      });
+    });
+
+    return matchingMethods.map((pm: any) => ({
+      id: pm.id,
+      type: pm.type,
+      accountType: pm.accountType,
+      bankName: pm.bankName,
+      accountNumber: pm.accountNumber ? this.maskAccountNumber(pm.accountNumber) : null,
+      accountName: pm.accountName,
+      provider: pm.provider ? {
+        id: pm.provider.id,
+        name: pm.provider.name,
+        code: pm.provider.code,
+      } : null,
+      phoneNumber: pm.phoneNumber ? this.maskPhoneNumber(pm.phoneNumber) : null,
+      countryCode: pm.countryCode,
+      currency: pm.currency,
+      isDefault: pm.isDefault,
+    }));
   }
 
   /**
