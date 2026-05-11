@@ -11,6 +11,7 @@ import { AuthModule, WalletModule, KYCModule, HomeModule, CountryModule, CryptoM
 import { authMiddleware } from './src/core/middleware/auth.middleware.js';
 import ApiError from './src/core/utils/ApiError.js';
 import { swaggerSpec } from './src/core/config/swagger.js';
+import { PalmPayWebhookService } from './src/services/palmpay/palmpay.webhook.service.js';
 
 // Load environment variables
 dotenv.config();
@@ -385,6 +386,23 @@ app.use('/api/crypto', cryptoModule.getPublicRouter());
 
 // Register webhook route separately (no auth)
 app.use('/api/crypto/webhooks', cryptoModule.getWebhookRouter());
+
+// Register PalmPay webhook routes separately (no auth, PalmPay requires plain text success)
+const palmPayWebhookService = new PalmPayWebhookService();
+const handlePalmPayWebhook = async (req: express.Request, res: express.Response) => {
+  try {
+    await palmPayWebhookService.handleWebhook(req.body, {
+      headers: req.headers,
+      ipAddress: req.ip || req.socket.remoteAddress,
+      userAgent: req.get('user-agent'),
+    });
+  } catch (error) {
+    console.error('[PalmPay Webhook] Failed to persist/process webhook:', error);
+  }
+  res.type('text/plain').send('success');
+};
+app.post('/api/webhooks/palmpay', handlePalmPayWebhook);
+app.post('/api/webhooks/palmpay/bill-payment', handlePalmPayWebhook);
 
 // ============================================
 // Error Handling

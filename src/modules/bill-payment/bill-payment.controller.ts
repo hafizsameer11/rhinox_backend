@@ -106,8 +106,9 @@ export class BillPaymentController {
         data: providers,
       });
     } catch (error: any) {
-      return res.status(500).json({
+      return res.status(error.statusCode || 500).json({
         success: false,
+        code: error.code,
         message: error.message || 'Failed to get providers',
       });
     }
@@ -138,7 +139,7 @@ export class BillPaymentController {
    */
   async getPlans(req: Request, res: Response) {
     try {
-      const { providerId } = req.query;
+      const { providerId, categoryCode } = req.query;
       if (!providerId) {
         return res.status(400).json({
           success: false,
@@ -146,17 +147,10 @@ export class BillPaymentController {
         });
       }
 
-      const providerIdNum = parseInt(providerId as string, 10);
-      
-      // Validate providerId is a valid positive integer
-      if (isNaN(providerIdNum) || providerIdNum <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid providerId. Must be a positive integer',
-        });
-      }
-
-      const plans = await this.service.getPlansByProvider(providerIdNum);
+      const plans = await this.service.getPlansByProvider(
+        providerId as string,
+        categoryCode as string | undefined
+      );
       return res.json({
         success: true,
         data: plans,
@@ -169,8 +163,9 @@ export class BillPaymentController {
           message: error.message,
         });
       }
-      return res.status(500).json({
+      return res.status(error.statusCode || 500).json({
         success: false,
+        code: error.code,
         message: error.message || 'Failed to get plans',
       });
     }
@@ -230,8 +225,9 @@ export class BillPaymentController {
         data: result,
       });
     } catch (error: any) {
-      return res.status(400).json({
+      return res.status(error.statusCode || 400).json({
         success: false,
+        code: error.code,
         message: error.message || 'Failed to validate meter',
       });
     }
@@ -283,8 +279,9 @@ export class BillPaymentController {
         data: result,
       });
     } catch (error: any) {
-      return res.status(400).json({
+      return res.status(error.statusCode || 400).json({
         success: false,
+        code: error.code,
         message: error.message || 'Failed to validate account',
       });
     }
@@ -350,8 +347,9 @@ export class BillPaymentController {
         data: summary,
       });
     } catch (error: any) {
-      return res.status(400).json({
+      return res.status(error.statusCode || 400).json({
         success: false,
+        code: error.code,
         message: error.message || 'Failed to initiate payment',
       });
     }
@@ -413,8 +411,9 @@ export class BillPaymentController {
         data: result,
       });
     } catch (error: any) {
-      return res.status(400).json({
+      return res.status(error.statusCode || 400).json({
         success: false,
+        code: error.code,
         message: error.message || 'Failed to confirm payment',
       });
     }

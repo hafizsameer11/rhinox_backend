@@ -1,8 +1,9 @@
 import { randomBytes } from 'crypto';
-import bcrypt from 'bcryptjs';
 import prisma from '../../core/config/database.js';
 import { WalletService } from '../wallet/wallet.service.js';
-import { sendDepositInitiatedEmail, sendDepositSuccessEmail } from '../../core/utils/transaction-email.service.js';
+import { sendDepositInitiatedEmail } from '../../core/utils/transaction-email.service.js';
+import { PalmPayDepositService } from '../../services/palmpay/palmpay.deposit.service.js';
+import { createProviderUnavailableError } from '../../services/palmpay/palmpay.utils.js';
 
 /**
  * Deposit Service
@@ -10,37 +11,27 @@ import { sendDepositInitiatedEmail, sendDepositSuccessEmail } from '../../core/u
  */
 export class DepositService {
   private walletService: WalletService;
+  private palmPayDepositService: PalmPayDepositService;
 
   constructor() {
     this.walletService = new WalletService();
+    this.palmPayDepositService = new PalmPayDepositService();
   }
 
   /**
-   * Get bank account details for deposit
-   * Returns the first active bank account for the given country and currency
+   * Static deposit accounts are disabled for NGN. A PalmPay virtual account
+   * is created per deposit through initiateDeposit.
    */
   async getBankAccountDetails(countryCode: string, currency: string) {
-    const bankAccount = await prisma.bankAccount.findFirst({
-      where: {
-        countryCode,
-        currency,
-        isActive: true,
-      },
-      orderBy: {
-        createdAt: 'asc', // Get the first created account
-      },
-    });
-
-    if (!bankAccount) {
-      throw new Error(`Bank account not available for ${currency} in ${countryCode}`);
+    if (countryCode !== 'NG' || currency !== 'NGN') {
+      throw new Error('Only NGN PalmPay deposits are currently supported');
     }
 
     return {
-      bankName: bankAccount.bankName,
-      accountNumber: bankAccount.accountNumber,
-      accountName: bankAccount.accountName,
-      currency: bankAccount.currency,
-      countryCode: bankAccount.countryCode,
+      provider: 'palmpay',
+      currency: 'NGN',
+      countryCode: 'NG',
+      message: 'Enter an amount to generate a PalmPay virtual account for this deposit.',
     };
   }
 
@@ -48,23 +39,11 @@ export class DepositService {
    * Get mobile money providers for a country
    */
   async getMobileMoneyProviders(countryCode: string, currency: string) {
-    const providers = await prisma.mobileMoneyProvider.findMany({
-      where: {
-        countryCode,
-        currency,
-        isActive: true,
-      },
-      orderBy: {
-        name: 'asc',
-      },
-    });
+    if (countryCode === 'NG' && currency === 'NGN') {
+      return [];
+    }
 
-    return providers.map((provider: any) => ({
-      id: provider.id,
-      name: provider.name,
-      code: provider.code,
-      logoUrl: provider.logoUrl,
-    }));
+    throw new Error('Mobile money deposits are currently unavailable');
   }
 
   /**
@@ -86,6 +65,18 @@ export class DepositService {
       throw new Error('Invalid user ID format');
     }
 
+    if (data.currency !== 'NGN' || data.countryCode !== 'NG' || data.channel !== 'bank_transfer') {
+      throw new Error('Only NGN bank transfer deposits via PalmPay are currently supported');
+    }
+
+    const amount = parseFloat(data.amount);
+    if (isNaN(amount) || amount <= 0) {
+      throw new Error('Amount must be greater than 0');
+    }
+    if (amount < 100) {
+      throw new Error('Minimum PalmPay deposit amount is 100 NGN');
+    }
+
     // Get or create wallet
     let wallet;
     try {
@@ -95,102 +86,29 @@ export class DepositService {
       wallet = await this.walletService.createWallet(parsedUserId, data.currency, 'fiat');
     }
 
-    // Generate unique reference
     const reference = this.generateReference();
+    const merchantOrderId = `deposit_${reference.toLowerCase()}`;
+    const fee = 0;
 
-    // Calculate fee (you can make this configurable)
-    const fee = this.calculateFee(parseFloat(data.amount), data.currency);
-
-    // Determine payment method and get related data
-    let bankAccountId: number | undefined;
-    let providerId: number | undefined;
-    let paymentMethod: string;
-    let bankAccountData: any = null;
-    let providerData: any = null;
-
-    if (data.channel === 'mobile_money') {
-      // Mobile money deposit
-      if (!data.providerId) {
-        throw new Error('Provider ID is required for mobile money deposits');
-      }
-
-      // Verify provider exists and is active (parse ID to integer)
-      const parsedProviderId = typeof data.providerId === 'string' ? parseInt(data.providerId, 10) : data.providerId;
-      if (isNaN(parsedProviderId) || parsedProviderId <= 0) {
-        throw new Error('Invalid provider ID format');
-      }
-      const provider = await prisma.mobileMoneyProvider.findUnique({
-        where: { id: parsedProviderId },
-      });
-
-      if (!provider || !provider.isActive) {
-        throw new Error('Invalid or inactive mobile money provider');
-      }
-
-      if (provider.countryCode !== data.countryCode || provider.currency !== data.currency) {
-        throw new Error('Provider does not support this country/currency combination');
-      }
-
-      // Store providerId as integer for database
-      providerId = parsedProviderId;
-      paymentMethod = 'Mobile Money';
-      providerData = {
-        name: provider.name,
-        code: provider.code,
-      };
-    } else {
-      // Bank transfer deposit
-      const bankAccountDataResult = await this.getBankAccountDetails(data.countryCode, data.currency);
-      
-      // Get full bank account record for ID
-      const bankAccount = await prisma.bankAccount.findFirst({
-        where: {
-          countryCode: data.countryCode,
-          currency: data.currency,
-          isActive: true,
-        },
-        orderBy: {
-          createdAt: 'asc',
-        },
-      });
-
-      if (!bankAccount) {
-        throw new Error('Bank account not found');
-      }
-
-      bankAccountId = bankAccount.id;
-      paymentMethod = 'Bank Transfer';
-      bankAccountData = {
-        bankName: bankAccount.bankName,
-        accountNumber: bankAccount.accountNumber,
-        accountName: bankAccount.accountName,
-      };
-    }
-
-    // Check if in mock/test mode (immediate balance credit)
-    const isMockMode = process.env.MOCK_MODE === 'true' || process.env.NODE_ENV === 'development';
-    
-    // Create transaction (completed immediately in mock mode, pending otherwise)
     const transaction = await prisma.transaction.create({
       data: {
         walletId: wallet.id,
         type: 'deposit',
-        status: isMockMode ? 'completed' : 'pending',
-        amount: parseFloat(data.amount),
-        currency: data.currency,
-        fee: fee,
+        status: 'pending',
+        amount,
+        currency: 'NGN',
+        fee,
         reference,
-        channel: data.channel,
-        country: data.countryCode,
-        bankAccountId: bankAccountId ?? null,
-        providerId: providerId ?? null,
-        paymentMethod,
-        description: `Deposit ${data.amount} ${data.currency} via ${data.channel}`,
-        completedAt: isMockMode ? new Date() : null,
+        channel: 'bank_transfer',
+        country: 'NG',
+        paymentMethod: 'PalmPay Virtual Account',
+        description: `Deposit ${data.amount} NGN via PalmPay virtual account`,
+        metadata: {
+          provider: 'palmpay',
+          merchantOrderId,
+        },
       },
       include: {
-        bankAccount: true,
-        provider: true,
         wallet: {
           include: {
             user: true,
@@ -199,88 +117,74 @@ export class DepositService {
       },
     });
 
-    // In mock mode, immediately credit the wallet balance
-    if (isMockMode) {
-      const currentBalance = Number(wallet.balance);
-      const depositAmount = Number(transaction.amount);
-      const feeAmount = Number(transaction.fee);
-      const creditedAmount = depositAmount - feeAmount;
-
-      await prisma.wallet.update({
-        where: { id: wallet.id },
-        data: {
-          balance: currentBalance + creditedAmount,
-        },
+    let palmPayOrder;
+    try {
+      palmPayOrder = await this.palmPayDepositService.createVirtualAccountOrder({
+        orderId: merchantOrderId,
+        amount,
+        userId: parsedUserId,
+        userMobileNo: transaction.wallet.user.phone,
       });
 
-      console.log(`[MOCK MODE] Deposit credited immediately: ${creditedAmount} ${data.currency} to wallet ${wallet.id}`);
+      await prisma.palmPayVirtualAccount.create({
+        data: {
+          transactionId: transaction.id,
+          merchantOrderId,
+          palmpayOrderNo: palmPayOrder.orderNo ?? null,
+          payerAccountType: palmPayOrder.payerAccountType ?? null,
+          payerAccountId: palmPayOrder.payerAccountId ?? null,
+          payerBankName: palmPayOrder.payerBankName ?? null,
+          payerAccountName: palmPayOrder.payerAccountName ?? null,
+          payerVirtualAccNo: palmPayOrder.payerVirtualAccNo ?? null,
+          orderStatus: palmPayOrder.orderStatus ?? null,
+          metadata: palmPayOrder as any,
+        },
+      });
+    } catch (error: any) {
+      await prisma.transaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: 'failed',
+          metadata: {
+            provider: 'palmpay',
+            merchantOrderId,
+            error: error.providerResponse || error.message,
+          },
+        },
+      });
+      throw createProviderUnavailableError(error.message || 'Unable to create PalmPay virtual account');
     }
 
-    // Get user email
-    const user = await prisma.user.findUnique({
-      where: { id: parsedUserId },
-      select: { email: true, firstName: true },
-    });
-
-    // Send email notification
-    if (user) {
-      if (isMockMode) {
-        // In mock mode, send success email instead of initiated email
-        const creditedAmount = (parseFloat(data.amount) - fee).toString();
-        await sendDepositSuccessEmail(user.email, {
-          amount: data.amount,
-          currency: data.currency,
-          creditedAmount,
-          fee: fee.toString(),
-          reference,
-          transactionId: transaction.id.toString(),
-          country: data.countryCode,
-          channel: data.channel,
-          paymentMethod,
-          provider: providerData?.name || null,
-          date: transaction.completedAt?.toLocaleString() || new Date().toLocaleString(),
-        });
-      } else {
-        // Normal flow: send initiated email
-      if (data.channel === 'mobile_money') {
-        // Mobile money email (different template if needed)
-        await sendDepositInitiatedEmail(user.email, {
-          amount: data.amount,
-          currency: data.currency,
-          reference,
-          providerName: providerData.name,
-        });
-      } else {
-        // Bank transfer email
-        await sendDepositInitiatedEmail(user.email, {
-          amount: data.amount,
-          currency: data.currency,
-          reference,
-          bankName: bankAccountData.bankName,
-          accountNumber: bankAccountData.accountNumber,
-          accountName: bankAccountData.accountName,
-        });
-      }
+    if (transaction.wallet.user.email) {
+      await sendDepositInitiatedEmail(transaction.wallet.user.email, {
+        amount: data.amount,
+        currency: 'NGN',
+        reference,
+        bankName: palmPayOrder.payerBankName,
+        accountNumber: palmPayOrder.payerVirtualAccNo,
+        accountName: palmPayOrder.payerAccountName,
+      });
     }
-    }
-
-    const creditedAmount = isMockMode ? (parseFloat(data.amount) - fee).toString() : undefined;
 
     return {
       id: transaction.id,
       reference: transaction.reference,
+      merchantOrderId,
+      orderNo: palmPayOrder.orderNo,
       amount: transaction.amount.toString(),
       currency: transaction.currency,
       fee: transaction.fee.toString(),
-      ...(creditedAmount && { creditedAmount }),
       status: transaction.status,
-      bankAccount: bankAccountData,
-      provider: providerData,
+      provider: 'palmpay',
+      virtualAccount: {
+        accountType: palmPayOrder.payerAccountType,
+        accountId: palmPayOrder.payerAccountId,
+        bankName: palmPayOrder.payerBankName,
+        accountName: palmPayOrder.payerAccountName,
+        accountNumber: palmPayOrder.payerVirtualAccNo,
+      },
+      checkoutUrl: palmPayOrder.checkoutUrl,
       createdAt: transaction.createdAt,
-      ...(isMockMode && { 
-        message: 'Deposit credited immediately (Mock Mode)',
-        completedAt: transaction.completedAt,
-      }),
     };
   }
 
@@ -292,120 +196,7 @@ export class DepositService {
     transactionId: string,
     pin: string
   ) {
-    // Parse transactionId to integer
-    const parsedTransactionId = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
-    if (isNaN(parsedTransactionId) || parsedTransactionId <= 0) {
-      throw new Error('Invalid transaction ID format');
-    }
-
-    // Parse userId to integer
-    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-    if (isNaN(parsedUserId) || parsedUserId <= 0) {
-      throw new Error('Invalid user ID format');
-    }
-
-    // Get transaction
-    const transaction = await prisma.transaction.findUnique({
-      where: { id: parsedTransactionId },
-      include: {
-        wallet: {
-          include: {
-            user: true,
-          },
-        },
-        bankAccount: true,
-      },
-    });
-
-    if (!transaction) {
-      throw new Error('Transaction not found');
-    }
-
-    if (transaction.wallet.userId !== parsedUserId) {
-      throw new Error('Unauthorized access to transaction');
-    }
-
-    if (transaction.status !== 'pending') {
-      throw new Error(`Transaction is already ${transaction.status}`);
-    }
-
-    // Verify PIN
-    if (!transaction.wallet.user.pinHash) {
-      throw new Error('PIN not set. Please setup your PIN first.');
-    }
-
-    const isValidPin = await bcrypt.compare(pin, transaction.wallet.user.pinHash);
-    if (!isValidPin) {
-      throw new Error('Invalid PIN');
-    }
-
-    // Update transaction status to completed
-    const updatedTransaction = await prisma.transaction.update({
-      where: { id: parsedTransactionId },
-      data: {
-        status: 'completed',
-        completedAt: new Date(),
-      },
-      include: {
-        wallet: {
-          include: {
-            user: true,
-          },
-        },
-        bankAccount: true,
-        provider: true,
-      },
-    });
-
-    // Update wallet balance
-    const currentBalance = Number(updatedTransaction.wallet.balance);
-    const depositAmount = Number(updatedTransaction.amount);
-    const fee = Number(updatedTransaction.fee);
-    const creditedAmount = depositAmount - fee;
-
-    await prisma.wallet.update({
-      where: { id: updatedTransaction.walletId },
-      data: {
-        balance: currentBalance + creditedAmount,
-      },
-    });
-
-    // Send success email
-    if (updatedTransaction.wallet.user.email) {
-      await sendDepositSuccessEmail(updatedTransaction.wallet.user.email, {
-        amount: updatedTransaction.amount.toString(),
-        currency: updatedTransaction.currency,
-        creditedAmount: creditedAmount.toString(),
-        fee: updatedTransaction.fee.toString(),
-        reference: updatedTransaction.reference,
-        transactionId: updatedTransaction.id.toString(),
-        country: updatedTransaction.country || 'N/A',
-        channel: updatedTransaction.channel || 'N/A',
-        paymentMethod: updatedTransaction.paymentMethod || 'Bank Transfer',
-        provider: updatedTransaction.provider?.name || null,
-        date: updatedTransaction.completedAt?.toLocaleString() || new Date().toLocaleString(),
-      });
-    }
-
-    return {
-      id: updatedTransaction.id,
-      reference: updatedTransaction.reference,
-      amount: updatedTransaction.amount.toString(),
-      currency: updatedTransaction.currency,
-      fee: updatedTransaction.fee.toString(),
-      creditedAmount: creditedAmount.toString(),
-      status: updatedTransaction.status,
-      country: updatedTransaction.country,
-      channel: updatedTransaction.channel,
-      paymentMethod: updatedTransaction.paymentMethod,
-      provider: updatedTransaction.provider ? {
-        name: updatedTransaction.provider.name,
-        code: updatedTransaction.provider.code,
-      } : null,
-      transactionId: updatedTransaction.id,
-      date: updatedTransaction.completedAt,
-      createdAt: updatedTransaction.createdAt,
-    };
+    throw new Error('PalmPay deposits are confirmed automatically by webhook. Manual deposit confirmation is disabled.');
   }
 
   /**
@@ -435,6 +226,7 @@ export class DepositService {
         },
         bankAccount: true,
         provider: true,
+        palmPayVirtualAccounts: true,
       },
     });
 
@@ -475,6 +267,13 @@ export class DepositService {
         accountNumber: transaction.bankAccount.accountNumber,
         accountName: transaction.bankAccount.accountName,
       } : null,
+      virtualAccount: transaction.palmPayVirtualAccounts[0] ? {
+        bankName: transaction.palmPayVirtualAccounts[0].payerBankName,
+        accountNumber: transaction.palmPayVirtualAccounts[0].payerVirtualAccNo,
+        accountName: transaction.palmPayVirtualAccounts[0].payerAccountName,
+        orderNo: transaction.palmPayVirtualAccounts[0].palmpayOrderNo,
+        merchantOrderId: transaction.palmPayVirtualAccounts[0].merchantOrderId,
+      } : null,
     };
   }
 
@@ -487,27 +286,5 @@ export class DepositService {
     return `${timestamp}${random}`.toUpperCase();
   }
 
-  /**
-   * Calculate deposit fee
-   */
-  private calculateFee(amount: number, currency: string): number {
-    // Simple fee calculation - you can make this more sophisticated
-    // For now: 0.1% or minimum fee based on currency
-    const feePercent = 0.001; // 0.1%
-    const calculatedFee = amount * feePercent;
-    
-    // Minimum fees by currency
-    const minFees: { [key: string]: number } = {
-      NGN: 200,
-      KES: 50,
-      GHS: 5,
-      ZAR: 20,
-      USD: 1,
-      EUR: 1,
-    };
-
-    const minFee = minFees[currency] || 1;
-    return Math.max(calculatedFee, minFee);
-  }
 }
 

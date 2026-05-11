@@ -7,6 +7,8 @@ import { KYCService } from '../kyc/kyc.service.js';
 import { generateOTP, sendOTPEmail } from '../../core/utils/email.service.js';
 import { PaymentSettingsService } from '../payment-settings/payment-settings.service.js';
 import { decryptPrivateKey } from '../../core/utils/encryption.js';
+import { PalmPayPayoutService } from '../../services/palmpay/palmpay.payout.service.js';
+import { mapPalmPayStatus } from '../../services/palmpay/palmpay.utils.js';
 
 /**
  * Transfer Service
@@ -16,11 +18,13 @@ export class TransferService {
   private walletService: WalletService;
   private kycService: KYCService;
   private paymentSettingsService: PaymentSettingsService;
+  private palmPayPayoutService: PalmPayPayoutService;
 
   constructor() {
     this.walletService = new WalletService();
     this.kycService = new KYCService();
     this.paymentSettingsService = new PaymentSettingsService();
+    this.palmPayPayoutService = new PalmPayPayoutService();
   }
 
   /**
@@ -146,6 +150,10 @@ export class TransferService {
    * Calculate transfer fee
    */
   private calculateTransferFee(amount: DecimalType, currency: string, channel: string): DecimalType {
+    if (channel === 'bank_account' && currency === 'NGN') {
+      return new Decimal(0);
+    }
+
     // Fee structure: 0.1% or minimum fee
     const feePercent = 0.001; // 0.1%
     const calculatedFee = amount.times(feePercent);
@@ -283,6 +291,9 @@ export class TransferService {
         throw new Error('You cannot transfer funds to yourself');
       }
     } else if (data.channel === 'bank_account') {
+      if (data.currency !== 'NGN' || data.countryCode !== 'NG') {
+        throw new Error('Only NGN withdrawals to Nigerian bank accounts are currently supported');
+      }
       // For withdrawals, use payment method from payment settings
       if (data.paymentMethodId) {
         const paymentMethod = await this.paymentSettingsService.getPaymentMethod(userId, data.paymentMethodId.toString());
@@ -301,11 +312,15 @@ export class TransferService {
         if (!fullPaymentMethod || !fullPaymentMethod.accountNumber) {
           throw new Error('Payment method not found or invalid');
         }
+        if (!fullPaymentMethod.bankCode) {
+          throw new Error('Bank account must be verified with PalmPay before withdrawal');
+        }
         const decryptedAccountNumber = decryptPrivateKey(fullPaymentMethod.accountNumber);
         recipientInfo = {
           accountNumber: decryptedAccountNumber,
           bankName: paymentMethod.bankName || '',
           accountName: paymentMethod.accountName || '',
+          bankCode: fullPaymentMethod.bankCode,
           countryCode: paymentMethod.countryCode,
           paymentMethodId: data.paymentMethodId,
         };
@@ -364,6 +379,7 @@ export class TransferService {
           accountNumber: recipientInfo.accountNumber || data.accountNumber, // For bank transfers
           bankName: recipientInfo.bankName || data.bankName, // For bank transfers
           accountName: recipientInfo.accountName, // For bank transfers (from validation/payment method)
+          bankCode: recipientInfo.bankCode,
           phoneNumber: data.phoneNumber, // For mobile money
           providerId: data.providerId, // For mobile money
           recipientInfo, // Full recipient information
@@ -536,6 +552,91 @@ export class TransferService {
 
     if (totalDeduction.greaterThan(availableBalance)) {
       throw new Error('Insufficient balance');
+    }
+
+    if (transaction.type === 'withdrawal' && transaction.channel === 'bank_account') {
+      const recipientInfo = metadata?.recipientInfo || {};
+      if (!recipientInfo.bankCode || !recipientInfo.accountNumber || !recipientInfo.accountName) {
+        throw new Error('PalmPay verified bank account details are required for withdrawal');
+      }
+
+      const now = new Date();
+      const palmPayOrderId = `payout_${transaction.reference.toLowerCase()}`;
+      let payoutResponse: any;
+
+      try {
+        payoutResponse = await this.palmPayPayoutService.initiatePayout({
+          orderId: palmPayOrderId,
+          amount: transaction.amount.toString(),
+          accountNumber: recipientInfo.accountNumber,
+          accountName: recipientInfo.accountName,
+          bankCode: recipientInfo.bankCode,
+          phoneNumber: transaction.wallet.user.phone,
+          userId: parsedUserId,
+        });
+      } catch (error: any) {
+        await prisma.transaction.update({
+          where: { id: parsedTransactionId },
+          data: {
+            status: 'failed',
+            metadata: {
+              ...metadata,
+              integrationStatus: 'failed',
+              palmpayOrderId: palmPayOrderId,
+              palmpayError: error.providerResponse || error.message,
+            },
+          },
+        });
+        throw new Error(error.message || 'PalmPay payout initiation failed');
+      }
+
+      const updatedTransaction = await prisma.$transaction(async (tx) => {
+        const updated = await tx.transaction.update({
+          where: { id: parsedTransactionId },
+          data: {
+            status: 'processing',
+            metadata: {
+              ...metadata,
+              provider: 'palmpay',
+              integrationStatus: 'accepted',
+              palmpayOrderId: palmPayOrderId,
+              palmpayOrderNo: payoutResponse.orderNo,
+              palmpayStatus: payoutResponse.orderStatus,
+              palmpaySessionId: payoutResponse.sessionId,
+              payoutResponse,
+              walletDebited: true,
+              walletDebitedAt: now.toISOString(),
+            },
+          },
+        });
+
+        await tx.wallet.update({
+          where: { id: transaction.walletId },
+          data: {
+            balance: {
+              decrement: totalDeduction.toNumber(),
+            },
+          },
+        });
+
+        return updated;
+      });
+
+      return {
+        id: updatedTransaction.id,
+        reference: updatedTransaction.reference,
+        amount: updatedTransaction.amount.toString(),
+        currency: updatedTransaction.currency,
+        fee: updatedTransaction.fee.toString(),
+        status: updatedTransaction.status,
+        channel: updatedTransaction.channel,
+        provider: 'palmpay',
+        orderId: palmPayOrderId,
+        orderNo: payoutResponse.orderNo,
+        recipientInfo,
+        date: updatedTransaction.completedAt,
+        createdAt: updatedTransaction.createdAt,
+      };
     }
 
     // Update transaction status to completed
@@ -775,26 +876,68 @@ export class TransferService {
       throw new Error('Invalid transaction type');
     }
 
-    const metadata = transaction.metadata as any;
-    const totalAmount = new Decimal(transaction.amount).plus(new Decimal(transaction.fee));
+    let receiptTransaction = transaction;
+    let metadata = receiptTransaction.metadata as any;
+
+    if (
+      receiptTransaction.type === 'withdrawal' &&
+      receiptTransaction.channel === 'bank_account' &&
+      ['pending', 'processing'].includes(receiptTransaction.status) &&
+      metadata?.palmpayOrderId
+    ) {
+      try {
+        const payoutStatus = await this.palmPayPayoutService.queryPayoutStatus(metadata.palmpayOrderId);
+        const mappedStatus = mapPalmPayStatus(payoutStatus.orderStatus);
+        receiptTransaction = await prisma.transaction.update({
+          where: { id: receiptTransaction.id },
+          data: {
+            status: mappedStatus === 'completed' ? 'completed' : mappedStatus,
+            completedAt: mappedStatus === 'completed' ? new Date() : receiptTransaction.completedAt,
+            metadata: {
+              ...metadata,
+              palmpayOrderNo: payoutStatus.orderNo,
+              palmpayStatus: payoutStatus.orderStatus,
+              palmpaySessionId: payoutStatus.sessionId,
+              payoutStatusResponse: payoutStatus,
+            },
+          },
+          include: {
+            wallet: {
+              include: {
+                user: true,
+                currencyRef: true,
+              },
+            },
+          },
+        });
+        metadata = receiptTransaction.metadata as any;
+      } catch (error) {
+        console.error('Failed to refresh PalmPay payout status:', error);
+      }
+    }
+
+    const totalAmount = new Decimal(receiptTransaction.amount).plus(new Decimal(receiptTransaction.fee));
 
     return {
-      id: transaction.id,
-      reference: transaction.reference,
-      type: transaction.type,
-      status: transaction.status,
-      amount: transaction.amount.toString(),
-      currency: transaction.currency,
-      fee: transaction.fee.toString(),
+      id: receiptTransaction.id,
+      reference: receiptTransaction.reference,
+      type: receiptTransaction.type,
+      status: receiptTransaction.status,
+      amount: receiptTransaction.amount.toString(),
+      currency: receiptTransaction.currency,
+      fee: receiptTransaction.fee.toString(),
       totalAmount: totalAmount.toString(),
-      country: transaction.country,
-      channel: transaction.channel,
-      paymentMethod: transaction.paymentMethod,
+      country: receiptTransaction.country,
+      channel: receiptTransaction.channel,
+      paymentMethod: receiptTransaction.paymentMethod,
       recipientInfo: metadata?.recipientInfo || {},
-      description: transaction.description,
-      transactionId: transaction.id,
-      date: transaction.completedAt || transaction.createdAt,
-      createdAt: transaction.createdAt,
+      provider: metadata?.provider,
+      orderId: metadata?.palmpayOrderId,
+      orderNo: metadata?.palmpayOrderNo,
+      description: receiptTransaction.description,
+      transactionId: receiptTransaction.id,
+      date: receiptTransaction.completedAt || receiptTransaction.createdAt,
+      createdAt: receiptTransaction.createdAt,
     };
   }
 

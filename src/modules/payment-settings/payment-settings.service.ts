@@ -1,11 +1,15 @@
 import prisma from '../../core/config/database.js';
 import { encryptPrivateKey, decryptPrivateKey } from '../../core/utils/encryption.js';
+import { PalmPayPayoutService } from '../../services/palmpay/palmpay.payout.service.js';
+import { createProviderUnavailableError } from '../../services/palmpay/palmpay.utils.js';
 
 /**
  * Payment Settings Service
  * Manages user payment methods (bank accounts, mobile money)
  */
 export class PaymentSettingsService {
+  private palmPayPayoutService = new PalmPayPayoutService();
+
   /**
    * Get all payment methods for a user
    */
@@ -49,6 +53,7 @@ export class PaymentSettingsService {
       type: method.type,
       accountType: method.accountType,
       bankName: method.bankName,
+      bankCode: method.bankCode,
       accountNumber: method.accountNumber ? this.maskAccountNumber(decryptPrivateKey(method.accountNumber)) : null,
       accountName: method.accountName,
       provider: method.provider,
@@ -104,6 +109,7 @@ export class PaymentSettingsService {
       type: paymentMethod.type,
       accountType: paymentMethod.accountType,
       bankName: paymentMethod.bankName,
+      bankCode: paymentMethod.bankCode,
       accountNumber: paymentMethod.accountNumber ? this.maskAccountNumber(decryptPrivateKey(paymentMethod.accountNumber)) : null,
       accountName: paymentMethod.accountName,
       provider: paymentMethod.provider,
@@ -126,6 +132,7 @@ export class PaymentSettingsService {
       accountType: string;
       bankName: string;
       accountNumber: string;
+      bankCode: string;
       accountName: string;
       countryCode: string;
       currency: string;
@@ -141,6 +148,34 @@ export class PaymentSettingsService {
     // Validate account number
     if (!data.accountNumber || data.accountNumber.length < 8) {
       throw new Error('Invalid account number');
+    }
+    if (data.countryCode !== 'NG' || data.currency !== 'NGN') {
+      throw new Error('Only PalmPay verified Nigerian NGN bank accounts are currently supported');
+    }
+    if (!data.bankCode) {
+      throw new Error('PalmPay bank code is required');
+    }
+
+    let palmPayBanks;
+    try {
+      palmPayBanks = await this.palmPayPayoutService.getBanks();
+    } catch (error: any) {
+      throw createProviderUnavailableError(error.message || 'PalmPay bank list is unavailable');
+    }
+
+    const bank = palmPayBanks.find((item) => item.bankCode === data.bankCode);
+    if (!bank) {
+      throw new Error('Selected bank is not available from PalmPay');
+    }
+
+    let verifiedAccount;
+    try {
+      verifiedAccount = await this.palmPayPayoutService.verifyBankAccount(data.bankCode, data.accountNumber);
+    } catch (error: any) {
+      throw createProviderUnavailableError(error.message || 'PalmPay account verification is unavailable');
+    }
+    if (!verifiedAccount.isValid || !verifiedAccount.accountName) {
+      throw new Error(verifiedAccount.errorMessage || 'PalmPay could not verify this account');
     }
 
     // Encrypt account number
@@ -166,9 +201,10 @@ export class PaymentSettingsService {
         userId: parsedUserId,
         type: 'bank_account',
         accountType: data.accountType,
-        bankName: data.bankName,
+        bankName: bank.bankName,
+        bankCode: data.bankCode,
         accountNumber: encryptedAccountNumber,
-        accountName: data.accountName,
+        accountName: verifiedAccount.accountName,
         countryCode: data.countryCode,
         currency: data.currency,
         isDefault: data.isDefault || false,
@@ -180,6 +216,7 @@ export class PaymentSettingsService {
       type: paymentMethod.type,
       accountType: paymentMethod.accountType,
       bankName: paymentMethod.bankName,
+      bankCode: paymentMethod.bankCode,
       accountNumber: this.maskAccountNumber(data.accountNumber),
       accountName: paymentMethod.accountName,
       countryCode: paymentMethod.countryCode,
@@ -413,6 +450,11 @@ export class PaymentSettingsService {
     const updateData: any = {};
 
     if (data.accountType !== undefined) updateData.accountType = data.accountType;
+    if (data.bankName !== undefined || data.accountName !== undefined || data.accountNumber !== undefined) {
+      if (paymentMethod.type === 'bank_account') {
+        throw new Error('Create a new PalmPay verified bank account to change bank details');
+      }
+    }
     if (data.bankName !== undefined) updateData.bankName = data.bankName;
     if (data.accountName !== undefined) updateData.accountName = data.accountName;
     if (data.phoneNumber !== undefined) updateData.phoneNumber = data.phoneNumber;
@@ -464,6 +506,7 @@ export class PaymentSettingsService {
       type: updated.type,
       accountType: updated.accountType,
       bankName: updated.bankName,
+      bankCode: updated.bankCode,
       accountNumber: updated.accountNumber ? this.maskAccountNumber(decryptPrivateKey(updated.accountNumber)) : null,
       accountName: updated.accountName,
       provider: updated.provider,
@@ -582,69 +625,35 @@ export class PaymentSettingsService {
       where.currency = currency;
     }
 
-    const providers = await prisma.mobileMoneyProvider.findMany({
-      where,
-      orderBy: [
-        { name: 'asc' },
-      ],
-    });
+    if ((!countryCode || countryCode === 'NG') && (!currency || currency === 'NGN')) {
+      return [];
+    }
 
-    return providers.map((provider: any) => ({
-      id: provider.id,
-      name: provider.name,
-      code: provider.code,
-      countryCode: provider.countryCode,
-      currency: provider.currency,
-      logoUrl: provider.logoUrl,
-    }));
+    throw new Error('Mobile money providers are currently unavailable');
   }
 
   /**
-   * Get available banks for a country/currency
-   * Returns unique bank names from BankAccount table
+   * Get available PalmPay banks for Nigerian NGN withdrawals
    */
   async getBanks(countryCode?: string, currency?: string) {
-    const where: any = {
-      isActive: true,
-    };
-
-    if (countryCode) {
-      where.countryCode = countryCode;
+    if ((countryCode && countryCode !== 'NG') || (currency && currency !== 'NGN')) {
+      throw new Error('Only NGN withdrawals to Nigerian banks are currently supported');
     }
 
-    if (currency) {
-      where.currency = currency;
+    try {
+      const banks = await this.palmPayPayoutService.getBanks();
+      return banks.map((bank) => ({
+        name: bank.bankName,
+        bankName: bank.bankName,
+        bankCode: bank.bankCode,
+        code: bank.bankCode,
+        logoUrl: bank.bankUrl,
+        countryCode: 'NG',
+        currency: 'NGN',
+      }));
+    } catch (error: any) {
+      throw createProviderUnavailableError(error.message || 'PalmPay bank list is unavailable');
     }
-
-    // Get all bank accounts matching the filters
-    const bankAccounts = await prisma.bankAccount.findMany({
-      where,
-      select: {
-        bankName: true,
-        countryCode: true,
-        currency: true,
-      },
-      orderBy: [
-        { bankName: 'asc' },
-      ],
-    });
-
-    // Deduplicate banks by creating a Set of unique combinations
-    const uniqueBanks = new Map<string, { name: string; countryCode: string; currency: string }>();
-    
-    bankAccounts.forEach((account: { bankName: string; countryCode: string; currency: string }) => {
-      const key = `${account.bankName}-${account.countryCode}-${account.currency}`;
-      if (!uniqueBanks.has(key)) {
-        uniqueBanks.set(key, {
-          name: account.bankName,
-          countryCode: account.countryCode,
-          currency: account.currency,
-        });
-      }
-    });
-
-    // Return unique banks as an array
-    return Array.from(uniqueBanks.values());
   }
 
   /**

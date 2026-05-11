@@ -3,6 +3,13 @@ import { randomBytes } from 'crypto';
 import prisma from '../../core/config/database.js';
 import { WalletService } from '../wallet/wallet.service.js';
 import bcrypt from 'bcryptjs';
+import { PalmPayBillPaymentService } from '../../services/palmpay/palmpay.billpayment.service.js';
+import {
+  createMaintenanceError,
+  createProviderUnavailableError,
+  isSupportedPalmPayScene,
+  mapPalmPayStatus,
+} from '../../services/palmpay/palmpay.utils.js';
 
 /**
  * Bill Payment Service
@@ -10,9 +17,11 @@ import bcrypt from 'bcryptjs';
  */
 export class BillPaymentService {
   private walletService: WalletService;
+  private palmPayBillPaymentService: PalmPayBillPaymentService;
 
   constructor() {
     this.walletService = new WalletService();
+    this.palmPayBillPaymentService = new PalmPayBillPaymentService();
   }
 
   /**
@@ -24,10 +33,33 @@ export class BillPaymentService {
     return `BILL${timestamp}${random}`.toUpperCase();
   }
 
+  private parsePalmPayProviderId(providerId: string, categoryCode?: string) {
+    const [embeddedSceneCode, embeddedBillerId] = providerId.includes(':')
+      ? providerId.split(':')
+      : [categoryCode, providerId];
+
+    if (!embeddedSceneCode || !embeddedBillerId) {
+      throw new Error('Invalid PalmPay provider id');
+    }
+
+    if (!isSupportedPalmPayScene(embeddedSceneCode)) {
+      throw createMaintenanceError();
+    }
+
+    return {
+      sceneCode: embeddedSceneCode,
+      billerId: embeddedBillerId,
+    };
+  }
+
   /**
    * Calculate bill payment fee
    */
   private calculateFee(amount: number, currency: string): number {
+    if (currency === 'NGN') {
+      return 0;
+    }
+
     // Simple fee calculation - 1% or minimum fee
     const feePercent = 0.01;
     const calculatedFee = amount * feePercent;
@@ -69,163 +101,96 @@ export class BillPaymentService {
    * Get providers by category
    */
   async getProvidersByCategory(categoryCode: string, countryCode?: string) {
-    const category = await prisma.billPaymentCategory.findUnique({
-      where: { code: categoryCode },
-    });
-
-    if (!category) {
-      throw new Error('Category not found');
+    if (countryCode && countryCode !== 'NG') {
+      throw new Error('Only Nigerian bill payments are currently supported');
+    }
+    if (!isSupportedPalmPayScene(categoryCode)) {
+      throw createMaintenanceError();
     }
 
-    const where: any = {
-      categoryId: category.id,
-      isActive: true,
-    };
-
-    if (countryCode) {
-      where.countryCode = countryCode;
-    }
-
-    const providers = await prisma.billPaymentProvider.findMany({
-      where,
-      include: {
+    try {
+      const billers = await this.palmPayBillPaymentService.queryBillers(categoryCode);
+      return billers.map((biller) => ({
+        id: `${categoryCode}:${biller.billerId}`,
+        code: biller.billerId,
+        billerId: biller.billerId,
+        name: biller.billerName,
+        logoUrl: biller.billerIcon || null,
+        countryCode: 'NG',
+        currency: 'NGN',
+        provider: 'palmpay',
         category: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-          },
+          code: categoryCode,
         },
-      },
-      orderBy: {
-        name: 'asc',
-      },
-    });
-
-    return providers.map((provider: { id: number; code: string; name: string; logoUrl: string | null; countryCode: string; currency: string; category: { id: number; code: string; name: string } | null; metadata: any }) => ({
-      id: provider.id,
-      code: provider.code,
-      name: provider.name,
-      logoUrl: provider.logoUrl,
-      countryCode: provider.countryCode,
-      currency: provider.currency,
-      category: provider.category,
-      metadata: provider.metadata,
-    }));
+        metadata: biller.raw || biller,
+      }));
+    } catch (error: any) {
+      if (error.code === 'BILL_SERVICE_UNDER_MAINTENANCE') throw error;
+      throw createProviderUnavailableError(error.message || 'PalmPay billers are unavailable');
+    }
   }
 
   /**
    * Get plans/bundles by provider
    */
-  async getPlansByProvider(providerId: number) {
-    // Validate providerId is a positive integer
-    if (!providerId || providerId <= 0 || !Number.isInteger(providerId)) {
-      throw new Error('Invalid providerId. Must be a positive integer');
+  async getPlansByProvider(providerId: string, categoryCode?: string) {
+    const { sceneCode, billerId } = this.parsePalmPayProviderId(providerId, categoryCode);
+    if (!isSupportedPalmPayScene(sceneCode)) {
+      throw createMaintenanceError();
     }
 
-    const provider = await prisma.billPaymentProvider.findUnique({
-      where: { id: providerId },
-    });
-
-    if (!provider) {
-      throw new Error('Provider not found');
+    try {
+      const items = await this.palmPayBillPaymentService.queryItems(sceneCode, billerId);
+      return items.map((item) => ({
+        id: item.itemId,
+        code: item.itemId,
+        itemId: item.itemId,
+        providerId: `${sceneCode}:${billerId}`,
+        name: item.itemName,
+        amount: item.amount !== undefined ? (item.amount / 100).toString() : undefined,
+        minAmount: item.minAmount !== undefined ? (item.minAmount / 100).toString() : undefined,
+        maxAmount: item.maxAmount !== undefined ? (item.maxAmount / 100).toString() : undefined,
+        currency: 'NGN',
+        dataAmount: item.raw?.dataAmount || null,
+        validity: item.raw?.validity || null,
+        description: item.raw?.description || item.itemName,
+        metadata: item.raw || item,
+      }));
+    } catch (error: any) {
+      throw createProviderUnavailableError(error.message || 'PalmPay bill payment items are unavailable');
     }
-
-    // Check if provider is active
-    if (!provider.isActive) {
-      throw new Error('Provider is not active');
-    }
-
-    const plans = await prisma.billPaymentPlan.findMany({
-      where: {
-        providerId,
-        isActive: true,
-      },
-      orderBy: {
-        amount: 'asc',
-      },
-    });
-
-    return plans.map((plan: { id: number; code: string; name: string; amount: any; currency: string; dataAmount: any; validity: any; description: any }) => ({
-      id: plan.id,
-      code: plan.code,
-      name: plan.name,
-      amount: plan.amount.toString(),
-      currency: plan.currency,
-      dataAmount: plan.dataAmount,
-      validity: plan.validity,
-      description: plan.description,
-    }));
   }
 
   /**
    * Validate meter number (electricity)
    */
   async validateMeterNumber(providerId: number, meterNumber: string, accountType: 'prepaid' | 'postpaid') {
-    const provider = await prisma.billPaymentProvider.findUnique({
-      where: { id: providerId },
-    });
-
-    if (!provider) {
-      throw new Error('Provider not found');
-    }
-
-    // For now, validate format and return random name
-    // In production, this would call the provider's API
-    if (!meterNumber || meterNumber.length < 8) {
-      throw new Error('Invalid meter number format');
-    }
-
-    // Generate random account name for demo
-    const names = [
-      'Qamardeen Abdulmalik',
-      'John Doe',
-      'Jane Smith',
-      'Adebisi Lateefat',
-      'Chukwuemeka Okafor',
-      'Amina Hassan',
-    ];
-    const randomName = names[Math.floor(Math.random() * names.length)];
-
-    return {
-      isValid: true,
-      accountName: randomName,
-      meterNumber,
-      accountType,
-      provider: {
-        id: provider.id,
-        name: provider.name,
-        code: provider.code,
-      },
-    };
+    throw createMaintenanceError('Electricity bill payments are temporarily unavailable.');
   }
 
   /**
    * Validate account number (betting)
    */
   async validateAccountNumber(providerId: number, accountNumber: string) {
-    const provider = await prisma.billPaymentProvider.findUnique({
-      where: { id: providerId },
-    });
-
-    if (!provider) {
-      throw new Error('Provider not found');
-    }
-
-    // For now, validate format and return validation
-    // In production, this would call the provider's API
     if (!accountNumber || accountNumber.length < 5) {
       throw new Error('Invalid account number format');
     }
+
+    const { sceneCode, billerId } = this.parsePalmPayProviderId(providerId.toString(), 'betting');
+    const verification = await this.palmPayBillPaymentService.verifyRechargeAccount({
+      sceneCode,
+      billerId,
+      rechargeAccount: accountNumber,
+    });
 
     return {
       isValid: true,
       accountNumber,
       provider: {
-        id: provider.id,
-        name: provider.name,
-        code: provider.code,
+        id: providerId,
+        code: billerId,
       },
+      verification,
     };
   }
 
@@ -236,12 +201,12 @@ export class BillPaymentService {
     userId: string | number,
     data: {
       categoryCode: string;
-      providerId: number;
+      providerId: string | number;
       currency: string;
       amount: string;
       accountNumber?: string; // Phone number, meter number, account number
       accountType?: string; // prepaid, postpaid (for electricity)
-      planId?: number; // For data and cable TV
+      planId?: string | number; // PalmPay itemId for supported bill scenes
       beneficiaryId?: number; // If using saved beneficiary
     }
   ) {
@@ -250,25 +215,37 @@ export class BillPaymentService {
       throw new Error(`Invalid userId: ${userId}`);
     }
 
-    // Get category
-    const category = await prisma.billPaymentCategory.findUnique({
-      where: { code: data.categoryCode },
-    });
-
-    if (!category) {
-      throw new Error('Category not found');
+    if (!isSupportedPalmPayScene(data.categoryCode)) {
+      throw createMaintenanceError();
+    }
+    if (data.currency !== 'NGN') {
+      throw new Error('Only NGN bill payments are currently supported');
     }
 
-    // Get provider
-    const provider = await prisma.billPaymentProvider.findUnique({
-      where: { id: data.providerId },
-      include: {
-        category: true,
-      },
+    const { sceneCode, billerId } = this.parsePalmPayProviderId(data.providerId.toString(), data.categoryCode);
+    const category = await prisma.billPaymentCategory.findUnique({
+      where: { code: sceneCode },
     });
+    const categoryName = category?.name || sceneCode;
 
-    if (!provider || provider.categoryId !== category.id) {
-      throw new Error('Provider not found or does not belong to category');
+    let biller;
+    let item;
+    try {
+      const billers = await this.palmPayBillPaymentService.queryBillers(sceneCode);
+      biller = billers.find((entry) => entry.billerId === billerId);
+      if (!biller) {
+        throw new Error('Selected PalmPay biller is unavailable');
+      }
+
+      const items = await this.palmPayBillPaymentService.queryItems(sceneCode, billerId);
+      item = data.planId
+        ? items.find((entry) => entry.itemId === data.planId?.toString())
+        : items[0];
+      if (!item) {
+        throw new Error('Selected PalmPay bill item is unavailable');
+      }
+    } catch (error: any) {
+      throw createProviderUnavailableError(error.message || 'PalmPay bill payment service is unavailable');
     }
 
     // Get wallet
@@ -284,8 +261,7 @@ export class BillPaymentService {
         where: {
           id: data.beneficiaryId,
           userId: userIdNum,
-          categoryId: category.id,
-          providerId: data.providerId,
+          categoryId: category?.id,
           isActive: true,
         },
         include: {
@@ -313,22 +289,10 @@ export class BillPaymentService {
       throw new Error('Account number is required');
     }
 
-    // Get plan if provided
-    let plan = null;
-    if (data.planId) {
-      plan = await prisma.billPaymentPlan.findUnique({
-        where: { id: data.planId },
-      });
-
-      if (!plan || plan.providerId !== data.providerId) {
-        throw new Error('Plan not found');
-      }
-    }
-
     // Calculate amount
     let amount = new Decimal(data.amount);
-    if (plan) {
-      amount = new Decimal(plan.amount);
+    if (item.amount !== undefined && item.amount > 0) {
+      amount = new Decimal(item.amount).dividedBy(100);
     }
 
     // Calculate fee
@@ -342,11 +306,14 @@ export class BillPaymentService {
     }
 
     // Validate account number based on category
-    if (category.code === 'electricity' && accountType) {
-      const validation = await this.validateMeterNumber(data.providerId, accountNumber, accountType as 'prepaid' | 'postpaid');
-      accountName = validation.accountName;
-    } else if (category.code === 'betting') {
-      await this.validateAccountNumber(data.providerId, accountNumber);
+    if (sceneCode === 'betting') {
+      const validation = await this.palmPayBillPaymentService.verifyRechargeAccount({
+        sceneCode,
+        billerId,
+        itemId: item.itemId,
+        rechargeAccount: accountNumber,
+      });
+      accountName = (validation as any)?.accountName || accountName;
     }
 
     // Create pending transaction
@@ -360,22 +327,25 @@ export class BillPaymentService {
         currency: data.currency,
         fee: fee,
         reference,
-        description: `${category.name} - ${provider.name}`,
-        channel: category.code,
-        country: provider.countryCode,
+        description: `${categoryName} - ${biller.billerName}`,
+        channel: sceneCode,
+        country: 'NG',
         metadata: {
-          categoryCode: category.code,
-          categoryName: category.name,
-          providerId: provider.id,
-          providerCode: provider.code,
-          providerName: provider.name,
+          provider: 'palmpay',
+          categoryCode: sceneCode,
+          categoryName,
+          providerId: `${sceneCode}:${biller.billerId}`,
+          billerId: biller.billerId,
+          providerCode: biller.billerId,
+          providerName: biller.billerName,
           accountNumber,
           accountName,
           accountType,
-          planId: plan?.id || null,
-          planCode: plan?.code || null,
-          planName: plan?.name || null,
-          planDataAmount: plan?.dataAmount || null,
+          planId: item.itemId,
+          itemId: item.itemId,
+          planCode: item.itemId,
+          planName: item.itemName,
+          planDataAmount: item.raw?.dataAmount || null,
           beneficiaryId: beneficiary?.id || null,
         },
       },
@@ -385,23 +355,23 @@ export class BillPaymentService {
       transactionId: transaction.id,
       reference: transaction.reference,
       category: {
-        id: category.id,
-        code: category.code,
-        name: category.name,
+        id: category?.id || 0,
+        code: sceneCode,
+        name: categoryName,
       },
       provider: {
-        id: provider.id,
-        code: provider.code,
-        name: provider.name,
-        logoUrl: provider.logoUrl,
+        id: `${sceneCode}:${biller.billerId}`,
+        code: biller.billerId,
+        name: biller.billerName,
+        logoUrl: biller.billerIcon,
       },
-      plan: plan ? {
-        id: plan.id,
-        code: plan.code,
-        name: plan.name,
-        dataAmount: plan.dataAmount,
-        validity: plan.validity,
-      } : null,
+      plan: {
+        id: item.itemId,
+        code: item.itemId,
+        name: item.itemName,
+        dataAmount: item.raw?.dataAmount || null,
+        validity: item.raw?.validity || null,
+      },
       accountNumber,
       accountName,
       accountType,
@@ -485,21 +455,95 @@ export class BillPaymentService {
       throw new Error('Insufficient balance');
     }
 
-    // Generate recharge token for prepaid electricity
-    let rechargeToken = null;
-    if (metadata?.categoryCode === 'electricity' && metadata?.accountType === 'prepaid') {
-      rechargeToken = Math.random().toString(36).substring(2, 15).toUpperCase();
+    if (!isSupportedPalmPayScene(metadata?.categoryCode)) {
+      throw createMaintenanceError();
     }
 
-    // Update transaction status and metadata
+    const palmPayOrderId = `bill_${transaction.reference.toLowerCase()}`;
+
+    const debitedTransaction = await prisma.$transaction(async (tx) => {
+      await tx.wallet.update({
+        where: { id: transaction.walletId },
+        data: {
+          balance: {
+            decrement: totalAmount.toNumber(),
+          },
+        },
+      });
+
+      return tx.transaction.update({
+        where: { id: txIdNum },
+        data: {
+          status: 'processing',
+          metadata: {
+            ...metadata,
+            palmpayOrderId: palmPayOrderId,
+            walletDebited: true,
+            walletDebitedAt: new Date().toISOString(),
+          },
+        },
+        include: {
+          wallet: {
+            include: {
+              currencyRef: true,
+            },
+          },
+        },
+      });
+    });
+
+    let palmPayOrder;
+    try {
+      palmPayOrder = await this.palmPayBillPaymentService.createOrder({
+        outOrderNo: palmPayOrderId,
+        sceneCode: metadata.categoryCode,
+        billerId: metadata.billerId,
+        itemId: metadata.itemId,
+        rechargeAccount: metadata.accountNumber,
+        amount: amount.toString(),
+        userId: userIdNum,
+      });
+    } catch (error: any) {
+      await prisma.$transaction(async (tx) => {
+        await tx.wallet.update({
+          where: { id: transaction.walletId },
+          data: {
+            balance: {
+              increment: totalAmount.toNumber(),
+            },
+          },
+        });
+        await tx.transaction.update({
+          where: { id: txIdNum },
+          data: {
+            status: 'failed',
+            metadata: {
+              ...metadata,
+              palmpayOrderId: palmPayOrderId,
+              refunded: true,
+              refundReason: error.message || 'PalmPay bill payment failed',
+              providerError: error.providerResponse || error.message,
+            },
+          },
+        });
+      });
+      throw createProviderUnavailableError(error.message || 'PalmPay bill payment failed');
+    }
+
+    const mappedStatus = mapPalmPayStatus(palmPayOrder.orderStatus);
     const updatedTransaction = await prisma.transaction.update({
       where: { id: txIdNum },
       data: {
-        status: 'completed',
-        completedAt: new Date(),
+        status: mappedStatus === 'pending' ? 'processing' : mappedStatus,
+        completedAt: mappedStatus === 'completed' ? new Date() : null,
         metadata: {
           ...metadata,
-          rechargeToken: rechargeToken || metadata?.rechargeToken || null,
+          palmpayOrderId: palmPayOrderId,
+          palmpayOrderNo: palmPayOrder.orderNo,
+          palmpayStatus: palmPayOrder.orderStatus,
+          palmpayRequestId: palmPayOrder.requestId,
+          providerResponse: palmPayOrder,
+          walletDebited: true,
         },
       },
       include: {
@@ -507,16 +551,6 @@ export class BillPaymentService {
           include: {
             currencyRef: true,
           },
-        },
-      },
-    });
-
-    // Deduct from wallet
-    await prisma.wallet.update({
-      where: { id: transaction.walletId },
-      data: {
-        balance: {
-          decrement: totalAmount.toNumber(),
         },
       },
     });
@@ -531,7 +565,8 @@ export class BillPaymentService {
       totalAmount: totalAmount.toString(),
       accountNumber: metadata?.accountNumber || null,
       accountName: metadata?.accountName || null,
-      rechargeToken,
+      orderId: palmPayOrderId,
+      orderNo: palmPayOrder.orderNo,
       category: {
         code: metadata?.categoryCode || null,
         name: metadata?.categoryName || null,
@@ -548,7 +583,7 @@ export class BillPaymentService {
         dataAmount: metadata.planDataAmount,
       } : null,
       completedAt: updatedTransaction.completedAt,
-      createdAt: updatedTransaction.createdAt,
+      createdAt: debitedTransaction.createdAt,
     };
   }
 

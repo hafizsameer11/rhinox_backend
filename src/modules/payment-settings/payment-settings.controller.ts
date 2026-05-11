@@ -213,6 +213,7 @@ export class PaymentSettingsController {
       const {
         accountType,
         bankName,
+        bankCode,
         accountNumber,
         accountName,
         countryCode,
@@ -227,16 +228,17 @@ export class PaymentSettingsController {
         });
       }
 
-      if (!accountType || !bankName || !accountNumber || !accountName || !countryCode || !currency) {
+      if (!accountType || !bankName || !bankCode || !accountNumber || !accountName || !countryCode || !currency) {
         return res.status(400).json({
           success: false,
-          message: 'All fields are required',
+          message: 'All fields are required, including PalmPay bank code',
         });
       }
 
       const result = await this.service.addBankAccount(userId, {
         accountType,
         bankName,
+        bankCode,
         accountNumber,
         accountName,
         countryCode,
@@ -249,8 +251,9 @@ export class PaymentSettingsController {
         data: result,
       });
     } catch (error: any) {
-      return res.status(400).json({
+      return res.status(error.statusCode || 400).json({
         success: false,
+        code: error.code,
         message: error.message || 'Failed to add bank account',
       });
     }
@@ -797,8 +800,9 @@ export class PaymentSettingsController {
         data: result,
       });
     } catch (error: any) {
-      return res.status(500).json({
+      return res.status(error.statusCode || 500).json({
         success: false,
+        code: error.code,
         message: error.message || 'Failed to get banks',
       });
     }

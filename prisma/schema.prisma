@@ -196,9 +196,10 @@ model Transaction {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  wallet      Wallet               @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  bankAccount BankAccount?         @relation(fields: [bankAccountId], references: [id])
-  provider    MobileMoneyProvider? @relation(fields: [providerId], references: [id])
+  wallet                 Wallet                 @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  bankAccount            BankAccount?           @relation(fields: [bankAccountId], references: [id])
+  provider               MobileMoneyProvider?   @relation(fields: [providerId], references: [id])
+  palmPayVirtualAccounts PalmPayVirtualAccount[]
 
   @@index([walletId])
   @@index([reference])
@@ -498,6 +499,7 @@ model UserPaymentMethod {
   type          String // bank_account, mobile_money, rhinoxpay_id
   accountType   String?  @map("account_type") // For bank: savings, current, etc.
   bankName      String?  @map("bank_name") // For bank accounts
+  bankCode      String?  @map("bank_code") @db.VarChar(50) // PalmPay bank code for payouts
   accountNumber String?  @map("account_number") // For bank accounts (encrypted)
   accountName   String?  @map("account_name") // Account holder name
   providerId    Int?     @map("provider_id") // For mobile money (reference to MobileMoneyProvider)
@@ -516,11 +518,57 @@ model UserPaymentMethod {
 
   @@index([userId])
   @@index([type])
+  @@index([bankCode])
   @@index([countryCode])
   @@index([currency])
   @@index([isDefault])
   @@index([isActive])
   @@map("user_payment_methods")
+}
+
+// ============================================
+// MODULE: PALMPAY
+// ============================================
+// PalmPay virtual account deposits and webhook audit records
+
+model PalmPayVirtualAccount {
+  id                Int      @id @default(autoincrement())
+  transactionId     Int      @map("transaction_id")
+  merchantOrderId   String   @unique @map("merchant_order_id") @db.VarChar(100)
+  palmpayOrderNo    String?  @map("palmpay_order_no") @db.VarChar(100)
+  payerAccountType  String?  @map("payer_account_type") @db.VarChar(50)
+  payerAccountId    String?  @map("payer_account_id") @db.VarChar(100)
+  payerBankName     String?  @map("payer_bank_name") @db.VarChar(255)
+  payerAccountName  String?  @map("payer_account_name") @db.VarChar(255)
+  payerVirtualAccNo String?  @map("payer_virtual_acc_no") @db.VarChar(50)
+  orderStatus       Int?     @map("order_status")
+  metadata          Json?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([merchantOrderId])
+  @@index([palmpayOrderNo])
+  @@index([orderStatus])
+  @@map("palmpay_virtual_accounts")
+}
+
+model PalmPayRawWebhook {
+  id           Int       @id @default(autoincrement())
+  rawData      Json      @map("raw_data")
+  headers      Json?
+  ipAddress    String?   @map("ip_address") @db.VarChar(100)
+  userAgent    String?   @map("user_agent") @db.VarChar(255)
+  processed    Boolean   @default(false)
+  processedAt  DateTime? @map("processed_at")
+  errorMessage String?   @map("error_message") @db.Text
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([processed])
+  @@index([createdAt])
+  @@map("palmpay_raw_webhooks")
 }
 
 // ============================================

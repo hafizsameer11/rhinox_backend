@@ -411,8 +411,9 @@ export class DepositController {
         data: result,
       });
     } catch (error: any) {
-      return res.status(400).json({
+      return res.status(error.statusCode || 400).json({
         success: false,
+        code: error.code,
         message: error.message || 'Failed to initiate deposit',
       });
     }
