@@ -42,7 +42,7 @@ RUN apk add --no-cache dumb-init
 
 # Create app user for security
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+    adduser -S nodejs -u 1001 -G nodejs
 
 # Copy package files (including package-lock.json for npm ci)
 COPY package.json package-lock.json* ./
@@ -55,6 +55,10 @@ RUN npm ci --omit=dev && \
 
 # Generate Prisma Client (needed at runtime)
 RUN npx prisma generate
+
+# Prisma writes generated client files during build as root. Own them by the
+# runtime user so emergency prisma generate/db push commands can update them.
+RUN chown -R nodejs:nodejs /app/node_modules/.prisma /app/node_modules/@prisma
 
 # Copy built files from builder stage
 COPY --from=builder /app/dist ./dist
