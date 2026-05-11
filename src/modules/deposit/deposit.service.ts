@@ -18,6 +18,10 @@ export class DepositService {
     this.palmPayDepositService = new PalmPayDepositService();
   }
 
+  private toNullableString(value: unknown): string | null {
+    return value === null || value === undefined ? null : String(value);
+  }
+
   /**
    * Static deposit accounts are disabled for NGN. A PalmPay virtual account
    * is created per deposit through initiateDeposit.
@@ -130,12 +134,12 @@ export class DepositService {
         data: {
           transactionId: transaction.id,
           merchantOrderId,
-          palmpayOrderNo: palmPayOrder.orderNo ?? null,
-          payerAccountType: palmPayOrder.payerAccountType ?? null,
-          payerAccountId: palmPayOrder.payerAccountId ?? null,
-          payerBankName: palmPayOrder.payerBankName ?? null,
-          payerAccountName: palmPayOrder.payerAccountName ?? null,
-          payerVirtualAccNo: palmPayOrder.payerVirtualAccNo ?? null,
+          palmpayOrderNo: this.toNullableString(palmPayOrder.orderNo),
+          payerAccountType: this.toNullableString(palmPayOrder.payerAccountType),
+          payerAccountId: this.toNullableString(palmPayOrder.payerAccountId),
+          payerBankName: this.toNullableString(palmPayOrder.payerBankName),
+          payerAccountName: this.toNullableString(palmPayOrder.payerAccountName),
+          payerVirtualAccNo: this.toNullableString(palmPayOrder.payerVirtualAccNo),
           orderStatus: palmPayOrder.orderStatus ?? null,
           metadata: palmPayOrder as any,
         },
