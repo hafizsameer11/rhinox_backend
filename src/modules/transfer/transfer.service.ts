@@ -4,7 +4,6 @@ import bcrypt from 'bcryptjs';
 import prisma from '../../core/config/database.js';
 import { WalletService } from '../wallet/wallet.service.js';
 import { KYCService } from '../kyc/kyc.service.js';
-import { generateOTP, sendOTPEmail } from '../../core/utils/email.service.js';
 import { PaymentSettingsService } from '../payment-settings/payment-settings.service.js';
 import { decryptPrivateKey } from '../../core/utils/encryption.js';
 import { PalmPayPayoutService } from '../../services/palmpay/palmpay.payout.service.js';
@@ -450,21 +449,6 @@ export class TransferService {
       },
     });
 
-    // Send email OTP for verification
-    if (transaction.wallet.user.email) {
-      const otpCode = generateOTP();
-      // Store OTP in database
-      await prisma.oTP.create({
-        data: {
-          userId: parsedUserId,
-          code: otpCode,
-          type: 'email',
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-        },
-      });
-      await sendOTPEmail(transaction.wallet.user.email, otpCode, 'email');
-    }
-
     return {
       id: transaction.id,
       reference: transaction.reference,
@@ -480,12 +464,11 @@ export class TransferService {
   }
 
   /**
-   * Verify transfer with email code and PIN
+   * Verify transfer with PIN
    */
   async verifyTransfer(
     userId: string,
     transactionId: string,
-    emailCode: string,
     pin: string
   ) {
     const parsedTransactionId = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
@@ -525,32 +508,6 @@ export class TransferService {
     if (transaction.type !== 'transfer' && transaction.type !== 'withdrawal') {
       throw new Error('Invalid transaction type');
     }
-
-    // Verify email OTP
-    const otp = await prisma.oTP.findFirst({
-      where: {
-        userId: parsedUserId,
-        type: 'email',
-        code: emailCode,
-        isUsed: false,
-        expiresAt: {
-          gt: new Date(),
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    if (!otp) {
-      throw new Error('Invalid or expired email verification code');
-    }
-
-    // Mark OTP as used
-    await prisma.oTP.update({
-      where: { id: otp.id },
-      data: { isUsed: true },
-    });
 
     // Verify PIN
     if (!transaction.wallet.user.pinHash) {

@@ -414,7 +414,7 @@ export class TransferController {
    * @swagger
    * /api/transfer/verify:
    *   post:
-   *     summary: Verify and complete transfer with email code and PIN
+   *     summary: Verify and complete transfer with PIN
    *     tags: [Transfer]
    *     security:
    *       - bearerAuth: []
@@ -427,17 +427,11 @@ export class TransferController {
    *             type: object
    *             required:
    *               - transactionId
-   *               - emailCode
    *               - pin
    *             properties:
    *               transactionId:
    *                 type: integer
    *                 example: 1
-   *               emailCode:
-   *                 type: string
-   *                 pattern: '^\d{5}$'
-   *                 example: "12345"
-   *                 description: 5-digit email verification code
    *               pin:
    *                 type: string
    *                 pattern: '^\d{5}$'
@@ -447,13 +441,13 @@ export class TransferController {
    *       200:
    *         description: Transfer completed successfully
    *       400:
-   *         description: Invalid code, PIN, or transaction error
+   *         description: Invalid PIN or transaction error
    *         $ref: '#/components/schemas/Error'
    */
   async verifyTransfer(req: Request, res: Response) {
     try {
       const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
-      const { transactionId, emailCode, pin } = req.body;
+      const { transactionId, pin } = req.body;
 
       if (!userId) {
         return res.status(401).json({
@@ -462,10 +456,10 @@ export class TransferController {
         });
       }
 
-      if (!transactionId || !emailCode || !pin) {
+      if (!transactionId || !pin) {
         return res.status(400).json({
           success: false,
-          message: 'Transaction ID, email code, and PIN are required',
+          message: 'Transaction ID and PIN are required',
         });
       }
 
@@ -477,15 +471,7 @@ export class TransferController {
         });
       }
 
-      // Validate email code format
-      if (!/^\d{5}$/.test(emailCode)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Email code must be exactly 5 digits',
-        });
-      }
-
-      const result = await this.service.verifyTransfer(userId, transactionId, emailCode, pin);
+      const result = await this.service.verifyTransfer(userId, transactionId, pin);
 
       return res.json({
         success: true,
