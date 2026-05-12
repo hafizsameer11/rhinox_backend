@@ -16,6 +16,10 @@ export interface CreatePalmPayPayoutInput {
 export class PalmPayPayoutService {
   constructor(private readonly client = new PalmPayClient()) {}
 
+  private maskAccountNumber(accountNumber: string): string {
+    return accountNumber.length <= 4 ? accountNumber : `****${accountNumber.slice(-4)}`;
+  }
+
   async getBanks(businessType = 0): Promise<PalmPayBank[]> {
     const data: any = await this.client.post('/api/v2/general/merchant/queryBankList', {
       businessType,
@@ -36,14 +40,27 @@ export class PalmPayPayoutService {
       ? '/api/v2/payment/merchant/payout/queryAccount'
       : '/api/v2/payment/merchant/payout/queryBankAccount';
 
-    const data: any = await this.client.post(
-      endpoint,
-      {
+    let data: any;
+    try {
+      data = await this.client.post(
+        endpoint,
+        {
+          bankCode,
+          accountNumber: numericAccountNumber,
+        },
+        bankCode === '100033' ? undefined : { version: 'V1.1' }
+      );
+    } catch (error: any) {
+      console.error('[PalmPayPayoutService] Bank account verification failed', {
+        endpoint,
         bankCode,
-        accountNumber: numericAccountNumber,
-      },
-      bankCode === '100033' ? undefined : { version: 'V1.1' }
-    );
+        accountNumber: this.maskAccountNumber(numericAccountNumber),
+        statusCode: error.statusCode,
+        message: error.message,
+        providerResponse: error.providerResponse,
+      });
+      throw error;
+    }
 
     const status = data?.status || data?.Status;
     const isValid =

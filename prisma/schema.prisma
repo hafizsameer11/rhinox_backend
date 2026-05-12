@@ -54,11 +54,34 @@ model User {
   supportChatsAssigned    SupportChat[]       @relation("SupportChatsAssigned")
   supportMessagesAsSender SupportMessage[]    @relation("SupportMessagesAsSender")
   notifications           Notification[]
+  applicationLogs          ApplicationLog[]
 
   @@index([email])
   @@index([phone])
   @@index([countryId])
   @@map("users")
+}
+
+model ApplicationLog {
+  id         Int      @id @default(autoincrement())
+  level      String   @default("error") @db.VarChar(20)
+  source     String   @db.VarChar(120)
+  message    String?  @db.Text
+  userId     Int?     @map("user_id")
+  requestId  String?  @map("request_id") @db.VarChar(100)
+  statusCode Int?     @map("status_code")
+  errorName  String?  @map("error_name") @db.VarChar(120)
+  stackTrace String?  @map("stack_trace") @db.LongText
+  context    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([level])
+  @@index([source])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("application_logs")
 }
 
 model Session {

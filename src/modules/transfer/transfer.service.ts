@@ -9,6 +9,7 @@ import { PaymentSettingsService } from '../payment-settings/payment-settings.ser
 import { decryptPrivateKey } from '../../core/utils/encryption.js';
 import { PalmPayPayoutService } from '../../services/palmpay/palmpay.payout.service.js';
 import { mapPalmPayStatus } from '../../services/palmpay/palmpay.utils.js';
+import { logApplicationEvent } from '../../core/utils/application-log.service.js';
 
 /**
  * Transfer Service
@@ -124,7 +125,7 @@ export class TransferService {
   /**
    * Validate a direct bank withdrawal account against PalmPay before payout.
    */
-  async validateBankAccount(accountNumber: string, bankName: string, countryCode: string, bankCode?: string) {
+  async validateBankAccount(accountNumber: string, bankName: string, countryCode: string, bankCode?: string, userId?: string | number) {
     const numericAccountNumber = accountNumber.replace(/\D/g, '');
     if (!numericAccountNumber || numericAccountNumber.length < 8) {
       throw new Error('Invalid account number');
@@ -154,6 +155,29 @@ export class TransferService {
     try {
       verifiedAccount = await this.palmPayPayoutService.verifyBankAccount(bankCode, numericAccountNumber);
     } catch (error: any) {
+      await logApplicationEvent({
+        level: 'error',
+        source: 'transfer.bank_account_verification',
+        message: error.message || 'Bank account verification failed',
+        userId,
+        statusCode: error.statusCode,
+        errorName: error.name,
+        stackTrace: error.stack,
+        context: {
+          bankCode,
+          bankName,
+          accountNumber: numericAccountNumber,
+          countryCode,
+          providerResponse: error.providerResponse,
+        },
+      });
+      console.error('[TransferService] Bank account verification failed during transfer initiation', {
+        bankCode,
+        accountNumber: numericAccountNumber.length <= 4 ? numericAccountNumber : `****${numericAccountNumber.slice(-4)}`,
+        message: error.message,
+        statusCode: error.statusCode,
+        providerResponse: error.providerResponse,
+      });
       throw new Error(error.message || 'Bank account verification is unavailable');
     }
 
@@ -351,7 +375,7 @@ export class TransferService {
           paymentMethodId: data.paymentMethodId,
         };
       } else if (data.accountNumber && data.bankCode) {
-        recipientInfo = await this.validateBankAccount(data.accountNumber, data.bankName || '', data.countryCode, data.bankCode);
+        recipientInfo = await this.validateBankAccount(data.accountNumber, data.bankName || '', data.countryCode, data.bankCode, parsedUserId);
       } else {
         throw new Error('Bank and account number are required for bank account withdrawals.');
       }
