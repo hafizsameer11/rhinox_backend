@@ -115,8 +115,8 @@ export class PalmPayWebhookService {
             transactionId: virtualAccount.transaction.id.toString(),
             country: virtualAccount.transaction.country || 'NG',
             channel: virtualAccount.transaction.channel || 'bank_transfer',
-            paymentMethod: virtualAccount.transaction.paymentMethod || 'PalmPay Virtual Account',
-            provider: 'PalmPay',
+            paymentMethod: virtualAccount.transaction.paymentMethod || 'Bank Transfer',
+            provider: 'Bank Transfer',
             date: new Date().toLocaleString(),
           });
         }

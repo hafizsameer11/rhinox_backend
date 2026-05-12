@@ -22,6 +22,16 @@ export class DepositService {
     return value === null || value === undefined ? null : String(value);
   }
 
+  private normalizeVirtualAccount(order: any) {
+    return {
+      accountType: order.payerAccountType ?? order.accountType ?? order.virtualAccountType ?? null,
+      accountId: order.payerAccountId ?? order.accountId ?? order.virtualAccountId ?? null,
+      bankName: order.payerBankName ?? order.bankName ?? order.bank_name ?? order.bank ?? null,
+      accountName: order.payerAccountName ?? order.accountName ?? order.account_name ?? order.virtualAccountName ?? null,
+      accountNumber: order.payerVirtualAccNo ?? order.accountNumber ?? order.accountNo ?? order.virtualAccountNo ?? order.virtualAccountNumber ?? order.virtualAccNo ?? null,
+    };
+  }
+
   /**
    * Static deposit accounts are disabled for NGN. A PalmPay virtual account
    * is created per deposit through initiateDeposit.
@@ -35,7 +45,7 @@ export class DepositService {
       provider: 'palmpay',
       currency: 'NGN',
       countryCode: 'NG',
-      message: 'Enter an amount to generate a PalmPay virtual account for this deposit.',
+      message: 'Enter an amount to generate bank transfer details for this deposit.',
     };
   }
 
@@ -105,8 +115,8 @@ export class DepositService {
         reference,
         channel: 'bank_transfer',
         country: 'NG',
-        paymentMethod: 'PalmPay Virtual Account',
-        description: `Deposit ${data.amount} NGN via PalmPay virtual account`,
+        paymentMethod: 'Bank Transfer',
+        description: `Deposit ${data.amount} NGN via bank transfer`,
         metadata: {
           provider: 'palmpay',
           merchantOrderId,
@@ -129,17 +139,18 @@ export class DepositService {
         userId: parsedUserId,
         userMobileNo: transaction.wallet.user.phone,
       });
+      const virtualAccount = this.normalizeVirtualAccount(palmPayOrder);
 
       await prisma.palmPayVirtualAccount.create({
         data: {
           transactionId: transaction.id,
           merchantOrderId,
           palmpayOrderNo: this.toNullableString(palmPayOrder.orderNo),
-          payerAccountType: this.toNullableString(palmPayOrder.payerAccountType),
-          payerAccountId: this.toNullableString(palmPayOrder.payerAccountId),
-          payerBankName: this.toNullableString(palmPayOrder.payerBankName),
-          payerAccountName: this.toNullableString(palmPayOrder.payerAccountName),
-          payerVirtualAccNo: this.toNullableString(palmPayOrder.payerVirtualAccNo),
+          payerAccountType: this.toNullableString(virtualAccount.accountType),
+          payerAccountId: this.toNullableString(virtualAccount.accountId),
+          payerBankName: this.toNullableString(virtualAccount.bankName),
+          payerAccountName: this.toNullableString(virtualAccount.accountName),
+          payerVirtualAccNo: this.toNullableString(virtualAccount.accountNumber),
           orderStatus: palmPayOrder.orderStatus ?? null,
           metadata: palmPayOrder as any,
         },
@@ -159,14 +170,16 @@ export class DepositService {
       throw createProviderUnavailableError(error.message || 'Unable to create PalmPay virtual account');
     }
 
+    const virtualAccount = this.normalizeVirtualAccount(palmPayOrder);
+
     if (transaction.wallet.user.email) {
       await sendDepositInitiatedEmail(transaction.wallet.user.email, {
         amount: data.amount,
         currency: 'NGN',
         reference,
-        bankName: palmPayOrder.payerBankName,
-        accountNumber: palmPayOrder.payerVirtualAccNo,
-        accountName: palmPayOrder.payerAccountName,
+        bankName: virtualAccount.bankName || undefined,
+        accountNumber: virtualAccount.accountNumber || undefined,
+        accountName: virtualAccount.accountName || undefined,
       });
     }
 
@@ -180,13 +193,7 @@ export class DepositService {
       fee: transaction.fee.toString(),
       status: transaction.status,
       provider: 'palmpay',
-      virtualAccount: {
-        accountType: palmPayOrder.payerAccountType,
-        accountId: palmPayOrder.payerAccountId,
-        bankName: palmPayOrder.payerBankName,
-        accountName: palmPayOrder.payerAccountName,
-        accountNumber: palmPayOrder.payerVirtualAccNo,
-      },
+      virtualAccount,
       checkoutUrl: palmPayOrder.checkoutUrl,
       createdAt: transaction.createdAt,
     };

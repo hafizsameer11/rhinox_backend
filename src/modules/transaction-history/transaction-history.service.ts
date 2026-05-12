@@ -541,6 +541,7 @@ export class TransactionHistoryService {
         },
         bankAccount: true,
         provider: true,
+        palmPayVirtualAccounts: true,
       },
       orderBy: {
         createdAt: 'desc',
@@ -584,6 +585,13 @@ export class TransactionHistoryService {
           bankName: tx.bankAccount.bankName,
           accountNumber: tx.bankAccount.accountNumber,
           accountName: tx.bankAccount.accountName,
+        } : null,
+        virtualAccount: tx.palmPayVirtualAccounts?.[0] ? {
+          bankName: tx.palmPayVirtualAccounts[0].payerBankName,
+          accountNumber: tx.palmPayVirtualAccounts[0].payerVirtualAccNo,
+          accountName: tx.palmPayVirtualAccounts[0].payerAccountName,
+          orderNo: tx.palmPayVirtualAccounts[0].palmpayOrderNo,
+          merchantOrderId: tx.palmPayVirtualAccounts[0].merchantOrderId,
         } : null,
         metadata: tx.metadata,
         completedAt: tx.completedAt,
@@ -922,6 +930,7 @@ export class TransactionHistoryService {
         },
         bankAccount: true,
         provider: true,
+        palmPayVirtualAccounts: true,
       },
     });
 
@@ -978,6 +987,13 @@ export class TransactionHistoryService {
         bankName: transaction.bankAccount.bankName,
         accountNumber: transaction.bankAccount.accountNumber,
         accountName: transaction.bankAccount.accountName,
+      } : null;
+      details.virtualAccount = transaction.palmPayVirtualAccounts?.[0] ? {
+        bankName: transaction.palmPayVirtualAccounts[0].payerBankName,
+        accountNumber: transaction.palmPayVirtualAccounts[0].payerVirtualAccNo,
+        accountName: transaction.palmPayVirtualAccounts[0].payerAccountName,
+        orderNo: transaction.palmPayVirtualAccounts[0].palmpayOrderNo,
+        merchantOrderId: transaction.palmPayVirtualAccounts[0].merchantOrderId,
       } : null;
     } else if (transaction.type === 'transfer' || transaction.type === 'withdrawal') {
       const totalAmount = amount.plus(fee);
