@@ -44,10 +44,15 @@ export class PalmPayPayoutService {
     try {
       data = await this.client.post(
         endpoint,
-        {
-          bankCode,
-          accountNumber: numericAccountNumber,
-        },
+        bankCode === '100033'
+          ? {
+              bankCode,
+              accountNumber: numericAccountNumber,
+            }
+          : {
+              bankCode,
+              bankAccNo: numericAccountNumber,
+            },
         bankCode === '100033' ? undefined : { version: 'V1.1' }
       );
     } catch (error: any) {

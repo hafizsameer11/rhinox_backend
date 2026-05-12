@@ -178,7 +178,7 @@ export class TransferService {
         statusCode: error.statusCode,
         providerResponse: error.providerResponse,
       });
-      throw new Error(error.message || 'Bank account verification is unavailable');
+      throw new Error('Unable to verify this bank account right now. Please try again later or use another bank account.');
     }
 
     if (!verifiedAccount.isValid || !verifiedAccount.accountName) {
