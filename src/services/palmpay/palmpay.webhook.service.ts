@@ -60,7 +60,7 @@ export class PalmPayWebhookService {
     });
 
     if (!virtualAccount) {
-      throw new Error(`PalmPay virtual account not found for ${payload.orderId}`);
+      throw new Error(`Deposit account not found for ${payload.orderId}`);
     }
 
     if (virtualAccount.transaction.status === 'completed') {

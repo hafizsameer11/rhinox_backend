@@ -231,7 +231,7 @@ export class PaymentSettingsController {
       if (!accountType || !bankName || !bankCode || !accountNumber || !accountName || !countryCode || !currency) {
         return res.status(400).json({
           success: false,
-          message: 'All fields are required, including PalmPay bank code',
+          message: 'All fields are required, including bank code',
         });
       }
 

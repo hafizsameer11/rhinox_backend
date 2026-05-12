@@ -23,7 +23,7 @@ export class PalmPayBillPaymentService {
 
   ensureSupportedScene(sceneCode: string): PalmPaySceneCode {
     if (!isSupportedPalmPayScene(sceneCode)) {
-      throw new Error(`PalmPay does not support ${sceneCode} bill payments`);
+      throw new Error(`${sceneCode} bill payments are not supported`);
     }
     return sceneCode;
   }

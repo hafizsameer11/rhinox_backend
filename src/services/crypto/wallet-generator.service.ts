@@ -258,7 +258,7 @@ export class WalletGeneratorService {
     // Store deposit address
     const parsedVirtualAccountId = typeof virtualAccountId === 'string' ? parseInt(virtualAccountId, 10) : virtualAccountId;
     if (isNaN(parsedVirtualAccountId) || parsedVirtualAccountId <= 0) {
-      throw new Error('Invalid virtual account ID format');
+      throw new Error('Invalid wallet account ID format');
     }
 
     const depositAddress = await prisma.depositAddress.create({

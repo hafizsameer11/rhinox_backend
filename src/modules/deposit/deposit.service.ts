@@ -38,7 +38,7 @@ export class DepositService {
    */
   async getBankAccountDetails(countryCode: string, currency: string) {
     if (countryCode !== 'NG' || currency !== 'NGN') {
-      throw new Error('Only NGN PalmPay deposits are currently supported');
+      throw new Error('Only NGN bank transfer deposits are currently supported');
     }
 
     return {
@@ -80,7 +80,7 @@ export class DepositService {
     }
 
     if (data.currency !== 'NGN' || data.countryCode !== 'NG' || data.channel !== 'bank_transfer') {
-      throw new Error('Only NGN bank transfer deposits via PalmPay are currently supported');
+      throw new Error('Only NGN bank transfer deposits are currently supported');
     }
 
     const amount = parseFloat(data.amount);
@@ -88,7 +88,7 @@ export class DepositService {
       throw new Error('Amount must be greater than 0');
     }
     if (amount < 100) {
-      throw new Error('Minimum PalmPay deposit amount is 100 NGN');
+      throw new Error('Minimum deposit amount is 100 NGN');
     }
 
     // Get or create wallet
@@ -167,7 +167,7 @@ export class DepositService {
           },
         },
       });
-      throw createProviderUnavailableError(error.message || 'Unable to create PalmPay virtual account');
+      throw createProviderUnavailableError(error.message || 'Unable to create bank transfer details');
     }
 
     const virtualAccount = this.normalizeVirtualAccount(palmPayOrder);
@@ -207,7 +207,7 @@ export class DepositService {
     transactionId: string,
     pin: string
   ) {
-    throw new Error('PalmPay deposits are confirmed automatically by webhook. Manual deposit confirmation is disabled.');
+    throw new Error('Bank transfer deposits are confirmed automatically. Manual deposit confirmation is disabled.');
   }
 
   /**

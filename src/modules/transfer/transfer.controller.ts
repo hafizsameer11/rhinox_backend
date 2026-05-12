@@ -335,6 +335,7 @@ export class TransferController {
         paymentMethodId, // For bank_account withdrawals
         accountNumber, // Legacy
         bankName, // Legacy
+        bankCode,
         providerId,
         phoneNumber,
       } = req.body;
@@ -368,10 +369,10 @@ export class TransferController {
         });
       }
 
-      if (channel === 'bank_account' && !paymentMethodId && (!accountNumber || !bankName)) {
+      if (channel === 'bank_account' && !paymentMethodId && (!accountNumber || !bankCode)) {
         return res.status(400).json({
           success: false,
-          message: 'Payment method ID is required for bank account withdrawals. Use payment method from payment settings (GET /api/payment-settings?type=bank_account)',
+          message: 'Bank and account number are required for bank account withdrawals',
         });
       }
 
@@ -392,6 +393,7 @@ export class TransferController {
         paymentMethodId,
         accountNumber,
         bankName,
+        bankCode,
         providerId,
         phoneNumber,
       });

@@ -2059,6 +2059,14 @@ export class P2POrderService {
             email: true,
           },
         },
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
         paymentMethod: true,
       },
       orderBy: {
@@ -2152,6 +2160,8 @@ export class P2POrderService {
       const parsedSellerId = typeof actualSellerId === 'string' ? parseInt(actualSellerId, 10) : actualSellerId;
       const isUserBuyer = parsedBuyerId === parsedUserId;
       const isUserSeller = parsedSellerId === parsedUserId;
+      const buyer = parsedBuyerId === order.vendorId ? order.vendor : order.user;
+      const seller = parsedSellerId === order.vendorId ? order.vendor : order.user;
 
       return {
         id: order.id,
@@ -2165,7 +2175,9 @@ export class P2POrderService {
         fiatAmount: order.fiatAmount.toString(),
         price: order.price.toString(),
         status: order.status,
-        buyer: order.buyer,
+        buyer,
+        seller,
+        user: order.user,
         vendor: order.vendor,
         isUserBuyer,
         isUserSeller,

@@ -59,7 +59,7 @@ export class PalmPayClient {
       const responseData = response.data as PalmPayEnvelope<T>;
       if (responseData?.respCode && responseData.respCode !== '00000000') {
         throw new PalmPayProviderError(
-          responseData.respMsg || 'PalmPay request failed',
+          responseData.respMsg || 'Payment provider request failed',
           503,
           responseData
         );
@@ -75,7 +75,7 @@ export class PalmPayClient {
         error.response?.data?.respMsg ||
           error.response?.data?.message ||
           error.message ||
-          'PalmPay service is unavailable',
+          'Payment provider is unavailable',
         error.response?.status || 503,
         error.response?.data
       );

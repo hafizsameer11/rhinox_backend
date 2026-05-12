@@ -122,25 +122,50 @@ export class TransferService {
   }
 
   /**
-   * Validate bank account (basic validation - in production, integrate with bank API)
+   * Validate a direct bank withdrawal account against PalmPay before payout.
    */
-  async validateBankAccount(accountNumber: string, bankName: string, countryCode: string) {
-    // In production, this would call a bank API to validate account
-    // For now, we'll do basic validation
-    
-    if (!accountNumber || accountNumber.length < 8) {
+  async validateBankAccount(accountNumber: string, bankName: string, countryCode: string, bankCode?: string) {
+    const numericAccountNumber = accountNumber.replace(/\D/g, '');
+    if (!numericAccountNumber || numericAccountNumber.length < 8) {
       throw new Error('Invalid account number');
     }
 
-    if (!bankName) {
-      throw new Error('Bank name is required');
+    if (countryCode !== 'NG') {
+      throw new Error('Only Nigerian bank withdrawals are currently supported');
     }
 
-    // Return mock account name (in production, get from bank API)
+    if (!bankCode) {
+      throw new Error('Bank code is required');
+    }
+
+    let palmPayBanks;
+    try {
+      palmPayBanks = await this.palmPayPayoutService.getBanks();
+    } catch (error: any) {
+      throw new Error(error.message || 'Bank list is unavailable');
+    }
+
+    const bank = palmPayBanks.find((item) => item.bankCode === bankCode);
+    if (!bank) {
+      throw new Error('Selected bank is not available');
+    }
+
+    let verifiedAccount;
+    try {
+      verifiedAccount = await this.palmPayPayoutService.verifyBankAccount(bankCode, numericAccountNumber);
+    } catch (error: any) {
+      throw new Error(error.message || 'Bank account verification is unavailable');
+    }
+
+    if (!verifiedAccount.isValid || !verifiedAccount.accountName) {
+      throw new Error(verifiedAccount.errorMessage || 'Could not verify this bank account');
+    }
+
     return {
-      accountNumber,
-      bankName,
-      accountName: 'Account Holder Name', // Would come from bank API
+      accountNumber: numericAccountNumber,
+      bankName: bank.bankName || bankName,
+      accountName: verifiedAccount.accountName,
+      bankCode,
       countryCode,
       isValid: true,
     };
@@ -190,6 +215,7 @@ export class TransferService {
       paymentMethodId?: number; // For bank_account withdrawals - ID from payment settings
       accountNumber?: string; // For bank account transfers (legacy - use paymentMethodId instead)
       bankName?: string; // For bank account transfers (legacy - use paymentMethodId instead)
+      bankCode?: string; // PalmPay bank code for direct bank account withdrawals
       providerId?: string; // For mobile money transfers
       phoneNumber?: string; // For mobile money transfers
     }
@@ -313,7 +339,7 @@ export class TransferService {
           throw new Error('Payment method not found or invalid');
         }
         if (!fullPaymentMethod.bankCode) {
-          throw new Error('Bank account must be verified with PalmPay before withdrawal');
+          throw new Error('Bank account must be verified before withdrawal');
         }
         const decryptedAccountNumber = decryptPrivateKey(fullPaymentMethod.accountNumber);
         recipientInfo = {
@@ -324,11 +350,10 @@ export class TransferService {
           countryCode: paymentMethod.countryCode,
           paymentMethodId: data.paymentMethodId,
         };
-      } else if (data.accountNumber && data.bankName) {
-        // Legacy support - direct account number and bank name
-        recipientInfo = await this.validateBankAccount(data.accountNumber, data.bankName, data.countryCode);
+      } else if (data.accountNumber && data.bankCode) {
+        recipientInfo = await this.validateBankAccount(data.accountNumber, data.bankName || '', data.countryCode, data.bankCode);
       } else {
-        throw new Error('Payment method ID is required for bank account withdrawals. Use payment method from payment settings.');
+        throw new Error('Bank and account number are required for bank account withdrawals.');
       }
     } else if (data.channel === 'mobile_money') {
       if (!data.providerId || !data.phoneNumber) {
@@ -557,7 +582,7 @@ export class TransferService {
     if (transaction.type === 'withdrawal' && transaction.channel === 'bank_account') {
       const recipientInfo = metadata?.recipientInfo || {};
       if (!recipientInfo.bankCode || !recipientInfo.accountNumber || !recipientInfo.accountName) {
-        throw new Error('PalmPay verified bank account details are required for withdrawal');
+        throw new Error('Verified bank account details are required for withdrawal');
       }
 
       const now = new Date();
@@ -587,7 +612,7 @@ export class TransferService {
             },
           },
         });
-        throw new Error(error.message || 'PalmPay payout initiation failed');
+        throw new Error(error.message || 'Withdrawal processing failed');
       }
 
       const updatedTransaction = await prisma.$transaction(async (tx) => {

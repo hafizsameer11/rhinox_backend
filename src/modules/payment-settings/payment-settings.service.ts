@@ -150,32 +150,32 @@ export class PaymentSettingsService {
       throw new Error('Invalid account number');
     }
     if (data.countryCode !== 'NG' || data.currency !== 'NGN') {
-      throw new Error('Only PalmPay verified Nigerian NGN bank accounts are currently supported');
+      throw new Error('Only Nigerian NGN bank accounts are currently supported');
     }
     if (!data.bankCode) {
-      throw new Error('PalmPay bank code is required');
+      throw new Error('Bank code is required');
     }
 
     let palmPayBanks;
     try {
       palmPayBanks = await this.palmPayPayoutService.getBanks();
     } catch (error: any) {
-      throw createProviderUnavailableError(error.message || 'PalmPay bank list is unavailable');
+      throw createProviderUnavailableError(error.message || 'Bank list is unavailable');
     }
 
     const bank = palmPayBanks.find((item) => item.bankCode === data.bankCode);
     if (!bank) {
-      throw new Error('Selected bank is not available from PalmPay');
+      throw new Error('Selected bank is not available');
     }
 
     let verifiedAccount;
     try {
       verifiedAccount = await this.palmPayPayoutService.verifyBankAccount(data.bankCode, data.accountNumber);
     } catch (error: any) {
-      throw createProviderUnavailableError(error.message || 'PalmPay account verification is unavailable');
+      throw createProviderUnavailableError(error.message || 'Bank account verification is unavailable');
     }
     if (!verifiedAccount.isValid || !verifiedAccount.accountName) {
-      throw new Error(verifiedAccount.errorMessage || 'PalmPay could not verify this account');
+      throw new Error(verifiedAccount.errorMessage || 'Could not verify this bank account');
     }
 
     // Encrypt account number
@@ -452,7 +452,7 @@ export class PaymentSettingsService {
     if (data.accountType !== undefined) updateData.accountType = data.accountType;
     if (data.bankName !== undefined || data.accountName !== undefined || data.accountNumber !== undefined) {
       if (paymentMethod.type === 'bank_account') {
-        throw new Error('Create a new PalmPay verified bank account to change bank details');
+        throw new Error('Create a new verified bank account to change bank details');
       }
     }
     if (data.bankName !== undefined) updateData.bankName = data.bankName;
@@ -652,7 +652,7 @@ export class PaymentSettingsService {
         currency: 'NGN',
       }));
     } catch (error: any) {
-      throw createProviderUnavailableError(error.message || 'PalmPay bank list is unavailable');
+      throw createProviderUnavailableError(error.message || 'Bank list is unavailable');
     }
   }
 

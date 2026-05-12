@@ -20,7 +20,7 @@ export const mapPalmPayStatus = (status?: PalmPayOrderStatus | number | string):
   return 'pending';
 };
 
-export const createProviderUnavailableError = (message = 'PalmPay service is unavailable') => {
+export const createProviderUnavailableError = (message = 'Payment provider is unavailable') => {
   const error = new Error(message) as Error & { statusCode?: number; code?: string };
   error.statusCode = 503;
   error.code = 'PALMPAY_PROVIDER_UNAVAILABLE';

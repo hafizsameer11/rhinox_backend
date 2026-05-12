@@ -39,7 +39,7 @@ export class BillPaymentService {
       : [categoryCode, providerId];
 
     if (!embeddedSceneCode || !embeddedBillerId) {
-      throw new Error('Invalid PalmPay provider id');
+      throw new Error('Invalid provider id');
     }
 
     if (!isSupportedPalmPayScene(embeddedSceneCode)) {
@@ -126,7 +126,7 @@ export class BillPaymentService {
       }));
     } catch (error: any) {
       if (error.code === 'BILL_SERVICE_UNDER_MAINTENANCE') throw error;
-      throw createProviderUnavailableError(error.message || 'PalmPay billers are unavailable');
+      throw createProviderUnavailableError(error.message || 'Bill payment providers are unavailable');
     }
   }
 
@@ -157,7 +157,7 @@ export class BillPaymentService {
         metadata: item.raw || item,
       }));
     } catch (error: any) {
-      throw createProviderUnavailableError(error.message || 'PalmPay bill payment items are unavailable');
+      throw createProviderUnavailableError(error.message || 'Bill payment plans are unavailable');
     }
   }
 
@@ -234,7 +234,7 @@ export class BillPaymentService {
       const billers = await this.palmPayBillPaymentService.queryBillers(sceneCode);
       biller = billers.find((entry) => entry.billerId === billerId);
       if (!biller) {
-        throw new Error('Selected PalmPay biller is unavailable');
+        throw new Error('Selected biller is unavailable');
       }
 
       const items = await this.palmPayBillPaymentService.queryItems(sceneCode, billerId);
@@ -242,10 +242,10 @@ export class BillPaymentService {
         ? items.find((entry) => entry.itemId === data.planId?.toString())
         : items[0];
       if (!item) {
-        throw new Error('Selected PalmPay bill item is unavailable');
+        throw new Error('Selected bill payment plan is unavailable');
       }
     } catch (error: any) {
-      throw createProviderUnavailableError(error.message || 'PalmPay bill payment service is unavailable');
+      throw createProviderUnavailableError(error.message || 'Bill payment service is unavailable');
     }
 
     // Get wallet
@@ -521,13 +521,13 @@ export class BillPaymentService {
               ...metadata,
               palmpayOrderId: palmPayOrderId,
               refunded: true,
-              refundReason: error.message || 'PalmPay bill payment failed',
+              refundReason: error.message || 'Bill payment failed',
               providerError: error.providerResponse || error.message,
             },
           },
         });
       });
-      throw createProviderUnavailableError(error.message || 'PalmPay bill payment failed');
+      throw createProviderUnavailableError(error.message || 'Bill payment failed');
     }
 
     const mappedStatus = mapPalmPayStatus(palmPayOrder.orderStatus);

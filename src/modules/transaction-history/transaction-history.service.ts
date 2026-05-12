@@ -6,6 +6,77 @@ import prisma from '../../core/config/database.js';
  * Business logic for transaction history with chart data and filtering
  */
 export class TransactionHistoryService {
+  private resolveP2PRoles(orderType: string, vendorId: string | number, userId: string | number) {
+    if (orderType === 'buy') {
+      return { buyerId: String(vendorId), sellerId: String(userId) };
+    }
+    return { buyerId: String(userId), sellerId: String(vendorId) };
+  }
+
+  private formatUserName(user?: any) {
+    if (!user) return null;
+    const name = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+    return name || user.name || user.email || null;
+  }
+
+  private summarizeP2POrder(order: any, currentUserId: number) {
+    if (!order) return null;
+
+    const metadata = order.metadata as any;
+    const roleIds = metadata?.buyerId && metadata?.sellerId
+      ? { buyerId: String(metadata.buyerId), sellerId: String(metadata.sellerId) }
+      : this.resolveP2PRoles(order.type, order.vendorId, order.userId);
+
+    const buyer = String(order.vendorId) === roleIds.buyerId ? order.vendor : order.user;
+    const seller = String(order.vendorId) === roleIds.sellerId ? order.vendor : order.user;
+    const peer = Number(order.vendorId) === currentUserId ? order.user : order.vendor;
+    const isUserBuyer = Number(roleIds.buyerId) === currentUserId;
+
+    return {
+      id: order.id,
+      chatId: order.id,
+      type: order.type,
+      status: order.status,
+      userAction: isUserBuyer ? 'buy' : 'sell',
+      p2pType: isUserBuyer ? 'Crypto Buy' : 'Crypto Sell',
+      cryptoCurrency: order.cryptoCurrency,
+      fiatCurrency: order.fiatCurrency,
+      cryptoAmount: order.cryptoAmount?.toString(),
+      fiatAmount: order.fiatAmount?.toString(),
+      price: order.price?.toString(),
+      createdAt: order.createdAt,
+      buyer: {
+        id: buyer?.id,
+        name: this.formatUserName(buyer),
+        email: buyer?.email,
+        phone: buyer?.phone,
+      },
+      seller: {
+        id: seller?.id,
+        name: this.formatUserName(seller),
+        email: seller?.email,
+        phone: seller?.phone,
+      },
+      peer: {
+        id: peer?.id,
+        name: this.formatUserName(peer),
+        email: peer?.email,
+        phone: peer?.phone,
+      },
+      paymentMethod: order.paymentMethod ? {
+        id: order.paymentMethod.id,
+        type: order.paymentMethod.type,
+        bankName: order.paymentMethod.bankName,
+        accountName: order.paymentMethod.accountName,
+        provider: order.paymentMethod.provider ? {
+          id: order.paymentMethod.provider.id,
+          name: order.paymentMethod.provider.name,
+          code: order.paymentMethod.provider.code,
+        } : null,
+      } : null,
+    };
+  }
+
   /**
    * Normalize transaction type to UI-friendly label
    */
@@ -852,6 +923,48 @@ export class TransactionHistoryService {
       skip: filters.offset || 0,
     });
 
+    const orderIds = Array.from(new Set(
+      transactions
+        .map((tx: any) => {
+          const metadata = tx.metadata as any;
+          const orderId = metadata?.orderId;
+          return orderId ? Number(orderId) : null;
+        })
+        .filter((orderId: number | null) => orderId && !isNaN(orderId))
+    )) as number[];
+
+    const p2pOrders = orderIds.length > 0
+      ? await prisma.p2POrder.findMany({
+          where: { id: { in: orderIds } },
+          include: {
+            vendor: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+              },
+            },
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+              },
+            },
+            paymentMethod: {
+              include: {
+                provider: true,
+              },
+            },
+          },
+        })
+      : [];
+    const p2pOrderMap = new Map(p2pOrders.map((order: any) => [order.id, order]));
+
     // Calculate summary
     let totalAmount = new Decimal(0);
     transactions.forEach((tx: any) => {
@@ -864,6 +977,8 @@ export class TransactionHistoryService {
       const amount = new Decimal(tx.amount);
       const isIncoming = metadata?.p2pStep === 'fiat_received' || metadata?.p2pStep === 'fiat_credited';
       const isOutgoing = metadata?.p2pStep === 'fiat_sent' || metadata?.p2pStep === 'fiat_debited';
+      const order = metadata?.orderId ? p2pOrderMap.get(Number(metadata.orderId)) : null;
+      const p2pOrder = this.summarizeP2POrder(order, userIdNum);
 
       return {
         id: tx.id,
@@ -879,6 +994,22 @@ export class TransactionHistoryService {
         metadata: tx.metadata,
         orderId: metadata?.orderId || null,
         adId: metadata?.adId || null,
+        p2pOrder,
+        p2pType: p2pOrder?.p2pType,
+        merchantName: p2pOrder?.peer?.name,
+        merchantContact: p2pOrder?.peer?.email || p2pOrder?.peer?.phone,
+        chatName: p2pOrder?.peer?.name,
+        chatEmail: p2pOrder?.peer?.email,
+        price: p2pOrder?.price,
+        totalQty: p2pOrder?.cryptoAmount && p2pOrder?.cryptoCurrency
+          ? `${p2pOrder.cryptoAmount} ${p2pOrder.cryptoCurrency}`
+          : undefined,
+        transferAmount: p2pOrder?.fiatAmount && p2pOrder?.fiatCurrency
+          ? `${p2pOrder.fiatCurrency}${p2pOrder.fiatAmount}`
+          : amount.abs().toString(),
+        paymentMethod: p2pOrder?.paymentMethod?.bankName ||
+          p2pOrder?.paymentMethod?.provider?.name ||
+          p2pOrder?.paymentMethod?.type,
         completedAt: tx.completedAt,
         createdAt: tx.createdAt,
       };
@@ -999,6 +1130,10 @@ export class TransactionHistoryService {
       const totalAmount = amount.plus(fee);
       details.totalAmount = totalAmount.toString();
       details.recipientInfo = metadata?.recipientInfo || null;
+      details.accountNumber = metadata?.accountNumber || metadata?.recipientInfo?.accountNumber || null;
+      details.accountName = metadata?.accountName || metadata?.recipientInfo?.accountName || metadata?.recipientInfo?.name || null;
+      details.bankName = metadata?.bankName || metadata?.recipientInfo?.bankName || null;
+      details.phoneNumber = metadata?.phoneNumber || metadata?.recipientInfo?.phoneNumber || null;
     } else if (transaction.type === 'p2p') {
       details.orderId = metadata?.orderId || null;
       details.adId = metadata?.adId || null;
@@ -1006,6 +1141,73 @@ export class TransactionHistoryService {
       details.direction = metadata?.p2pStep === 'fiat_received' || metadata?.p2pStep === 'crypto_credited' 
         ? 'incoming' 
         : 'outgoing';
+      if (details.orderId) {
+        const order = await prisma.p2POrder.findUnique({
+          where: { id: Number(details.orderId) },
+          include: {
+            vendor: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+              },
+            },
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+              },
+            },
+            paymentMethod: {
+              include: {
+                provider: true,
+              },
+            },
+          },
+        });
+        const p2pOrder = this.summarizeP2POrder(order, userIdNum);
+        details.p2pOrder = p2pOrder;
+        details.p2pType = p2pOrder?.p2pType;
+        details.merchantName = p2pOrder?.peer?.name;
+        details.merchantContact = p2pOrder?.peer?.email || p2pOrder?.peer?.phone;
+        details.chatName = p2pOrder?.peer?.name;
+        details.chatEmail = p2pOrder?.peer?.email;
+        details.price = p2pOrder?.price;
+        details.totalQty = p2pOrder?.cryptoAmount && p2pOrder?.cryptoCurrency
+          ? `${p2pOrder.cryptoAmount} ${p2pOrder.cryptoCurrency}`
+          : undefined;
+        details.transferAmount = p2pOrder?.fiatAmount && p2pOrder?.fiatCurrency
+          ? `${p2pOrder.fiatCurrency}${p2pOrder.fiatAmount}`
+          : amount.abs().toString();
+        details.paymentMethod = p2pOrder?.paymentMethod?.bankName ||
+          p2pOrder?.paymentMethod?.provider?.name ||
+          p2pOrder?.paymentMethod?.type ||
+          details.paymentMethod;
+      }
+    } else if (transaction.type === 'bill_payment') {
+      details.category = {
+        code: metadata?.categoryCode || transaction.channel,
+        name: metadata?.categoryName || transaction.channel,
+      };
+      details.provider = {
+        id: metadata?.providerId,
+        code: metadata?.providerCode || metadata?.billerId,
+        name: metadata?.providerName,
+      };
+      details.plan = {
+        id: metadata?.itemId,
+        name: metadata?.itemName,
+        amount: metadata?.itemAmount,
+      };
+      details.accountNumber = metadata?.accountNumber;
+      details.accountName = metadata?.accountName;
+      details.billerType = metadata?.providerName || metadata?.categoryName;
+      details.mobileNumber = metadata?.accountNumber;
     }
 
     return details;
