@@ -1,6 +1,7 @@
 import prisma from '../../core/config/database.js';
 import { isTatumEnabled } from '../../core/config/tatum.config.js';
 import { WalletGeneratorService } from '../../services/crypto/wallet-generator.service.js';
+import { CryptoWalletLinkService } from '../../services/tatum/crypto-wallet-link.service.js';
 import { DepositAddressService } from '../../services/tatum/deposit-address.service.js';
 import { VirtualAccountService } from '../../services/tatum/virtual-account.service.js';
 
@@ -13,6 +14,7 @@ export class CryptoService {
   private readonly walletGenerator = new WalletGeneratorService();
   private readonly virtualAccountService = new VirtualAccountService();
   private readonly depositAddressService = new DepositAddressService();
+  private readonly linkService = new CryptoWalletLinkService();
 
   /**
    * Get user's virtual accounts (from database)
@@ -44,6 +46,13 @@ export class CryptoService {
             address: true,
             currency: true,
             blockchain: true,
+            userWalletId: true,
+            userWallet: {
+              select: {
+                id: true,
+                blockchain: true,
+              },
+            },
           },
           orderBy: {
             createdAt: 'desc',
@@ -131,11 +140,27 @@ export class CryptoService {
       }
     }
 
+    const userWallet = depositAddress.userWalletId
+      ? await prisma.userWallet.findUnique({
+          where: { id: depositAddress.userWalletId },
+          select: { id: true, blockchain: true },
+        })
+      : null;
+
     return {
       address: depositAddress.address,
       currency: depositAddress.currency,
       blockchain: depositAddress.blockchain,
+      /** Webhook + ledger account UUID (not Tatum Ledger) */
       virtualAccountId: virtualAccount.accountId,
+      virtualAccountDbId: virtualAccount.id,
+      userWalletId: depositAddress.userWalletId,
+      userWalletBlockchain: userWallet?.blockchain ?? null,
+      /** In-app balance only — updated by webhooks, P2P, buy/sell */
+      ledger: {
+        accountBalance: virtualAccount.accountBalance,
+        availableBalance: virtualAccount.availableBalance,
+      },
     };
   }
 
@@ -177,6 +202,11 @@ export class CryptoService {
           message
         );
       }
+    }
+
+    const { issues } = await this.linkService.ensureUserCryptoLinks(userId);
+    if (issues.length > 0) {
+      console.warn(`User ${userId} crypto link issues:`, issues);
     }
 
     console.log(

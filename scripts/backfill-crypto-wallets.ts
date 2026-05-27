@@ -68,11 +68,15 @@ async function main() {
         const nonZero = result.balancesAfter.filter(
           (b) => parseFloat(b.accountBalance || '0') > 0 || parseFloat(b.availableBalance || '0') > 0
         );
+        const linkWarn =
+          result.linkIssues.length > 0
+            ? `; link warnings: ${result.linkIssues.length}`
+            : '';
         console.log(
           `OK user ${userId}: cleared ${result.cleared.depositAddresses} deposit row(s), ` +
             `${result.cleared.userWallets} user_wallet(s); ` +
             `created ${result.depositCount} Tatum deposit address(es); ` +
-            `ledger accounts with balance preserved: ${nonZero.length}`
+            `ledger accounts with balance preserved: ${nonZero.length}${linkWarn}`
         );
       } else {
         await cryptoService.initializeUserCryptoWallets(userId);

@@ -50,10 +50,19 @@ export class DepositAddressService {
     );
 
     if (reused) {
-      return prisma.depositAddress.create({
+      let userWalletId = reused.userWalletId;
+      if (!userWalletId) {
+        const uw = await this.userWalletService.getOrCreateUserWallet(
+          virtualAccount.userId,
+          normalizedBlockchain
+        );
+        userWalletId = uw.id;
+      }
+
+      const linked = await prisma.depositAddress.create({
         data: {
           virtualAccountId,
-          userWalletId: reused.userWalletId,
+          userWalletId,
           blockchain,
           currency: virtualAccount.currency,
           address: reused.address,
@@ -61,6 +70,8 @@ export class DepositAddressService {
           privateKey: reused.privateKey,
         },
       });
+      await this.syncVirtualAccountFromWallet(virtualAccountId, userWalletId);
+      return linked;
     }
 
     const userWallet = await this.userWalletService.getOrCreateUserWallet(
@@ -119,8 +130,27 @@ export class DepositAddressService {
     });
 
     await this.registerWebhooksForAddress(address, normalizedBlockchain);
+    await this.syncVirtualAccountFromWallet(virtualAccountId, userWallet.id);
 
     return depositAddress;
+  }
+
+  /** Ledger row metadata only — does not move on-chain or change balances. */
+  private async syncVirtualAccountFromWallet(virtualAccountId: number, userWalletId: number) {
+    const [va, wallet] = await Promise.all([
+      prisma.virtualAccount.findUnique({ where: { id: virtualAccountId } }),
+      prisma.userWallet.findUnique({ where: { id: userWalletId } }),
+    ]);
+    if (!va || !wallet || wallet.userId !== va.userId) {
+      return;
+    }
+    await prisma.virtualAccount.update({
+      where: { id: virtualAccountId },
+      data: {
+        customerId: va.customerId || String(va.userId),
+        ...(wallet.xpub ? { xpub: wallet.xpub } : {}),
+      },
+    });
   }
 
   private async registerWebhooksForAddress(address: string, normalizedBlockchain: string) {

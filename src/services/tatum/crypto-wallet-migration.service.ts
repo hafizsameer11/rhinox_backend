@@ -1,4 +1,5 @@
 import prisma from '../../core/config/database.js';
+import { CryptoWalletLinkService } from './crypto-wallet-link.service.js';
 import { DepositAddressService } from './deposit-address.service.js';
 import { VirtualAccountService } from './virtual-account.service.js';
 
@@ -14,6 +15,7 @@ import { VirtualAccountService } from './virtual-account.service.js';
 export class CryptoWalletMigrationService {
   private readonly virtualAccountService = new VirtualAccountService();
   private readonly depositAddressService = new DepositAddressService();
+  private readonly linkService = new CryptoWalletLinkService();
 
   /**
    * Remove old deposit_addresses and user_wallets only. Does not touch virtual_accounts.
@@ -75,6 +77,7 @@ export class CryptoWalletMigrationService {
 
     const cleared = await this.clearOnChainWalletRows(userId);
     const deposits = await this.reprovisionDepositAddresses(userId);
+    const { issues: linkIssues } = await this.linkService.ensureUserCryptoLinks(userId);
 
     const balancesAfter = await prisma.virtualAccount.findMany({
       where: { userId },
@@ -93,6 +96,7 @@ export class CryptoWalletMigrationService {
       balancesBefore,
       balancesAfter,
       deposits,
+      linkIssues,
     };
   }
 }
