@@ -48,6 +48,7 @@
   "include": [
     "src/**/*",
     "server.ts",
+    "scripts/**/*.ts",
     "prisma.config.ts",
     "prisma/seed.ts"
   ],
