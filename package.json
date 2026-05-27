@@ -11,6 +11,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "prisma:seed": "prisma db seed",
+    "tatum:master-wallets": "tsx scripts/create-master-wallets.ts",
+    "tatum:backfill-users": "tsx scripts/backfill-crypto-wallets.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

@@ -289,6 +289,17 @@ export class BillPaymentService {
       throw new Error('Account number is required');
     }
 
+    // Airtime/Data phone normalization for PalmPay:
+    // take last 10 digits and prefix with 02340 => 02340 + last10
+    if (sceneCode === 'airtime' || sceneCode === 'data') {
+      const digitsOnly = String(accountNumber).replace(/\D/g, '');
+      if (digitsOnly.length < 10) {
+        throw new Error('Invalid phone number');
+      }
+      const last10 = digitsOnly.slice(-10);
+      accountNumber = `02340${last10}`;
+    }
+
     // Calculate amount
     let amount = new Decimal(data.amount);
     if (item.amount !== undefined && item.amount > 0) {

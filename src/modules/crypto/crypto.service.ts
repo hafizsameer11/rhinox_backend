@@ -1,30 +1,23 @@
 import prisma from '../../core/config/database.js';
-// TATUM SERVICES COMMENTED OUT - Using local wallet generation instead
-// import { VirtualAccountService } from '../../services/tatum/virtual-account.service.js';
-// import { DepositAddressService } from '../../services/tatum/deposit-address.service.js';
+import { isTatumEnabled } from '../../core/config/tatum.config.js';
 import { WalletGeneratorService } from '../../services/crypto/wallet-generator.service.js';
+import { DepositAddressService } from '../../services/tatum/deposit-address.service.js';
+import { VirtualAccountService } from '../../services/tatum/virtual-account.service.js';
 
 /**
  * Crypto Service
- * Business logic for crypto operations
+ * Business logic for crypto operations.
+ * Uses Tatum when TATUM_API_KEY is configured; otherwise local wallet generation (dev).
  */
 export class CryptoService {
-  // TATUM SERVICES COMMENTED OUT
-  // private virtualAccountService: VirtualAccountService;
-  // private depositAddressService: DepositAddressService;
-  private walletGenerator: WalletGeneratorService;
-
-  constructor() {
-    // this.virtualAccountService = new VirtualAccountService();
-    // this.depositAddressService = new DepositAddressService();
-    this.walletGenerator = new WalletGeneratorService();
-  }
+  private readonly walletGenerator = new WalletGeneratorService();
+  private readonly virtualAccountService = new VirtualAccountService();
+  private readonly depositAddressService = new DepositAddressService();
 
   /**
    * Get user's virtual accounts (from database)
    */
   async getUserVirtualAccounts(userId: string | number) {
-    // Parse userId to integer for Prisma queries
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(userIdNum) || userIdNum <= 0) {
       throw new Error(`Invalid userId: ${userId}`);
@@ -55,16 +48,13 @@ export class CryptoService {
           orderBy: {
             createdAt: 'desc',
           },
-          take: 1, // Get the most recent deposit address
+          take: 1,
         },
       },
-      orderBy: [
-        { blockchain: 'asc' },
-        { currency: 'asc' },
-      ],
+      orderBy: [{ blockchain: 'asc' }, { currency: 'asc' }],
     });
 
-    return virtualAccounts.map((va: { id: number; userId: number; blockchain: string; currency: string; accountId: string; accountCode: string | null; active: boolean; frozen: boolean; accountBalance: any; availableBalance: any; walletCurrency: any; depositAddresses: any[] }) => ({
+    return virtualAccounts.map((va) => ({
       id: va.id,
       userId: va.userId,
       blockchain: va.blockchain,
@@ -84,29 +74,28 @@ export class CryptoService {
    * Get deposit address for a currency and blockchain
    */
   async getDepositAddress(userId: string | number, currency: string, blockchain: string) {
-    // Parse userId to integer for Prisma queries
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(userIdNum) || userIdNum <= 0) {
       throw new Error(`Invalid userId: ${userId}`);
     }
 
-    // Get or create virtual account
+    const blockchainKey = blockchain.toLowerCase();
+
     let virtualAccount = await prisma.virtualAccount.findFirst({
       where: {
         userId: userIdNum,
         currency,
-        blockchain: blockchain.toLowerCase(),
+        blockchain: blockchainKey,
       },
     });
 
     if (!virtualAccount) {
-      // Create virtual accounts if they don't exist
       await this.initializeUserCryptoWallets(userIdNum);
       virtualAccount = await prisma.virtualAccount.findFirst({
         where: {
           userId: userIdNum,
           currency,
-          blockchain: blockchain.toLowerCase(),
+          blockchain: blockchainKey,
         },
       });
 
@@ -115,26 +104,31 @@ export class CryptoService {
       }
     }
 
-    // Get or create deposit address
     let depositAddress = await prisma.depositAddress.findFirst({
       where: {
         virtualAccountId: virtualAccount.id,
         currency,
-        blockchain: blockchain.toLowerCase(),
+        blockchain: blockchainKey,
       },
     });
 
     if (!depositAddress) {
-      // Get or create user wallet
-      const userWallet = await this.walletGenerator.getOrCreateUserWallet(String(userIdNum), blockchain);
-      
-      // Generate deposit address
-      depositAddress = await this.walletGenerator.generateDepositAddress(
-        virtualAccount.id.toString(),
-        userWallet.id.toString(),
-        blockchain,
-        currency
-      );
+      if (isTatumEnabled()) {
+        depositAddress = await this.depositAddressService.generateAndAssignToVirtualAccount(
+          virtualAccount.id
+        );
+      } else {
+        const userWallet = await this.walletGenerator.getOrCreateUserWallet(
+          String(userIdNum),
+          blockchain
+        );
+        depositAddress = await this.walletGenerator.generateDepositAddress(
+          virtualAccount.id.toString(),
+          userWallet.id.toString(),
+          blockchain,
+          currency
+        );
+      }
     }
 
     return {
@@ -146,41 +140,72 @@ export class CryptoService {
   }
 
   /**
-   * Create virtual accounts for user (triggered after email verification)
-   * All generated in database - no external API calls
+   * Create virtual accounts + deposit addresses after email verification.
    */
   async initializeUserCryptoWallets(userId: string | number) {
-    // Parse userId to integer for Prisma queries
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(userIdNum) || userIdNum <= 0) {
       throw new Error(`Invalid userId: ${userId}`);
     }
 
-    // Get all wallet currencies from database
-    // Note: WalletCurrency model doesn't have isActive field, so we get all
+    if (isTatumEnabled()) {
+      return this.initializeUserCryptoWalletsWithTatum(userIdNum);
+    }
+    return this.initializeUserCryptoWalletsLocal(userIdNum);
+  }
+
+  private async initializeUserCryptoWalletsWithTatum(userId: number) {
+    const virtualAccounts = await this.virtualAccountService.createVirtualAccountsForUser(userId);
+    console.log(
+      `Creating deposit addresses (Tatum) for ${virtualAccounts.length} virtual accounts, user ${userId}...`
+    );
+
+    let assigned = 0;
+    for (const va of virtualAccounts) {
+      try {
+        const existing = await prisma.depositAddress.findFirst({
+          where: { virtualAccountId: va.id },
+        });
+        if (!existing) {
+          await this.depositAddressService.generateAndAssignToVirtualAccount(va.id);
+        }
+        assigned++;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(
+          `Failed deposit address for ${va.currency} on ${va.blockchain}:`,
+          message
+        );
+      }
+    }
+
+    console.log(
+      `✅ Tatum crypto init: ${assigned}/${virtualAccounts.length} virtual accounts for user ${userId}`
+    );
+    return virtualAccounts;
+  }
+
+  private async initializeUserCryptoWalletsLocal(userId: number) {
     const walletCurrencies = await prisma.walletCurrency.findMany({
-      orderBy: [
-        { blockchain: 'asc' },
-        { currency: 'asc' },
-      ],
+      orderBy: [{ blockchain: 'asc' }, { currency: 'asc' }],
     });
 
     if (walletCurrencies.length === 0) {
-      console.log(`No active wallet currencies found in database for user ${userIdNum}`);
+      console.log(`No wallet currencies in database for user ${userId}`);
       return [];
     }
 
-    console.log(`Creating ${walletCurrencies.length} crypto virtual accounts for user ${userIdNum}...`);
+    console.log(
+      `Creating ${walletCurrencies.length} crypto virtual accounts (local) for user ${userId}...`
+    );
 
     const createdVirtualAccounts = [];
 
-    // Create virtual accounts for each wallet currency
     for (const wc of walletCurrencies) {
       try {
-        // Check if virtual account already exists
         const existing = await prisma.virtualAccount.findFirst({
           where: {
-            userId: userIdNum,
+            userId,
             blockchain: wc.blockchain.toLowerCase(),
             currency: wc.currency,
           },
@@ -191,16 +216,15 @@ export class CryptoService {
           continue;
         }
 
-        // Generate unique account ID
-        const accountId = `va_${userIdNum}_${wc.blockchain}_${wc.currency}_${Date.now()}`;
+        const accountId = `va_${userId}_${wc.blockchain}_${wc.currency}_${Date.now()}`;
+        const userWallet = await this.walletGenerator.getOrCreateUserWallet(
+          String(userId),
+          wc.blockchain
+        );
 
-        // Get or create user wallet for this blockchain
-        const userWallet = await this.walletGenerator.getOrCreateUserWallet(String(userIdNum), wc.blockchain);
-
-        // Create virtual account
         const virtualAccount = await prisma.virtualAccount.create({
           data: {
-            userId: userIdNum,
+            userId,
             blockchain: wc.blockchain.toLowerCase(),
             currency: wc.currency,
             accountId,
@@ -214,7 +238,6 @@ export class CryptoService {
           },
         });
 
-        // Generate deposit address
         try {
           await this.walletGenerator.generateDepositAddress(
             virtualAccount.id.toString(),
@@ -223,25 +246,27 @@ export class CryptoService {
             wc.currency
           );
         } catch (error) {
-          console.error(`Failed to generate deposit address for ${wc.currency}:`, error);
-          // Continue with other currencies
+          console.error(`Failed local deposit address for ${wc.currency}:`, error);
         }
 
         createdVirtualAccounts.push(virtualAccount);
-        console.log(`✅ Created virtual account for ${wc.currency} on ${wc.blockchain} for user ${userIdNum}`);
-      } catch (error: any) {
-        console.error(`❌ Failed to create virtual account for ${wc.currency} on ${wc.blockchain}:`, error.message || error);
-        // Continue with other currencies
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(
+          `❌ Failed virtual account for ${wc.currency} on ${wc.blockchain}:`,
+          message
+        );
       }
     }
 
-    console.log(`✅ Completed crypto wallet initialization: ${createdVirtualAccounts.length}/${walletCurrencies.length} virtual accounts created for user ${userIdNum}`);
+    console.log(
+      `✅ Local crypto init: ${createdVirtualAccounts.length}/${walletCurrencies.length} for user ${userId}`
+    );
     return createdVirtualAccounts;
   }
 
   /**
    * Get all USDT tokens across different blockchains
-   * Returns all USDT variants (Ethereum, TRON, BSC, Solana, Polygon, etc.)
    */
   async getUSDTTokens() {
     const usdtTokens = await prisma.walletCurrency.findMany({
@@ -253,13 +278,10 @@ export class CryptoService {
         ],
         isToken: true,
       },
-      orderBy: [
-        { blockchain: 'asc' },
-        { currency: 'asc' },
-      ],
+      orderBy: [{ blockchain: 'asc' }, { currency: 'asc' }],
     });
 
-    return usdtTokens.map((token: any) => ({
+    return usdtTokens.map((token) => ({
       id: token.id,
       blockchain: token.blockchain,
       blockchainName: token.blockchainName || token.blockchain,
@@ -272,14 +294,10 @@ export class CryptoService {
       isToken: token.isToken,
       price: token.price?.toString() || null,
       nairaPrice: token.nairaPrice?.toString() || null,
-      // Display name for UI
       displayName: this.getUSDTDisplayName(token.blockchain, token.currency),
     }));
   }
 
-  /**
-   * Get all tokens for a given symbol (e.g., USDT, USDC)
-   */
   async getTokensBySymbol(symbol: string) {
     const tokens = await prisma.walletCurrency.findMany({
       where: {
@@ -290,13 +308,10 @@ export class CryptoService {
         ],
         isToken: true,
       },
-      orderBy: [
-        { blockchain: 'asc' },
-        { currency: 'asc' },
-      ],
+      orderBy: [{ blockchain: 'asc' }, { currency: 'asc' }],
     });
 
-    return tokens.map((token: any) => ({
+    return tokens.map((token) => ({
       id: token.id,
       blockchain: token.blockchain,
       blockchainName: token.blockchainName || token.blockchain,
@@ -309,15 +324,16 @@ export class CryptoService {
       isToken: token.isToken,
       price: token.price?.toString() || null,
       nairaPrice: token.nairaPrice?.toString() || null,
-      displayName: this.getTokenDisplayName(token.blockchain, token.currency, token.symbol || symbol.toUpperCase()),
+      displayName: this.getTokenDisplayName(
+        token.blockchain,
+        token.currency,
+        token.symbol || symbol.toUpperCase()
+      ),
     }));
   }
 
-  /**
-   * Get display name for USDT token based on blockchain
-   */
   private getUSDTDisplayName(blockchain: string, currency: string): string {
-    const blockchainNames: { [key: string]: string } = {
+    const blockchainNames: Record<string, string> = {
       ethereum: 'Ethereum',
       tron: 'TRON',
       bsc: 'Binance Smart Chain',
@@ -329,20 +345,14 @@ export class CryptoService {
     };
 
     const blockchainName = blockchainNames[blockchain.toLowerCase()] || blockchain;
-    
     if (currency === 'USDT') {
       return `USDT (${blockchainName})`;
     }
-    
-    // Handle USDT_TRON, USDT_BSC, etc.
     return `USDT (${blockchainName})`;
   }
 
-  /**
-   * Get display name for any token based on blockchain
-   */
   private getTokenDisplayName(blockchain: string, currency: string, symbol: string): string {
-    const blockchainNames: { [key: string]: string } = {
+    const blockchainNames: Record<string, string> = {
       ethereum: 'Ethereum',
       tron: 'TRON',
       bsc: 'Binance Smart Chain',
@@ -354,45 +364,37 @@ export class CryptoService {
     };
 
     const blockchainName = blockchainNames[blockchain.toLowerCase()] || blockchain;
-    
     if (currency === symbol) {
       return `${symbol} (${blockchainName})`;
     }
-    
     return `${symbol} (${blockchainName})`;
   }
 
-  /**
-   * Get currency icon path
-   * Checks database icon field first, then falls back to uploads/wallet_symbols folder
-   */
-  private getCurrencyIcon(icon: string | null | undefined, symbol: string, currency: string): string | null {
-    // If icon is set in database, use it
+  private getCurrencyIcon(
+    icon: string | null | undefined,
+    symbol: string,
+    currency: string
+  ): string | null {
     if (icon) {
       return `/uploads/wallet_symbols/${icon}`;
     }
 
-    // Map common currency symbols to image filenames
-    const iconMap: { [key: string]: string } = {
-      'BTC': 'btc.png',
-      'ETH': 'ETH.png',
-      'USDT': 'TUSDT.png',
-      'TRX': 'trx.png',
-      'SOL': 'sol.png',
-      'MATIC': 'polygon-matic-logo.png',
-      'BNB': 'BSC.png',
-      'DOGE': 'dogecoin-doge-logo.png',
-      'XRP': 'xrp-xrp-logo.png',
+    const iconMap: Record<string, string> = {
+      BTC: 'btc.png',
+      ETH: 'ETH.png',
+      USDT: 'TUSDT.png',
+      TRX: 'trx.png',
+      SOL: 'sol.png',
+      MATIC: 'polygon-matic-logo.png',
+      BNB: 'BSC.png',
+      DOGE: 'dogecoin-doge-logo.png',
+      XRP: 'xrp-xrp-logo.png',
     };
 
-    // Try symbol first, then currency
     const iconFile = iconMap[symbol.toUpperCase()] || iconMap[currency.toUpperCase()];
-    
     if (iconFile) {
       return `/uploads/wallet_symbols/${iconFile}`;
     }
-
     return null;
   }
 }
-

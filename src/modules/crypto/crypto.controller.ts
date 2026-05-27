@@ -62,7 +62,7 @@ export class CryptoController {
 
       return res.json({
         success: true,
-        data: virtualAccounts.map((va: { id: number; accountId: string; blockchain: string; currency: string; accountBalance: any; availableBalance: any; active: boolean; frozen: boolean; depositAddresses: Array<{ address: string; currency: string; blockchain: string }> }) => ({
+        data: virtualAccounts.map((va) => ({
           id: va.id,
           accountId: va.accountId,
           blockchain: va.blockchain,
@@ -71,10 +71,10 @@ export class CryptoController {
           availableBalance: va.availableBalance,
           active: va.active,
           frozen: va.frozen,
-          depositAddresses: va.depositAddresses.map((da: { address: string; currency: string; blockchain: string }) => ({
+          depositAddresses: va.depositAddresses.map((da) => ({
             address: da.address,
-            currency: da.currency,
-            blockchain: da.blockchain,
+            currency: da.currency ?? va.currency,
+            blockchain: da.blockchain ?? va.blockchain,
           })),
         })),
       });
