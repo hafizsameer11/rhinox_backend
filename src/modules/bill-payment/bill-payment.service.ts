@@ -10,6 +10,7 @@ import {
   isSupportedPalmPayScene,
   mapPalmPayStatus,
 } from '../../services/palmpay/palmpay.utils.js';
+import { notifyBillPayment } from '../../core/utils/notification.events.js';
 
 /**
  * Bill Payment Service
@@ -565,6 +566,34 @@ export class BillPaymentService {
         },
       },
     });
+
+    if (mappedStatus === 'completed') {
+      notifyBillPayment(userIdNum, {
+        amount: amount.toString(),
+        currency: transaction.currency,
+        reference: updatedTransaction.reference,
+        status: 'success',
+        categoryName: metadata?.categoryName,
+      });
+    } else if (mappedStatus === 'failed') {
+      notifyBillPayment(userIdNum, {
+        amount: amount.toString(),
+        currency: transaction.currency,
+        reference: updatedTransaction.reference,
+        status: 'error',
+        categoryName: metadata?.categoryName,
+        message: 'Your bill payment could not be completed.',
+      });
+    } else {
+      notifyBillPayment(userIdNum, {
+        amount: amount.toString(),
+        currency: transaction.currency,
+        reference: updatedTransaction.reference,
+        status: 'info',
+        categoryName: metadata?.categoryName,
+        message: 'Your bill payment is being processed.',
+      });
+    }
 
     return {
       id: updatedTransaction.id,

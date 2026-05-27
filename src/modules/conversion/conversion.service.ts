@@ -5,6 +5,7 @@ import prisma from '../../core/config/database.js';
 import { WalletService } from '../wallet/wallet.service.js';
 import { ExchangeService } from '../exchange/exchange.service.js';
 import { sendDepositSuccessEmail } from '../../core/utils/transaction-email.service.js';
+import { notifyConversion } from '../../core/utils/notification.events.js';
 
 /**
  * Conversion Service
@@ -374,6 +375,14 @@ export class ConversionService {
         date: now.toLocaleString(),
       });
     }
+
+    notifyConversion(parsedUserId, {
+      fromAmount: updatedDebitTx.amount.toString(),
+      fromCurrency: updatedDebitTx.currency,
+      toAmount: creditedAmount.toString(),
+      toCurrency: updatedCreditTx.currency,
+      reference: conversionReference,
+    });
 
     return {
       conversionReference,

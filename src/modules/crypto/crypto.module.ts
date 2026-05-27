@@ -31,6 +31,8 @@ export class CryptoModule implements IModule {
   private setupRoutes(): void {
     // Protected routes (require authentication)
     this.router.get('/virtual-accounts', this.controller.getVirtualAccounts.bind(this.controller));
+    this.router.get('/unified-balances', this.controller.getUnifiedBalances.bind(this.controller));
+    this.router.get('/unified-balances/:symbol', this.controller.getUnifiedBalanceBySymbol.bind(this.controller));
     this.router.get('/deposit-address/:currency/:blockchain', this.controller.getDepositAddress.bind(this.controller));
   }
 

@@ -1,5 +1,6 @@
 import { Decimal, type Decimal as DecimalType } from 'decimal.js';
 import prisma from '../../core/config/database.js';
+import { getBaseSymbol } from '../../services/crypto/unified-stablecoin.service.js';
 
 /**
  * Transaction History Service
@@ -75,6 +76,67 @@ export class TransactionHistoryService {
         } : null,
       } : null,
     };
+  }
+
+  /**
+   * Classify P2P ledger row direction for the viewing user.
+   */
+  private resolveP2PDirection(
+    p2pStep: string | undefined,
+    userId: number,
+    order: any | null,
+    walletType: string
+  ): 'incoming' | 'outgoing' | 'neutral' {
+    const step = (p2pStep || 'unknown').toLowerCase();
+
+    const neutralSteps = new Set([
+      'order_created',
+      'order_accepted',
+      'payment_confirmed',
+      'unknown',
+    ]);
+    if (neutralSteps.has(step)) {
+      return 'neutral';
+    }
+
+    let buyerId: string | null = null;
+    let sellerId: string | null = null;
+    if (order) {
+      const roles = this.resolveP2PRoles(order.type, order.vendorId, order.userId);
+      buyerId = roles.buyerId;
+      sellerId = roles.sellerId;
+    }
+
+    const isBuyer = buyerId !== null && Number(buyerId) === userId;
+    const isSeller = sellerId !== null && Number(sellerId) === userId;
+
+    if (step === 'payment_completed_rhinoxpay') {
+      return isBuyer ? 'outgoing' : isSeller ? 'incoming' : 'outgoing';
+    }
+    if (step === 'payment_received_rhinoxpay' || step === 'payment_received') {
+      return isSeller ? 'incoming' : isBuyer ? 'outgoing' : 'incoming';
+    }
+    if (step === 'fiat_received' || step === 'fiat_credited') {
+      return 'incoming';
+    }
+    if (step === 'fiat_sent' || step === 'fiat_debited') {
+      return 'outgoing';
+    }
+    if (step === 'crypto_credited') {
+      return walletType === 'crypto' ? 'incoming' : isBuyer ? 'incoming' : 'neutral';
+    }
+    if (step === 'crypto_debited' || step === 'crypto_frozen') {
+      return walletType === 'crypto' ? 'outgoing' : isSeller ? 'outgoing' : 'neutral';
+    }
+
+    return 'neutral';
+  }
+
+  private formatCurrencySymbol(currency: string): string {
+    const upper = (currency || '').toUpperCase();
+    if (upper === 'NGN') return '₦';
+    if (upper === 'USD' || upper.startsWith('USDT') || upper.startsWith('USDC')) return '$';
+    return upper;
   }
 
   /**
@@ -858,37 +920,41 @@ export class TransactionHistoryService {
     // Get date range
     const { start, end } = this.getDateRange(filters.period || 'M', filters.startDate, filters.endDate);
 
-    // Get user fiat wallets
+    // Fiat + crypto wallets (P2P fiat legs and crypto release legs)
     const wallets = await prisma.wallet.findMany({
       where: {
         userId: userIdNum,
         isActive: true,
-        type: 'fiat',
+        type: { in: ['fiat', 'crypto'] },
       },
     });
 
     if (wallets.length === 0) {
       return {
-        summary: { total: '0', count: 0 },
+        summary: { total: '0', count: 0, incoming: '0', outgoing: '0' },
         transactions: [],
       };
     }
 
+    const walletTypeById = new Map(wallets.map((w) => [w.id, w.type]));
     let walletIds = wallets.map((w: { id: number }) => w.id);
 
-    // Filter by currency if provided
     if (filters.currency) {
-      const filteredWallets = wallets.filter((w: { currency: string }) => w.currency === filters.currency);
+      const filterUpper = filters.currency.toUpperCase();
+      const filteredWallets = wallets.filter((w: { currency: string }) => {
+        const c = w.currency.toUpperCase();
+        return c === filterUpper || getBaseSymbol(c) === filterUpper;
+      });
       walletIds = filteredWallets.map((w: { id: number }) => w.id);
       if (walletIds.length === 0) {
         return {
-          summary: { total: '0', count: 0 },
+          summary: { total: '0', count: 0, incoming: '0', outgoing: '0' },
           transactions: [],
         };
       }
     }
 
-    // Build where clause - P2P transactions on fiat wallets
+    // Build where clause - P2P transactions on fiat and crypto wallets
     const where: any = {
       walletId: { in: walletIds },
       type: 'p2p',
@@ -965,32 +1031,49 @@ export class TransactionHistoryService {
       : [];
     const p2pOrderMap = new Map(p2pOrders.map((order: any) => [order.id, order]));
 
-    // Calculate summary
     let totalAmount = new Decimal(0);
-    transactions.forEach((tx: any) => {
-      totalAmount = totalAmount.plus(new Decimal(tx.amount).abs());
-    });
+    let incomingTotal = new Decimal(0);
+    let outgoingTotal = new Decimal(0);
 
-    // Normalize transactions
     const normalizedTransactions = transactions.map((tx: any) => {
       const metadata = tx.metadata as any;
       const amount = new Decimal(tx.amount);
-      const isIncoming = metadata?.p2pStep === 'fiat_received' || metadata?.p2pStep === 'fiat_credited';
-      const isOutgoing = metadata?.p2pStep === 'fiat_sent' || metadata?.p2pStep === 'fiat_debited';
       const order = metadata?.orderId ? p2pOrderMap.get(Number(metadata.orderId)) : null;
       const p2pOrder = this.summarizeP2POrder(order, userIdNum);
+      const walletType = walletTypeById.get(tx.walletId) || 'fiat';
+      const direction = this.resolveP2PDirection(
+        metadata?.p2pStep,
+        userIdNum,
+        order,
+        walletType
+      );
+      const absAmount = amount.abs();
+
+      totalAmount = totalAmount.plus(absAmount);
+      if (direction === 'incoming') {
+        incomingTotal = incomingTotal.plus(absAmount);
+      } else if (direction === 'outgoing') {
+        outgoingTotal = outgoingTotal.plus(absAmount);
+      }
+
+      const baseCrypto = p2pOrder?.cryptoCurrency
+        ? getBaseSymbol(p2pOrder.cryptoCurrency)
+        : getBaseSymbol(tx.currency);
 
       return {
         id: tx.id,
         type: tx.type,
         normalizedType: 'P2P Transactions',
         status: tx.status,
-        amount: amount.abs().toString(),
+        amount: absAmount.toString(),
         currency: tx.currency,
+        currencySymbol: this.formatCurrencySymbol(tx.currency),
+        baseSymbol: getBaseSymbol(tx.currency),
         fee: new Decimal(tx.fee).toString(),
         reference: tx.reference,
         description: tx.description || 'P2P Transaction',
-        direction: isIncoming ? 'incoming' : isOutgoing ? 'outgoing' : 'unknown',
+        direction,
+        walletType,
         metadata: tx.metadata,
         orderId: metadata?.orderId || null,
         adId: metadata?.adId || null,
@@ -1002,7 +1085,7 @@ export class TransactionHistoryService {
         chatEmail: p2pOrder?.peer?.email,
         price: p2pOrder?.price,
         totalQty: p2pOrder?.cryptoAmount && p2pOrder?.cryptoCurrency
-          ? `${p2pOrder.cryptoAmount} ${p2pOrder.cryptoCurrency}`
+          ? `${p2pOrder.cryptoAmount} ${baseCrypto}`
           : undefined,
         transferAmount: p2pOrder?.fiatAmount && p2pOrder?.fiatCurrency
           ? `${p2pOrder.fiatCurrency}${p2pOrder.fiatAmount}`
@@ -1019,6 +1102,8 @@ export class TransactionHistoryService {
       summary: {
         total: totalAmount.toString(),
         count: transactions.length,
+        incoming: incomingTotal.toString(),
+        outgoing: outgoingTotal.toString(),
       },
       transactions: normalizedTransactions,
     };
@@ -1138,11 +1223,9 @@ export class TransactionHistoryService {
       details.orderId = metadata?.orderId || null;
       details.adId = metadata?.adId || null;
       details.p2pStep = metadata?.p2pStep || null;
-      details.direction = metadata?.p2pStep === 'fiat_received' || metadata?.p2pStep === 'crypto_credited' 
-        ? 'incoming' 
-        : 'outgoing';
+      let order: any = null;
       if (details.orderId) {
-        const order = await prisma.p2POrder.findUnique({
+        order = await prisma.p2POrder.findUnique({
           where: { id: Number(details.orderId) },
           include: {
             vendor: {
@@ -1189,6 +1272,12 @@ export class TransactionHistoryService {
           p2pOrder?.paymentMethod?.type ||
           details.paymentMethod;
       }
+      details.direction = this.resolveP2PDirection(
+        metadata?.p2pStep,
+        userIdNum,
+        order,
+        transaction.wallet.type
+      );
     } else if (transaction.type === 'bill_payment') {
       details.category = {
         code: metadata?.categoryCode || transaction.channel,

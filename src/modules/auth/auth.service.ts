@@ -5,6 +5,14 @@ import { generateOTP, sendOTPEmail } from '../../core/utils/email.service.js';
 import { CryptoService } from '../crypto/crypto.service.js';
 import { WalletService } from '../wallet/wallet.service.js';
 import { parseOptionalId } from '../../core/utils/idParser.js';
+import {
+  notifyEmailVerified,
+  notifyLogin,
+  notifyPasswordReset,
+  notifyPinChanged,
+  notifyPinSetup,
+  notifyRegistration,
+} from '../../core/utils/notification.events.js';
 
 /**
  * Auth Service
@@ -102,6 +110,8 @@ export class AuthService {
       },
     });
 
+    notifyRegistration(user.id);
+
     // Return user with tokens (email verification still required but user can use app)
     return {
       user: {
@@ -161,6 +171,8 @@ export class AuthService {
     await prisma.session.create({
       data: sessionData,
     });
+
+    notifyLogin(user.id, ipAddress ?? null);
 
     return {
       user: {
@@ -272,6 +284,8 @@ export class AuthService {
     this.initializeFiatWallets(user.id).catch(error => {
       console.error('Failed to initialize fiat wallets:', error);
     });
+
+    notifyEmailVerified(user.id);
 
     // Generate tokens after verification
     const tokens = this.generateTokens(user.id.toString());
@@ -389,6 +403,8 @@ export class AuthService {
       data: { pinHash },
     });
 
+    notifyPinSetup(parsedUserId, false);
+
     return {
       message: 'PIN setup successfully',
     };
@@ -456,6 +472,8 @@ export class AuthService {
       data: { pinHash },
     });
 
+    notifyPinSetup(parsedUserId, Boolean(user.pinHash));
+
     return {
       message: user.pinHash ? 'PIN updated successfully' : 'PIN setup successfully',
       hasPin: true,
@@ -502,6 +520,8 @@ export class AuthService {
       where: { id: parsedUserId },
       data: { pinHash },
     });
+
+    notifyPinChanged(parsedUserId);
 
     return {
       message: 'PIN changed successfully',
@@ -776,6 +796,8 @@ export class AuthService {
     await prisma.session.deleteMany({
       where: { userId: user.id },
     });
+
+    notifyPasswordReset(user.id);
 
     return {
       message: 'Password reset successfully. Please login with your new password.',

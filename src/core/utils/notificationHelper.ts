@@ -2,9 +2,13 @@ import { NotificationService } from '../../modules/notification/notification.ser
 
 /**
  * Notification Helper
- * Utility functions to create notifications for various events
+ * Utility functions to create notifications for various events.
+ * Prefer notification.events.ts for fire-and-forget app notifications.
  */
 const notificationService = new NotificationService();
+
+/** @deprecated Use notifyUser from notification.events.ts */
+export { notifyUser, NotificationAction } from './notification.events.js';
 
 /**
  * Create a transaction notification

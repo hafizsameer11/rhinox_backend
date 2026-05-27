@@ -3,6 +3,12 @@ import prisma from '../../core/config/database.js';
 import { Prisma } from '@prisma/client';
 import { generateOTP } from '../../core/utils/email.service.js';
 import { sendOTPEmail } from '../../core/utils/email.service.js';
+import {
+  UnifiedStablecoinService,
+  getBaseSymbol,
+  isUnifiedStable,
+} from '../../services/crypto/unified-stablecoin.service.js';
+import { NotificationAction, notifyP2P } from '../../core/utils/notification.events.js';
 
 /**
  * P2P Order Service
@@ -15,6 +21,110 @@ import { sendOTPEmail } from '../../core/utils/email.service.js';
  * - ad.type = 'SELL' → Vendor is SELLER, User is BUYER
  */
 export class P2POrderService {
+  private readonly unifiedStablecoinService = new UnifiedStablecoinService();
+
+  /**
+   * Seller available balance for P2P (unified USDT/USDC pool or single VA).
+   */
+  private async getSellerAvailableForP2P(
+    sellerId: number,
+    cryptoCurrency: string
+  ): Promise<{ available: Decimal; virtualAccountId?: number }> {
+    if (isUnifiedStable(cryptoCurrency)) {
+      const unified = await this.unifiedStablecoinService.getUnifiedBalance(
+        sellerId,
+        getBaseSymbol(cryptoCurrency)
+      );
+      return { available: new Decimal(unified.totalAvailable) };
+    }
+
+    const va = await prisma.virtualAccount.findFirst({
+      where: { userId: sellerId, currency: cryptoCurrency },
+    });
+    if (!va) {
+      return { available: new Decimal(0) };
+    }
+    return {
+      available: new Decimal(va.availableBalance || '0'),
+      virtualAccountId: va.id,
+    };
+  }
+
+  private parseOrderMetadata(metadata: unknown): Record<string, unknown> {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return {};
+    }
+    return metadata as Record<string, unknown>;
+  }
+
+  /** VA that holds frozen crypto (set on accept; required for release/cancel). */
+  private async resolveSellerVirtualAccountForOrder(
+    sellerId: number,
+    order: { cryptoCurrency: string; metadata?: unknown }
+  ) {
+    const meta = this.parseOrderMetadata(order.metadata);
+    const vaId = meta.sellerVirtualAccountId;
+    if (typeof vaId === 'number') {
+      const va = await prisma.virtualAccount.findUnique({ where: { id: vaId } });
+      if (va && va.userId === sellerId) {
+        return va;
+      }
+    }
+
+    if (isUnifiedStable(order.cryptoCurrency)) {
+      const blockchain =
+        typeof meta.sellerBlockchain === 'string' ? meta.sellerBlockchain : undefined;
+      const resolved = await this.unifiedStablecoinService.resolveVirtualAccountForCurrency(
+        sellerId,
+        order.cryptoCurrency,
+        blockchain
+      );
+      if (resolved) {
+        return resolved;
+      }
+    }
+
+    return prisma.virtualAccount.findFirst({
+      where: { userId: sellerId, currency: order.cryptoCurrency },
+    });
+  }
+
+  /** Credit buyer on the same network/ledger row as the seller debit when possible. */
+  private async resolveBuyerVirtualAccountForOrder(
+    buyerId: number,
+    order: { cryptoCurrency: string; metadata?: unknown }
+  ) {
+    const meta = this.parseOrderMetadata(order.metadata);
+    const ledgerCurrency =
+      typeof meta.sellerLedgerCurrency === 'string'
+        ? meta.sellerLedgerCurrency
+        : order.cryptoCurrency;
+    const blockchain =
+      typeof meta.sellerBlockchain === 'string' ? meta.sellerBlockchain : undefined;
+
+    const sameLedger = await prisma.virtualAccount.findFirst({
+      where: { userId: buyerId, currency: ledgerCurrency },
+    });
+    if (sameLedger) {
+      return sameLedger;
+    }
+
+    if (isUnifiedStable(order.cryptoCurrency)) {
+      const resolved = await this.unifiedStablecoinService.resolveVirtualAccountForCurrency(
+        buyerId,
+        order.cryptoCurrency,
+        blockchain
+      );
+      if (resolved) {
+        return resolved;
+      }
+    }
+
+    return prisma.virtualAccount.findFirst({
+      where: { userId: buyerId, currency: order.cryptoCurrency },
+    });
+  }
+
   /**
    * Generate unique transaction reference
    */
@@ -171,7 +281,16 @@ export class P2POrderService {
     }
 
     if (filters.cryptoCurrency) {
-      where.cryptoCurrency = filters.cryptoCurrency.toUpperCase();
+      const upper = filters.cryptoCurrency.toUpperCase();
+      const base = getBaseSymbol(upper);
+      if (isUnifiedStable(base)) {
+        where.OR = [
+          { cryptoCurrency: base },
+          { cryptoCurrency: { startsWith: `${base}_` } },
+        ];
+      } else {
+        where.cryptoCurrency = upper;
+      }
     }
 
     if (filters.fiatCurrency) {
@@ -742,31 +861,51 @@ export class P2POrderService {
     // For SELL ads: Vendor is SELLER, must have crypto
     // For BUY ads: User is SELLER, must have crypto
     const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
-    const sellerVirtualAccount = await prisma.virtualAccount.findFirst({
-      where: {
-        userId: parsedSellerId,
-        currency: ad.cryptoCurrency,
-      },
-    });
+    const sellerAvail = await this.getSellerAvailableForP2P(parsedSellerId, ad.cryptoCurrency);
+
+    if (sellerAvail.available.lt(cryptoAmount)) {
+      const base = getBaseSymbol(ad.cryptoCurrency);
+      if (isUnifiedStable(ad.cryptoCurrency)) {
+        throw new Error(
+          `Insufficient ${base} balance. Available: ${sellerAvail.available.toString()} ${base} across all networks`
+        );
+      }
+      throw new Error('Insufficient crypto balance available');
+    }
+
+    let sellerVirtualAccount = sellerAvail.virtualAccountId
+      ? await prisma.virtualAccount.findUnique({ where: { id: sellerAvail.virtualAccountId } })
+      : await prisma.virtualAccount.findFirst({
+          where: { userId: parsedSellerId, currency: ad.cryptoCurrency },
+        });
+
+    if (!sellerVirtualAccount && isUnifiedStable(ad.cryptoCurrency)) {
+      sellerVirtualAccount = await this.unifiedStablecoinService.resolveVirtualAccountForCurrency(
+        parsedSellerId,
+        ad.cryptoCurrency
+      );
+    }
 
     if (!sellerVirtualAccount) {
       throw new Error('Seller crypto wallet not found');
     }
 
-    const sellerBalance = new Decimal(sellerVirtualAccount.accountBalance || '0');
-    const sellerAvailable = new Decimal(sellerVirtualAccount.availableBalance || '0');
-
-    if (sellerAvailable.lt(cryptoAmount)) {
-      throw new Error('Insufficient crypto balance available');
-    }
+    const sellerBalanceForLimits = isUnifiedStable(ad.cryptoCurrency)
+      ? sellerAvail.available
+      : new Decimal(sellerVirtualAccount.accountBalance || '0');
 
     // Validate vendor has sufficient balance for the order
     if (ad.type === 'sell') {
       // Vendor is SELLER, must have crypto balance
       // Validate maxOrder doesn't exceed their crypto balance (ad limit check)
       const maxOrderCrypto = maxOrder.div(price);
-      if (sellerBalance.lt(maxOrderCrypto)) {
-        throw new Error(`Maximum order amount exceeds vendor's available crypto balance`);
+      if (sellerBalanceForLimits.lt(maxOrderCrypto)) {
+        const base = getBaseSymbol(ad.cryptoCurrency);
+        throw new Error(
+          isUnifiedStable(ad.cryptoCurrency)
+            ? `Maximum order amount exceeds your available ${base} balance across networks`
+            : `Maximum order amount exceeds vendor's available crypto balance`
+        );
       }
       // Actual order amount is already validated above (sellerAvailable.lt(cryptoAmount))
     } else {
@@ -805,11 +944,8 @@ export class P2POrderService {
       }
     }
 
-    // Determine initial status
-    let initialStatus = 'pending';
-    if (ad.autoAccept) {
-      initialStatus = 'awaiting_payment';
-    }
+    // Always start pending; auto-accept calls acceptOrder (freeze + awaiting_payment)
+    const initialStatus = 'pending';
 
     // Create order
     // Store vendorId (ad owner) and userId (order creator)
@@ -901,6 +1037,15 @@ export class P2POrderService {
         receiverId: ad.userId,
         message: `Order created for ${cryptoAmount.toString()} ${ad.cryptoCurrency} at ${price.toString()} ${ad.fiatCurrency} per unit.`,
       },
+    });
+
+    notifyP2P(parsedSellerId, {
+      action: NotificationAction.P2P_ORDER_CREATED,
+      title: 'New P2P order',
+      message: `A buyer placed an order for ${cryptoAmount.toString()} ${ad.cryptoCurrency}.`,
+      amount: cryptoAmount.toString(),
+      currency: ad.cryptoCurrency,
+      orderId: order.id,
     });
 
     // Auto-accept if enabled
@@ -1003,22 +1148,55 @@ export class P2POrderService {
 
     // Get seller's VirtualAccount
     const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
-    const sellerVirtualAccount = await prisma.virtualAccount.findFirst({
-      where: {
-        userId: parsedSellerId,
-        currency: order.cryptoCurrency,
-      },
+    const cryptoAmount = new Decimal(order.cryptoAmount);
+
+    let sellerVirtualAccountId: number;
+
+    if (isUnifiedStable(order.cryptoCurrency)) {
+      const blockchain =
+        (await this.unifiedStablecoinService.getBlockchainForCurrency(order.cryptoCurrency)) ??
+        undefined;
+      sellerVirtualAccountId = await this.unifiedStablecoinService.allocateUnifiedBalance(
+        parsedSellerId,
+        getBaseSymbol(order.cryptoCurrency),
+        order.cryptoCurrency,
+        blockchain,
+        cryptoAmount
+      );
+    } else {
+      const sellerVirtualAccount = await prisma.virtualAccount.findFirst({
+        where: {
+          userId: parsedSellerId,
+          currency: order.cryptoCurrency,
+        },
+      });
+
+      if (!sellerVirtualAccount) {
+        console.log('[P2P Accept Order] Seller VirtualAccount not found:', {
+          sellerId: parsedSellerId,
+          cryptoCurrency: order.cryptoCurrency,
+        });
+        throw new Error(`Seller crypto wallet not found for ${order.cryptoCurrency}`);
+      }
+
+      const sellerAvailable = new Decimal(sellerVirtualAccount.availableBalance || '0');
+      if (sellerAvailable.lt(cryptoAmount)) {
+        throw new Error(
+          `Insufficient crypto balance available. Seller needs ${cryptoAmount.toString()} ${order.cryptoCurrency}, ` +
+            `but has ${sellerAvailable.toString()} ${order.cryptoCurrency} available.`
+        );
+      }
+      sellerVirtualAccountId = sellerVirtualAccount.id;
+    }
+
+    const sellerVirtualAccount = await prisma.virtualAccount.findUnique({
+      where: { id: sellerVirtualAccountId },
     });
 
     if (!sellerVirtualAccount) {
-      console.log('[P2P Accept Order] Seller VirtualAccount not found:', {
-        sellerId: parsedSellerId,
-        cryptoCurrency: order.cryptoCurrency,
-      });
       throw new Error(`Seller crypto wallet not found for ${order.cryptoCurrency}`);
     }
 
-    const cryptoAmount = new Decimal(order.cryptoAmount);
     const sellerBalance = new Decimal(sellerVirtualAccount.accountBalance || '0');
     const sellerAvailable = new Decimal(sellerVirtualAccount.availableBalance || '0');
 
@@ -1031,27 +1209,27 @@ export class P2POrderService {
       hasEnough: sellerAvailable.gte(cryptoAmount),
     });
 
-    if (sellerAvailable.lt(cryptoAmount)) {
-      throw new Error(
-        `Insufficient crypto balance available. Seller needs ${cryptoAmount.toString()} ${order.cryptoCurrency}, ` +
-        `but has ${sellerAvailable.toString()} ${order.cryptoCurrency} available.`
-      );
-    }
-
-    // Freeze crypto: Move from availableBalance to locked (via availableBalance reduction)
+    // Freeze crypto on target VA (funds already allocated for unified stables)
     const newAvailableBalance = sellerAvailable.minus(cryptoAmount);
 
     await prisma.virtualAccount.update({
-      where: { id: sellerVirtualAccount.id },
+      where: { id: sellerVirtualAccountId },
       data: {
         availableBalance: newAvailableBalance.toString(),
-        // Note: VirtualAccount doesn't have lockedBalance, we track via availableBalance
       },
     });
 
     // Calculate expiration time
     const processingTimeMinutes = order.ad.processingTime || 30; // Default 30 minutes
     const expiresAt = new Date(Date.now() + processingTimeMinutes * 60 * 1000);
+
+    const existingMeta = this.parseOrderMetadata(order.metadata);
+    const orderMetadata = {
+      ...existingMeta,
+      sellerVirtualAccountId,
+      sellerLedgerCurrency: sellerVirtualAccount.currency,
+      sellerBlockchain: sellerVirtualAccount.blockchain,
+    };
 
     // Update order status
     const updated = await prisma.p2POrder.update({
@@ -1061,6 +1239,7 @@ export class P2POrderService {
         acceptedAt: new Date(),
         processingTimeMinutes,
         expiresAt,
+        metadata: orderMetadata,
       },
     });
 
@@ -1097,6 +1276,17 @@ export class P2POrderService {
         receiverId: order.userId,
         message: 'Order accepted. Please make payment within the specified time.',
       },
+    });
+
+    const notifyBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
+    notifyP2P(notifyBuyerId, {
+      action: NotificationAction.P2P_ORDER_ACCEPTED,
+      title: 'P2P order accepted',
+      message: `Your order was accepted. Pay ${order.fiatAmount} ${order.fiatCurrency} within the time limit.`,
+      amount: order.fiatAmount.toString(),
+      currency: order.fiatCurrency,
+      orderId: order.id,
+      status: 'success',
     });
 
     return {
@@ -1160,6 +1350,73 @@ export class P2POrderService {
       status: updated.status,
       cancelledAt: updated.cancelledAt,
     };
+  }
+
+  /**
+   * Auto-cancel awaiting_payment orders past expiresAt (unfreeze seller crypto).
+   */
+  private async expireOrderIfNeeded(
+    orderId: number
+  ): Promise<{ cancelledAt: Date } | null> {
+    const order = await prisma.p2POrder.findUnique({
+      where: { id: orderId },
+      include: { ad: true },
+    });
+
+    if (!order) {
+      return null;
+    }
+
+    if (order.status !== 'awaiting_payment' || !order.acceptedAt || !order.expiresAt) {
+      return null;
+    }
+
+    if (new Date() <= order.expiresAt) {
+      return null;
+    }
+
+    const { sellerId } = this.resolveRoles(
+      order.type,
+      order.vendorId.toString(),
+      order.userId.toString()
+    );
+    const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
+
+    const sellerVirtualAccount = await this.resolveSellerVirtualAccountForOrder(
+      parsedSellerId,
+      order
+    );
+
+    if (sellerVirtualAccount) {
+      const cryptoAmount = new Decimal(order.cryptoAmount);
+      const sellerAvailable = new Decimal(sellerVirtualAccount.availableBalance || '0');
+      await prisma.virtualAccount.update({
+        where: { id: sellerVirtualAccount.id },
+        data: {
+          availableBalance: sellerAvailable.plus(cryptoAmount).toString(),
+        },
+      });
+    }
+
+    const cancelledAt = new Date();
+    await prisma.p2POrder.update({
+      where: { id: orderId },
+      data: {
+        status: 'cancelled',
+        cancelledAt,
+      },
+    });
+
+    await prisma.p2PChatMessage.create({
+      data: {
+        orderId: order.id,
+        senderId: order.vendorId,
+        receiverId: order.userId,
+        message: 'Order expired — payment window closed.',
+      },
+    }).catch(() => undefined);
+
+    return { cancelledAt };
   }
 
   /**
@@ -1241,6 +1498,12 @@ export class P2POrderService {
     
     if (!isVendor && !isUser) {
       throw new Error('Unauthorized to view this order');
+    }
+
+    const expired = await this.expireOrderIfNeeded(parsedOrderId);
+    if (expired) {
+      order.status = 'cancelled';
+      order.cancelledAt = expired.cancelledAt;
     }
 
     // Resolve roles for display - derive from vendorId and userId
@@ -1347,8 +1610,14 @@ export class P2POrderService {
     }
 
     // Resolve roles
-    const { buyerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.userId.toString());
+    const { buyerId, sellerId: paymentSellerId } = this.resolveRoles(
+      order.type,
+      order.vendorId.toString(),
+      order.userId.toString()
+    );
     const parsedBuyerId = typeof buyerId === 'string' ? parseInt(buyerId, 10) : buyerId;
+    const notifySellerId =
+      typeof paymentSellerId === 'string' ? parseInt(paymentSellerId, 10) : paymentSellerId;
 
     if (parsedBuyerId !== parsedUserId) {
       throw new Error('Only buyer can confirm payment');
@@ -1412,6 +1681,16 @@ export class P2POrderService {
         receiverId: order.vendorId,
         message: 'I have made the payment. Please confirm receipt.',
       },
+    });
+
+    notifyP2P(notifySellerId, {
+      action: NotificationAction.P2P_PAYMENT_CONFIRMED,
+      title: 'Buyer marked payment',
+      message: `The buyer confirmed payment of ${order.fiatAmount} ${order.fiatCurrency}. Verify and release crypto.`,
+      amount: order.fiatAmount.toString(),
+      currency: order.fiatCurrency,
+      orderId: order.id,
+      status: 'info',
     });
 
     return {
@@ -1691,25 +1970,19 @@ export class P2POrderService {
 
     const cryptoAmount = new Decimal(order.cryptoAmount);
 
-    // Get seller's VirtualAccount (crypto source)
-    const sellerVirtualAccount = await prisma.virtualAccount.findFirst({
-      where: {
-        userId: parsedSellerId,
-        currency: order.cryptoCurrency,
-      },
-    });
+    const sellerVirtualAccount = await this.resolveSellerVirtualAccountForOrder(
+      parsedSellerId,
+      order
+    );
 
     if (!sellerVirtualAccount) {
       throw new Error('Seller crypto wallet not found');
     }
 
-    // Get buyer's VirtualAccount (crypto destination)
-    const buyerVirtualAccount = await prisma.virtualAccount.findFirst({
-      where: {
-        userId: parsedBuyerId,
-        currency: order.cryptoCurrency,
-      },
-    });
+    const buyerVirtualAccount = await this.resolveBuyerVirtualAccountForOrder(
+      parsedBuyerId,
+      order
+    );
 
     if (!buyerVirtualAccount) {
       throw new Error('Buyer crypto wallet not found');
@@ -1811,6 +2084,26 @@ export class P2POrderService {
       },
     });
 
+    const completionMessage = `Order #${order.id} completed. ${order.cryptoAmount} ${order.cryptoCurrency} released.`;
+    notifyP2P(parsedBuyerId, {
+      action: NotificationAction.P2P_ORDER_COMPLETED,
+      title: 'P2P trade completed',
+      message: completionMessage,
+      amount: order.cryptoAmount.toString(),
+      currency: order.cryptoCurrency,
+      orderId: order.id,
+      status: 'success',
+    });
+    notifyP2P(parsedSellerId, {
+      action: NotificationAction.P2P_ORDER_COMPLETED,
+      title: 'P2P trade completed',
+      message: completionMessage,
+      amount: order.fiatAmount.toString(),
+      currency: order.fiatCurrency,
+      orderId: order.id,
+      status: 'success',
+    });
+
     return {
       id: updated.id,
       status: updated.status,
@@ -1860,19 +2153,16 @@ export class P2POrderService {
       const { sellerId } = this.resolveRoles(order.type, order.vendorId.toString(), order.userId.toString());
       const parsedSellerId = typeof sellerId === 'string' ? parseInt(sellerId, 10) : sellerId;
 
-      const sellerVirtualAccount = await prisma.virtualAccount.findFirst({
-        where: {
-          userId: parsedSellerId,
-          currency: order.cryptoCurrency,
-        },
-      });
+      const sellerVirtualAccount = await this.resolveSellerVirtualAccountForOrder(
+        parsedSellerId,
+        order
+      );
 
       if (sellerVirtualAccount) {
         const cryptoAmount = new Decimal(order.cryptoAmount);
-        const sellerBalance = new Decimal(sellerVirtualAccount.accountBalance || '0');
         const sellerAvailable = new Decimal(sellerVirtualAccount.availableBalance || '0');
 
-        // Unfreeze: Restore available balance
+        // Unfreeze: Restore available balance on the VA that was debited on accept
         const newAvailableBalance = sellerAvailable.plus(cryptoAmount);
 
         await prisma.virtualAccount.update({
@@ -1893,13 +2183,25 @@ export class P2POrderService {
     });
 
     // Send notification message
+    const otherPartyId =
+      order.userId === parsedUserId ? order.vendorId : order.userId;
     await prisma.p2PChatMessage.create({
       data: {
         orderId: order.id,
         senderId: parsedUserId,
-        receiverId: order.userId === parsedUserId ? order.vendorId : order.userId,
+        receiverId: otherPartyId,
         message: 'Order has been cancelled.',
       },
+    });
+
+    notifyP2P(otherPartyId, {
+      action: NotificationAction.P2P_ORDER_CANCELLED,
+      title: 'P2P order cancelled',
+      message: `Order #${order.id} was cancelled.`,
+      amount: order.cryptoAmount.toString(),
+      currency: order.cryptoCurrency,
+      orderId: order.id,
+      status: 'warning',
     });
 
     return {
@@ -2029,8 +2331,8 @@ export class P2POrderService {
     if (filters.role === 'vendor') {
       // User wants only orders where they are the vendor (ad owner)
       where.vendorId = parsedUserId;
-    } else if (filters.role === 'user') {
-      // User wants only orders where they created the order
+    } else if (filters.role === 'user' || filters.role === 'buyer') {
+      // Orders the user created (buyer on SELL ads, seller on BUY ads)
       where.userId = parsedUserId;
     } else {
       // Get all orders where user is involved (either as vendor or order creator)

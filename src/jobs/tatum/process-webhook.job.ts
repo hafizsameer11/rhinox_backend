@@ -1,9 +1,11 @@
+import { randomBytes } from 'crypto';
 import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 import {
   normalizeBlockchain,
   tokenContractMatches,
 } from '../../services/tatum/tatum-blockchain.util.js';
+import { notifyCryptoDeposit } from '../../core/utils/notification.events.js';
 
 export type WebhookProcessResult = {
   processed: boolean;
@@ -185,6 +187,56 @@ export async function processBlockchainWebhook(
       accountBalance: newBalance.toString(),
       availableBalance: newAvailable.toString(),
     },
+  });
+
+  let cryptoWallet = await prisma.wallet.findFirst({
+    where: {
+      userId: virtualAccount.userId,
+      currency: virtualAccount.currency,
+      type: 'crypto',
+    },
+  });
+  if (!cryptoWallet) {
+    cryptoWallet = await prisma.wallet.create({
+      data: {
+        userId: virtualAccount.userId,
+        currency: virtualAccount.currency,
+        type: 'crypto',
+        balance: 0,
+        lockedBalance: 0,
+      },
+    });
+  }
+
+  const reference = `DEP-${Date.now().toString(36).toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`;
+  await prisma.transaction.create({
+    data: {
+      walletId: cryptoWallet.id,
+      type: 'deposit',
+      status: 'completed',
+      amount: depositAmount.toNumber(),
+      currency: virtualAccount.currency,
+      fee: 0,
+      reference,
+      channel: 'crypto',
+      description: `Crypto deposit ${depositAmount.toString()} ${virtualAccount.currency}`,
+      completedAt: new Date(),
+      metadata: {
+        blockchain: virtualAccount.blockchain,
+        txId: txId ?? null,
+        virtualAccountId: virtualAccount.id,
+        source: 'tatum_webhook',
+      },
+    },
+  }).catch((err) => {
+    console.error('[Tatum webhook] Failed to record deposit transaction:', err);
+  });
+
+  notifyCryptoDeposit(virtualAccount.userId, {
+    amount: depositAmount.toString(),
+    currency: virtualAccount.currency,
+    txId: txId ?? null,
+    blockchain: virtualAccount.blockchain,
   });
 
   return {

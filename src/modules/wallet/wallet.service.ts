@@ -1,11 +1,13 @@
 import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
+import { UnifiedStablecoinService } from '../../services/crypto/unified-stablecoin.service.js';
 
 /**
  * Wallet Service
  * Business logic for wallet operations
  */
 export class WalletService {
+  private readonly unifiedStablecoinService = new UnifiedStablecoinService();
 
   /**
    * Create a new wallet for user
@@ -310,9 +312,12 @@ export class WalletService {
       ? totalCryptoInUSDT.times(new Decimal(usdtToNgnRate.rate.toString()))
       : null;
 
+    const cryptoUnified = await this.unifiedStablecoinService.getAllUnifiedBalances(userIdNum);
+
     return {
       fiat: fiatBalances,
       crypto: cryptoBalances,
+      cryptoUnified,
       totals: {
         cryptoInUSDT: totalCryptoInUSDT.toString(),
         cryptoInNGN: totalCryptoInNGN?.toString() || null,

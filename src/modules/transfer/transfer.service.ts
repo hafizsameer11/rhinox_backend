@@ -9,6 +9,16 @@ import { decryptPrivateKey } from '../../core/utils/encryption.js';
 import { PalmPayPayoutService } from '../../services/palmpay/palmpay.payout.service.js';
 import { mapPalmPayStatus } from '../../services/palmpay/palmpay.utils.js';
 import { logApplicationEvent } from '../../core/utils/application-log.service.js';
+import {
+  notifyTransferReceived,
+  notifyTransferSent,
+} from '../../core/utils/notification.events.js';
+import {
+  UnifiedStablecoinService,
+  getBaseSymbol,
+  isUnifiedStable,
+} from '../../services/crypto/unified-stablecoin.service.js';
+import { normalizeBlockchain } from '../../services/tatum/tatum-blockchain.util.js';
 
 /**
  * Transfer Service
@@ -19,6 +29,7 @@ export class TransferService {
   private kycService: KYCService;
   private paymentSettingsService: PaymentSettingsService;
   private palmPayPayoutService: PalmPayPayoutService;
+  private unifiedStablecoinService = new UnifiedStablecoinService();
 
   constructor() {
     this.walletService = new WalletService();
@@ -235,6 +246,7 @@ export class TransferService {
       channel: 'rhionx_user' | 'bank_account' | 'mobile_money';
       recipientUserId?: string; // For RhionX user transfers (legacy support)
       recipientEmail?: string; // For RhionX user transfers (from QR scan)
+      blockchain?: string; // For crypto: network to send from (ethereum, tron, bsc, …)
       paymentMethodId?: number; // For bank_account withdrawals - ID from payment settings
       accountNumber?: string; // For bank account transfers (legacy - use paymentMethodId instead)
       bankName?: string; // For bank account transfers (legacy - use paymentMethodId instead)
@@ -255,42 +267,112 @@ export class TransferService {
       throw new Error(eligibility.message);
     }
 
-    // Check if currency is crypto by checking WalletCurrency table
-    const walletCurrency = await prisma.walletCurrency.findFirst({
-      where: {
-        currency: data.currency.toUpperCase(),
-      },
+    const currencyUpper = data.currency.toUpperCase();
+    const baseSymbol = getBaseSymbol(currencyUpper);
+
+    let walletCurrency = await prisma.walletCurrency.findFirst({
+      where: { currency: currencyUpper },
     });
+
+    if (!walletCurrency && data.blockchain) {
+      walletCurrency = await prisma.walletCurrency.findFirst({
+        where: {
+          blockchain: data.blockchain.toLowerCase(),
+          OR: [
+            { currency: currencyUpper },
+            { symbol: baseSymbol },
+          ],
+        },
+      });
+    }
+
+    if (!walletCurrency && isUnifiedStable(currencyUpper)) {
+      walletCurrency = await prisma.walletCurrency.findFirst({
+        where: {
+          OR: [
+            { currency: currencyUpper },
+            { currency: { startsWith: `${baseSymbol}_` } },
+            { symbol: baseSymbol },
+          ],
+        },
+      });
+    }
 
     const isCrypto = !!walletCurrency;
     let sourceWallet;
     let sourceVirtualAccount = null;
     let availableBalance: Decimal;
+    let ledgerCurrency = currencyUpper;
+    let ledgerBlockchain = data.blockchain?.toLowerCase();
 
     if (isCrypto) {
-      // For crypto, use VirtualAccount
-      sourceVirtualAccount = await prisma.virtualAccount.findFirst({
-        where: {
-          userId: parsedUserId,
-          currency: data.currency.toUpperCase(),
-          active: true,
-        },
-      });
+      if (isUnifiedStable(currencyUpper)) {
+        const unified = await this.unifiedStablecoinService.getUnifiedBalance(
+          parsedUserId,
+          baseSymbol
+        );
+        availableBalance = new Decimal(unified.totalAvailable);
+
+        if (ledgerBlockchain) {
+          const network = unified.networks.find(
+            (n) => normalizeBlockchain(n.blockchain) === normalizeBlockchain(ledgerBlockchain!)
+          );
+          if (network) {
+            ledgerCurrency = network.currency;
+            ledgerBlockchain = network.blockchain;
+          }
+        } else if (unified.networks.length > 0) {
+          const richest = [...unified.networks].sort((a, b) =>
+            parseFloat(b.available) > parseFloat(a.available) ? 1 : -1
+          )[0];
+          if (richest) {
+            ledgerCurrency = richest.currency;
+            ledgerBlockchain = richest.blockchain;
+          }
+        }
+
+        sourceVirtualAccount = await this.unifiedStablecoinService.resolveVirtualAccountForCurrency(
+          parsedUserId,
+          ledgerCurrency,
+          ledgerBlockchain
+        );
+      } else {
+        sourceVirtualAccount = await prisma.virtualAccount.findFirst({
+          where: {
+            userId: parsedUserId,
+            currency: currencyUpper,
+            ...(ledgerBlockchain ? { blockchain: ledgerBlockchain } : {}),
+            active: true,
+          },
+        });
+
+        if (!sourceVirtualAccount) {
+          throw new Error(
+            `Source crypto wallet for ${data.currency} not found. Please initialize your crypto wallets.`
+          );
+        }
+        ledgerCurrency = sourceVirtualAccount.currency;
+        ledgerBlockchain = sourceVirtualAccount.blockchain;
+        availableBalance = new Decimal(sourceVirtualAccount.availableBalance || '0');
+      }
 
       if (!sourceVirtualAccount) {
         throw new Error(`Source crypto wallet for ${data.currency} not found. Please initialize your crypto wallets.`);
       }
 
-      // Check available balance from VirtualAccount
       const accountBalance = new Decimal(sourceVirtualAccount.accountBalance || '0');
-      const lockedAmount = new Decimal(sourceVirtualAccount.accountBalance || '0').minus(new Decimal(sourceVirtualAccount.availableBalance || '0'));
-      availableBalance = new Decimal(sourceVirtualAccount.availableBalance || '0');
+      const lockedAmount = new Decimal(sourceVirtualAccount.accountBalance || '0').minus(
+        new Decimal(sourceVirtualAccount.availableBalance || '0')
+      );
 
-      // Get or create Wallet with type='crypto' for transaction tracking
+      if (!isUnifiedStable(currencyUpper)) {
+        availableBalance = new Decimal(sourceVirtualAccount.availableBalance || '0');
+      }
+
       sourceWallet = await prisma.wallet.findFirst({
         where: {
           userId: parsedUserId,
-          currency: data.currency.toUpperCase(),
+          currency: baseSymbol,
           type: 'crypto',
         },
       });
@@ -299,7 +381,7 @@ export class TransferService {
         sourceWallet = await prisma.wallet.create({
           data: {
             userId: parsedUserId,
-            currency: data.currency.toUpperCase(),
+            currency: baseSymbol,
             type: 'crypto',
             balance: accountBalance.toNumber(),
             lockedBalance: lockedAmount.toNumber(),
@@ -438,6 +520,10 @@ export class TransferService {
           // Crypto transfer fields
           isCrypto: isCrypto,
           sourceVirtualAccountId: sourceVirtualAccount?.id || null,
+          ledgerCurrency: isCrypto ? ledgerCurrency : undefined,
+          blockchain: isCrypto ? ledgerBlockchain : undefined,
+          baseSymbol: isCrypto ? baseSymbol : undefined,
+          isUnifiedStable: isCrypto ? isUnifiedStable(currencyUpper) : false,
         },
       },
       include: {
@@ -533,28 +619,55 @@ export class TransferService {
       throw new Error('Wallet not found');
     }
 
+    const amountDecimal = new Decimal(transaction.amount);
+    const fee = new Decimal(transaction.fee);
+    const totalDeduction = amountDecimal.plus(fee);
+
     let availableBalance: Decimal;
     let sourceVirtualAccount = null;
 
     if (isCrypto && sourceVirtualAccountId) {
-      // For crypto, check VirtualAccount balance
-      sourceVirtualAccount = await prisma.virtualAccount.findUnique({
-        where: { id: sourceVirtualAccountId },
-      });
+      const metaLedger = metadata?.ledgerCurrency as string | undefined;
+      const metaBlockchain = metadata?.blockchain as string | undefined;
+      const metaBase = metadata?.baseSymbol as string | undefined;
+      const metaUnified = metadata?.isUnifiedStable === true;
+
+      if (metaUnified && metaBase) {
+        const unified = await this.unifiedStablecoinService.getUnifiedBalance(
+          parsedUserId,
+          metaBase
+        );
+        availableBalance = new Decimal(unified.totalAvailable);
+
+        const allocatedId = await this.unifiedStablecoinService.allocateUnifiedBalance(
+          parsedUserId,
+          metaBase,
+          metaLedger || transaction.currency,
+          metaBlockchain,
+          totalDeduction
+        );
+        sourceVirtualAccount = await prisma.virtualAccount.findUnique({
+          where: { id: allocatedId },
+        });
+      } else {
+        sourceVirtualAccount = await prisma.virtualAccount.findUnique({
+          where: { id: sourceVirtualAccountId },
+        });
+
+        if (!sourceVirtualAccount) {
+          throw new Error('Source crypto wallet not found');
+        }
+
+        availableBalance = new Decimal(sourceVirtualAccount.availableBalance || '0');
+      }
 
       if (!sourceVirtualAccount) {
         throw new Error('Source crypto wallet not found');
       }
-
-      availableBalance = new Decimal(sourceVirtualAccount.availableBalance || '0');
     } else {
       // For fiat, check Wallet balance
       availableBalance = new Decimal(wallet.balance).minus(new Decimal(wallet.lockedBalance));
     }
-
-    const amountDecimal = new Decimal(transaction.amount);
-    const fee = new Decimal(transaction.fee);
-    const totalDeduction = amountDecimal.plus(fee);
 
     if (totalDeduction.greaterThan(availableBalance)) {
       throw new Error('Insufficient balance');
@@ -721,14 +834,25 @@ export class TransferService {
         let recipientWallet;
 
         if (isCrypto) {
-          // For crypto, credit recipient's VirtualAccount
+          const metaLedger = metadata?.ledgerCurrency as string | undefined;
+          const creditCurrency = metaLedger || transaction.currency.toUpperCase();
+
           let recipientVirtualAccount = await prisma.virtualAccount.findFirst({
             where: {
               userId: recipientUserId,
-              currency: transaction.currency.toUpperCase(),
+              currency: creditCurrency,
               active: true,
             },
           });
+
+          if (!recipientVirtualAccount && metadata?.isUnifiedStable) {
+            recipientVirtualAccount =
+              await this.unifiedStablecoinService.resolveVirtualAccountForCurrency(
+                recipientUserId,
+                creditCurrency,
+                metadata?.blockchain as string | undefined
+              );
+          }
 
           if (!recipientVirtualAccount) {
             throw new Error(`Recipient crypto wallet for ${transaction.currency} not found`);
@@ -830,6 +954,38 @@ export class TransferService {
     // Send success email
     // TODO: Add transfer success email
 
+    const parsedSenderId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const recipientInfo = metadata?.recipientInfo || {};
+    const recipientLabel =
+      recipientInfo?.accountName ||
+      recipientInfo?.name ||
+      recipientInfo?.email ||
+      undefined;
+
+    notifyTransferSent(parsedSenderId, {
+      amount: updatedTransaction.amount.toString(),
+      currency: updatedTransaction.currency,
+      reference: updatedTransaction.reference,
+      channel: updatedTransaction.channel ?? undefined,
+      recipientLabel,
+    });
+
+    if (metadata?.recipientUserId) {
+      const recipientUserId =
+        typeof metadata.recipientUserId === 'string'
+          ? parseInt(metadata.recipientUserId, 10)
+          : metadata.recipientUserId;
+      const senderName = updatedTransaction.wallet?.user
+        ? `${updatedTransaction.wallet.user.firstName || ''} ${updatedTransaction.wallet.user.lastName || ''}`.trim()
+        : undefined;
+      notifyTransferReceived(recipientUserId, {
+        amount: updatedTransaction.amount.toString(),
+        currency: updatedTransaction.currency,
+        reference: `${updatedTransaction.reference}-CREDIT`,
+        senderLabel: senderName || undefined,
+      });
+    }
+
     return {
       id: updatedTransaction.id,
       reference: updatedTransaction.reference,
@@ -838,7 +994,7 @@ export class TransferService {
       fee: updatedTransaction.fee.toString(),
       status: updatedTransaction.status,
       channel: updatedTransaction.channel,
-      recipientInfo: metadata?.recipientInfo || {},
+      recipientInfo,
       date: updatedTransaction.completedAt,
       createdAt: updatedTransaction.createdAt,
     };

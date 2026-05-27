@@ -338,6 +338,7 @@ export class TransferController {
         bankCode,
         providerId,
         phoneNumber,
+        blockchain,
       } = req.body;
 
       if (!userId) {
@@ -396,6 +397,7 @@ export class TransferController {
         bankCode,
         providerId,
         phoneNumber,
+        blockchain,
       });
 
       return res.status(201).json({

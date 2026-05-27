@@ -1,6 +1,11 @@
 import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 import { sendDepositSuccessEmail } from '../../core/utils/transaction-email.service.js';
+import {
+  notifyBillPayment,
+  notifyFiatDeposit,
+  notifyWithdrawal,
+} from '../../core/utils/notification.events.js';
 import { fromPalmPayAmount, mapPalmPayStatus } from './palmpay.utils.js';
 import type { PalmPayWebhookPayload } from './palmpay.types.js';
 
@@ -120,6 +125,13 @@ export class PalmPayWebhookService {
             date: new Date().toLocaleString(),
           });
         }
+
+        notifyFiatDeposit(virtualAccount.transaction.wallet.userId, {
+          amount: virtualAccount.transaction.amount.toString(),
+          currency: virtualAccount.transaction.currency,
+          reference: virtualAccount.transaction.reference,
+          creditedAmount: creditedAmount.toString(),
+        });
       } else if (mappedStatus === 'failed' || mappedStatus === 'cancelled') {
         await tx.transaction.update({
           where: { id: virtualAccount.transactionId },
@@ -146,6 +158,7 @@ export class PalmPayWebhookService {
           in: ['pending', 'processing'],
         },
       },
+      include: { wallet: true },
       take: 100,
     });
     const transaction = candidates.find((tx) => (tx.metadata as any)?.palmpayOrderId === payload.orderId);
@@ -169,6 +182,25 @@ export class PalmPayWebhookService {
         },
       },
     });
+
+    if (mappedStatus === 'completed') {
+      notifyWithdrawal(transaction.wallet.userId, {
+        amount: transaction.amount.toString(),
+        currency: transaction.currency,
+        reference: transaction.reference,
+        status: 'success',
+      });
+    } else if (mappedStatus === 'failed' || mappedStatus === 'cancelled') {
+      notifyWithdrawal(transaction.wallet.userId, {
+        amount: transaction.amount.toString(),
+        currency: transaction.currency,
+        reference: transaction.reference,
+        status: 'error',
+        message: payload.errorMsg
+          ? `Withdrawal failed: ${payload.errorMsg}`
+          : 'Your withdrawal could not be completed.',
+      });
+    }
   }
 
   private async processBillPaymentWebhook(payload: PalmPayWebhookPayload) {
@@ -219,5 +251,26 @@ export class PalmPayWebhookService {
         },
       });
     });
+
+    if (mappedStatus === 'completed') {
+      notifyBillPayment(transaction.wallet.userId, {
+        amount: transaction.amount.toString(),
+        currency: transaction.currency,
+        reference: transaction.reference,
+        status: 'success',
+        categoryName: metadata?.categoryName,
+      });
+    } else if (mappedStatus === 'failed' || mappedStatus === 'cancelled') {
+      notifyBillPayment(transaction.wallet.userId, {
+        amount: transaction.amount.toString(),
+        currency: transaction.currency,
+        reference: transaction.reference,
+        status: 'error',
+        categoryName: metadata?.categoryName,
+        message: payload.errorMsg
+          ? `Bill payment failed: ${payload.errorMsg}`
+          : 'Your bill payment could not be completed. Funds were refunded if debited.',
+      });
+    }
   }
 }

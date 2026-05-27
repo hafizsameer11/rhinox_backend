@@ -300,6 +300,42 @@ export class CryptoController {
    *         description: Invalid symbol
    *         $ref: '#/components/schemas/Error'
    */
+  async getUnifiedBalances(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+      }
+      const data = await this.service.getAllUnifiedBalances(userId);
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to get unified balances',
+      });
+    }
+  }
+
+  async getUnifiedBalanceBySymbol(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
+      const { symbol } = req.params;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+      }
+      if (!symbol) {
+        return res.status(400).json({ success: false, message: 'Symbol is required' });
+      }
+      const data = await this.service.getUnifiedBalance(userId, symbol);
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to get unified balance',
+      });
+    }
+  }
+
   async getTokensBySymbol(req: Request, res: Response) {
     try {
       const { symbol } = req.params;

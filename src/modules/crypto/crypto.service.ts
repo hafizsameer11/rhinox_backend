@@ -1,6 +1,7 @@
 import prisma from '../../core/config/database.js';
 import { isTatumEnabled } from '../../core/config/tatum.config.js';
 import { WalletGeneratorService } from '../../services/crypto/wallet-generator.service.js';
+import { UnifiedStablecoinService } from '../../services/crypto/unified-stablecoin.service.js';
 import { CryptoWalletLinkService } from '../../services/tatum/crypto-wallet-link.service.js';
 import { DepositAddressService } from '../../services/tatum/deposit-address.service.js';
 import { VirtualAccountService } from '../../services/tatum/virtual-account.service.js';
@@ -15,6 +16,7 @@ export class CryptoService {
   private readonly virtualAccountService = new VirtualAccountService();
   private readonly depositAddressService = new DepositAddressService();
   private readonly linkService = new CryptoWalletLinkService();
+  private readonly unifiedStablecoinService = new UnifiedStablecoinService();
 
   /**
    * Get user's virtual accounts (from database)
@@ -293,6 +295,22 @@ export class CryptoService {
       `✅ Local crypto init: ${createdVirtualAccounts.length}/${walletCurrencies.length} for user ${userId}`
     );
     return createdVirtualAccounts;
+  }
+
+  async getAllUnifiedBalances(userId: string | number) {
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(userIdNum) || userIdNum <= 0) {
+      throw new Error(`Invalid userId: ${userId}`);
+    }
+    return this.unifiedStablecoinService.getAllUnifiedBalances(userIdNum);
+  }
+
+  async getUnifiedBalance(userId: string | number, symbol: string) {
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(userIdNum) || userIdNum <= 0) {
+      throw new Error(`Invalid userId: ${userId}`);
+    }
+    return this.unifiedStablecoinService.getUnifiedBalance(userIdNum, symbol);
   }
 
   /**
