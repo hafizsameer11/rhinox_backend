@@ -29,6 +29,10 @@ model User {
   isEmailVerified Boolean  @default(false)
   isPhoneVerified Boolean  @default(false)
   isActive        Boolean  @default(true)
+  rhinoxPayId     String?  @unique @map("rhinox_pay_id") @db.VarChar(20)
+  verifyTransactionsWithPin   Boolean @default(false) @map("verify_transactions_with_pin")
+  verifyTransactionsWithEmail Boolean @default(false) @map("verify_transactions_with_email")
+  verifyTransactionsWith2FA   Boolean @default(false) @map("verify_transactions_with_2fa")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -55,10 +59,12 @@ model User {
   supportMessagesAsSender SupportMessage[]    @relation("SupportMessagesAsSender")
   notifications           Notification[]
   applicationLogs          ApplicationLog[]
+  rewardClaims            RewardClaim[]
 
   @@index([email])
   @@index([phone])
   @@index([countryId])
+  @@index([rhinoxPayId])
   @@map("users")
 }
 
@@ -85,13 +91,14 @@ model ApplicationLog {
 }
 
 model Session {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  token     String   @unique
-  ipAddress String?
-  userAgent String?
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  token      String   @unique
+  ipAddress  String?
+  userAgent  String?
+  deviceName String?  @map("device_name")
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -914,4 +921,28 @@ model Notification {
   @@index([createdAt])
   @@index([userId, isRead])
   @@map("notifications")
+}
+
+// ============================================
+// MODULE: REWARDS
+// ============================================
+
+model RewardClaim {
+  id          Int       @id @default(autoincrement())
+  userId      Int       @map("user_id")
+  rewardCode  String    @map("reward_code") @db.VarChar(80)
+  rewardTitle String    @map("reward_title") @db.VarChar(255)
+  tierCode    String    @map("tier_code") @db.VarChar(40)
+  value       String    @db.VarChar(120)
+  status      String    @default("completed") @db.VarChar(40)
+  claimedAt   DateTime  @default(now()) @map("claimed_at")
+  expiresAt   DateTime? @map("expires_at")
+  metadata    Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, rewardCode])
+  @@index([userId])
+  @@index([claimedAt])
+  @@map("reward_claims")
 }

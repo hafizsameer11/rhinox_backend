@@ -2,7 +2,6 @@ import { Decimal } from 'decimal.js';
 import { randomBytes } from 'crypto';
 import prisma from '../../core/config/database.js';
 import { WalletService } from '../wallet/wallet.service.js';
-import bcrypt from 'bcryptjs';
 import { PalmPayBillPaymentService } from '../../services/palmpay/palmpay.billpayment.service.js';
 import {
   createMaintenanceError,
@@ -11,6 +10,7 @@ import {
   mapPalmPayStatus,
 } from '../../services/palmpay/palmpay.utils.js';
 import { notifyBillPayment } from '../../core/utils/notification.events.js';
+import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
 
 /**
  * Bill Payment Service
@@ -75,6 +75,32 @@ export class BillPaymentService {
 
     const minFee = minFees[currency] || 0.1;
     return Math.max(calculatedFee, minFee);
+  }
+
+  private isFixedAmountItem(item: { isFixAmount?: number; raw?: { isFixAmount?: number } }): boolean {
+    return item.isFixAmount === 1 || item.raw?.isFixAmount === 1;
+  }
+
+  private resolveBillPaymentAmount(
+    sceneCode: string,
+    userAmount: string,
+    item: { amount?: number; isFixAmount?: number; raw?: { isFixAmount?: number } }
+  ): Decimal {
+    const parsedUserAmount = new Decimal(userAmount);
+    if (parsedUserAmount.lte(0)) {
+      throw new Error('Invalid amount');
+    }
+
+    // Airtime and betting are user-entered amounts; do not override from provider item defaults.
+    if (sceneCode === 'airtime' || sceneCode === 'betting') {
+      return parsedUserAmount;
+    }
+
+    if (this.isFixedAmountItem(item) && item.amount !== undefined && Number(item.amount) > 0) {
+      return new Decimal(item.amount).dividedBy(100);
+    }
+
+    return parsedUserAmount;
   }
 
   /**
@@ -241,7 +267,9 @@ export class BillPaymentService {
       const items = await this.palmPayBillPaymentService.queryItems(sceneCode, billerId);
       item = data.planId
         ? items.find((entry) => entry.itemId === data.planId?.toString())
-        : items[0];
+        : sceneCode === 'airtime'
+          ? items.find((entry) => !this.isFixedAmountItem(entry)) || items[0]
+          : items[0];
       if (!item) {
         throw new Error('Selected bill payment plan is unavailable');
       }
@@ -301,11 +329,8 @@ export class BillPaymentService {
       accountNumber = `02340${last10}`;
     }
 
-    // Calculate amount
-    let amount = new Decimal(data.amount);
-    if (item.amount !== undefined && item.amount > 0) {
-      amount = new Decimal(item.amount).dividedBy(100);
-    }
+    // Calculate amount from user input unless the selected item is a fixed-price bundle.
+    const amount = this.resolveBillPaymentAmount(sceneCode, data.amount, item);
 
     // Calculate fee
     const fee = this.calculateFee(amount.toNumber(), data.currency);
@@ -405,7 +430,8 @@ export class BillPaymentService {
   async confirmBillPayment(
     userId: string | number,
     transactionId: string | number,
-    pin: string
+    pin?: string,
+    emailOtp?: string
   ) {
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     const txIdNum = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
@@ -446,15 +472,8 @@ export class BillPaymentService {
       throw new Error(`Transaction is already ${transaction.status}`);
     }
 
-    // Verify PIN
-    if (!transaction.wallet.user.pinHash) {
-      throw new Error('PIN not set. Please setup your PIN first.');
-    }
-
-    const isPINValid = await bcrypt.compare(pin, transaction.wallet.user.pinHash);
-    if (!isPINValid) {
-      throw new Error('Invalid PIN');
-    }
+    // Verify configured security requirements
+    await assertTransactionSecurity(transaction.wallet.user, { pin, emailOtp });
 
     const metadata = transaction.metadata as any;
     const amount = new Decimal(transaction.amount);

@@ -397,15 +397,15 @@ export class BillPaymentController {
         });
       }
 
-      const { transactionId, pin } = req.body;
-      if (!transactionId || !pin) {
+      const { transactionId, pin, emailOtp } = req.body;
+      if (!transactionId) {
         return res.status(400).json({
           success: false,
-          message: 'transactionId and pin are required',
+          message: 'transactionId is required',
         });
       }
 
-      const result = await this.service.confirmBillPayment(userId, transactionId, pin);
+      const result = await this.service.confirmBillPayment(userId, transactionId, pin, emailOtp);
       return res.json({
         success: true,
         data: result,

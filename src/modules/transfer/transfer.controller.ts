@@ -449,7 +449,7 @@ export class TransferController {
   async verifyTransfer(req: Request, res: Response) {
     try {
       const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
-      const { transactionId, pin } = req.body;
+      const { transactionId, pin, emailOtp } = req.body;
 
       if (!userId) {
         return res.status(401).json({
@@ -458,22 +458,21 @@ export class TransferController {
         });
       }
 
-      if (!transactionId || !pin) {
+      if (!transactionId) {
         return res.status(400).json({
           success: false,
-          message: 'Transaction ID and PIN are required',
+          message: 'Transaction ID is required',
         });
       }
 
-      // Validate PIN format
-      if (!/^\d{5}$/.test(pin)) {
+      if (pin && !/^\d{5}$/.test(pin)) {
         return res.status(400).json({
           success: false,
           message: 'PIN must be exactly 5 digits',
         });
       }
 
-      const result = await this.service.verifyTransfer(userId, transactionId, pin);
+      const result = await this.service.verifyTransfer(userId, transactionId, pin, emailOtp);
 
       return res.json({
         success: true,

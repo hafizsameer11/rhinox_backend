@@ -6,6 +6,7 @@ import { WalletService } from '../wallet/wallet.service.js';
 import { ExchangeService } from '../exchange/exchange.service.js';
 import { sendDepositSuccessEmail } from '../../core/utils/transaction-email.service.js';
 import { notifyConversion } from '../../core/utils/notification.events.js';
+import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
 
 /**
  * Conversion Service
@@ -236,7 +237,8 @@ export class ConversionService {
   async confirmConversion(
     userId: string,
     conversionReference: string,
-    pin: string
+    pin?: string,
+    emailOtp?: string
   ) {
     // Parse userId to integer
     const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
@@ -283,15 +285,8 @@ export class ConversionService {
       throw new Error(`Conversion is already ${debitTx.status}`);
     }
 
-    // Verify PIN
-    if (!debitTx.wallet.user.pinHash) {
-      throw new Error('PIN not set. Please setup your PIN first.');
-    }
-
-    const isValidPin = await bcrypt.compare(pin, debitTx.wallet.user.pinHash);
-    if (!isValidPin) {
-      throw new Error('Invalid PIN');
-    }
+    // Verify configured security requirements
+    await assertTransactionSecurity(debitTx.wallet.user, { pin, emailOtp });
 
     // Check source wallet balance
     const fromBalance = new Decimal(debitTx.wallet.balance);

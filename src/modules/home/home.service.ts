@@ -1,5 +1,6 @@
 import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
+import { ensureRhinoxPayId } from '../../core/utils/rhinox-pay-id.service.js';
 
 /**
  * Home Service
@@ -27,6 +28,8 @@ export class HomeService {
     if (!user) {
       throw new Error('User not found');
     }
+
+    const rhinoxPayId = await ensureRhinoxPayId(userIdNum);
 
     // Get all active fiat wallets with currency info
     const wallets = await prisma.wallet.findMany({
@@ -163,6 +166,7 @@ export class HomeService {
         lastName: user.lastName,
         email: user.email,
         phone: user.phone,
+        rhinoxPayId,
         country: user.country
           ? {
               id: user.country.id,

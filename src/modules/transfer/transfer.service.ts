@@ -13,12 +13,18 @@ import {
   notifyTransferReceived,
   notifyTransferSent,
 } from '../../core/utils/notification.events.js';
+import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
 import {
   UnifiedStablecoinService,
   getBaseSymbol,
   isUnifiedStable,
 } from '../../services/crypto/unified-stablecoin.service.js';
 import { normalizeBlockchain } from '../../services/tatum/tatum-blockchain.util.js';
+import {
+  ensureRhinoxPayId,
+  isRhinoxPayId,
+  normalizeRhinoxPayId,
+} from '../../core/utils/rhinox-pay-id.service.js';
 
 /**
  * Transfer Service
@@ -85,28 +91,50 @@ export class TransferService {
    * Accepts either userId or email
    */
   async validateRhionXUser(recipientIdentifier: string) {
-    // Try to find user by email first (from QR scan), then by userId
-    let user = await prisma.user.findUnique({
-      where: { email: recipientIdentifier },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        phone: true,
-        isActive: true,
-      },
-    });
+    const normalized = recipientIdentifier.trim();
+    const normalizedPayId = normalizeRhinoxPayId(normalized);
 
-    // If not found by email, try by userId (parse to integer)
+    let user = null;
+
+    if (normalizedPayId && isRhinoxPayId(normalizedPayId)) {
+      user = await prisma.user.findUnique({
+        where: { rhinoxPayId: normalizedPayId },
+        select: {
+          id: true,
+          email: true,
+          rhinoxPayId: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          isActive: true,
+        },
+      });
+    }
+
+    if (!user && normalized.includes('@')) {
+      user = await prisma.user.findUnique({
+        where: { email: normalized.toLowerCase() },
+        select: {
+          id: true,
+          email: true,
+          rhinoxPayId: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          isActive: true,
+        },
+      });
+    }
+
     if (!user) {
-      const userId = typeof recipientIdentifier === 'string' ? parseInt(recipientIdentifier, 10) : recipientIdentifier;
+      const userId = typeof normalized === 'string' ? parseInt(normalized, 10) : normalized;
       if (!isNaN(userId) && userId > 0) {
         user = await prisma.user.findUnique({
           where: { id: userId },
           select: {
             id: true,
             email: true,
+            rhinoxPayId: true,
             firstName: true,
             lastName: true,
             phone: true,
@@ -124,9 +152,12 @@ export class TransferService {
       throw new Error('Recipient account is not active');
     }
 
+    const rhinoxPayId = user.rhinoxPayId || (await ensureRhinoxPayId(user.id));
+
     return {
       userId: user.id,
       email: user.email,
+      rhinoxPayId,
       name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'RhionX User',
       phone: user.phone,
     };
@@ -245,7 +276,8 @@ export class TransferService {
       countryCode: string;
       channel: 'rhionx_user' | 'bank_account' | 'mobile_money';
       recipientUserId?: string; // For RhionX user transfers (legacy support)
-      recipientEmail?: string; // For RhionX user transfers (from QR scan)
+      recipientEmail?: string; // Legacy email lookup
+      recipientRhinoxPayId?: string; // Preferred Rhinox Pay ID lookup
       blockchain?: string; // For crypto: network to send from (ethereum, tron, bsc, …)
       paymentMethodId?: number; // For bank_account withdrawals - ID from payment settings
       accountNumber?: string; // For bank account transfers (legacy - use paymentMethodId instead)
@@ -410,15 +442,15 @@ export class TransferService {
     let recipientInfo: any = {};
     
     if (data.channel === 'rhionx_user') {
-      // Accept either email (from QR scan) or userId
-      const recipientIdentifier = data.recipientEmail || data.recipientUserId;
+      const recipientIdentifier =
+        data.recipientRhinoxPayId || data.recipientEmail || data.recipientUserId;
       if (!recipientIdentifier) {
-        throw new Error('Recipient email or user ID is required for RhionX user transfers');
+        throw new Error('Recipient Rhinox Pay ID is required for RhionX user transfers');
       }
       recipientInfo = await this.validateRhionXUser(recipientIdentifier);
       
       // Prevent self-transfer
-      if (recipientInfo.userId === userId) {
+      if (Number(recipientInfo.userId) === parsedUserId) {
         throw new Error('You cannot transfer funds to yourself');
       }
     } else if (data.channel === 'bank_account') {
@@ -461,25 +493,7 @@ export class TransferService {
         throw new Error('Bank and account number are required for bank account withdrawals.');
       }
     } else if (data.channel === 'mobile_money') {
-      if (!data.providerId || !data.phoneNumber) {
-        throw new Error('Provider ID and phone number are required for mobile money transfers');
-      }
-      // Validate provider (parse ID to integer)
-      const providerId = typeof data.providerId === 'string' ? parseInt(data.providerId, 10) : data.providerId;
-      if (isNaN(providerId) || providerId <= 0) {
-        throw new Error('Invalid provider ID format');
-      }
-      const provider = await prisma.mobileMoneyProvider.findUnique({
-        where: { id: providerId },
-      });
-      if (!provider || !provider.isActive) {
-        throw new Error('Invalid or inactive mobile money provider');
-      }
-      recipientInfo = {
-        phoneNumber: data.phoneNumber,
-        provider: provider.name,
-        providerCode: provider.code,
-      };
+      throw new Error('Mobile money transfers are coming soon. Only Naira bank transfer is available now.');
     }
 
     // Generate unique reference
@@ -504,7 +518,8 @@ export class TransferService {
         description: this.getTransferDescription(data.channel, recipientInfo, data.amount, data.currency),
         metadata: {
           recipientUserId: recipientInfo.userId || data.recipientUserId, // Store validated userId
-          recipientEmail: data.recipientEmail, // Store original email if provided
+          recipientEmail: data.recipientEmail, // Legacy email lookup
+          recipientRhinoxPayId: data.recipientRhinoxPayId || recipientInfo.rhinoxPayId,
           paymentMethodId: recipientInfo.paymentMethodId || data.paymentMethodId, // For bank withdrawals
           accountNumber: recipientInfo.accountNumber || data.accountNumber, // For bank transfers
           bankName: recipientInfo.bankName || data.bankName, // For bank transfers
@@ -555,7 +570,8 @@ export class TransferService {
   async verifyTransfer(
     userId: string,
     transactionId: string,
-    pin: string
+    pin?: string,
+    emailOtp?: string
   ) {
     const parsedTransactionId = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
     if (isNaN(parsedTransactionId) || parsedTransactionId <= 0) {
@@ -595,15 +611,8 @@ export class TransferService {
       throw new Error('Invalid transaction type');
     }
 
-    // Verify PIN
-    if (!transaction.wallet.user.pinHash) {
-      throw new Error('PIN not set');
-    }
-
-    const isValidPin = await bcrypt.compare(pin, transaction.wallet.user.pinHash);
-    if (!isValidPin) {
-      throw new Error('Invalid PIN');
-    }
+    // Verify configured security requirements
+    await assertTransactionSecurity(transaction.wallet.user, { pin, emailOtp });
 
     // Get metadata to check if it's crypto
     const metadata = transaction.metadata as any;

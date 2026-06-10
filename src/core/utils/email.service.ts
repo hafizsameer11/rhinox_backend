@@ -85,13 +85,20 @@ export const sendEmail = async (to: string, subject: string, html: string): Prom
 /**
  * Send OTP email
  */
-export const sendOTPEmail = async (email: string, code: string, type: 'email' | 'phone' | 'password_reset' = 'email'): Promise<void> => {
+export const sendOTPEmail = async (
+  email: string,
+  code: string,
+  type: 'email' | 'phone' | 'password_reset' | 'transaction' = 'email'
+): Promise<void> => {
   let subject: string;
   let title: string;
   
   if (type === 'password_reset') {
     subject = 'Password Reset Code - Rhinox Pay';
     title = 'Password Reset Code';
+  } else if (type === 'transaction') {
+    subject = 'Transaction Verification Code - Rhinox Pay';
+    title = 'Transaction Verification Code';
   } else if (type === 'email') {
     subject = 'Email Verification Code - Rhinox Pay';
     title = 'Email Verification Code';

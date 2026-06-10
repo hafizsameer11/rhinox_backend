@@ -136,7 +136,8 @@ export class AuthController {
         firstName, 
         lastName, 
         countryId,
-        termsAccepted 
+        termsAccepted,
+        deviceName,
       } = req.body;
 
       // Validate required fields
@@ -168,15 +169,20 @@ export class AuthController {
         });
       }
 
-      const result = await this.service.register({
-        email,
-        phone,
-        password,
-        firstName,
-        lastName,
-        countryId,
-        termsAccepted,
-      });
+      const result = await this.service.register(
+        {
+          email,
+          phone,
+          password,
+          firstName,
+          lastName,
+          countryId,
+          termsAccepted,
+        },
+        req.ip || req.socket.remoteAddress,
+        req.get('user-agent'),
+        deviceName
+      );
 
       return res.status(201).json({
         success: true,
@@ -240,7 +246,7 @@ export class AuthController {
    */
   async login(req: Request, res: Response) {
     try {
-      const { email, password } = req.body;
+      const { email, password, deviceName } = req.body;
 
       if (!email || !password) {
         return res.status(400).json({
@@ -252,7 +258,13 @@ export class AuthController {
       const ipAddress = req.ip || req.socket.remoteAddress;
       const userAgent = req.get('user-agent');
 
-      const result = await this.service.login(email, password, ipAddress, userAgent);
+      const result = await this.service.login(
+        email,
+        password,
+        ipAddress,
+        userAgent,
+        deviceName
+      );
 
       return res.json({
         success: true,
@@ -296,10 +308,25 @@ export class AuthController {
    */
   async logout(req: Request, res: Response) {
     try {
-      // TODO: Implement logout logic (invalidate session)
+      const userId = (req as any).userId || (req as any).user?.id;
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.startsWith('Bearer ')
+        ? authHeader.substring(7)
+        : undefined;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      const result = await this.service.logout(userId, token);
+
       return res.json({
         success: true,
-        message: 'Logged out successfully',
+        data: result,
+        message: result.message,
       });
     } catch (error: any) {
       return res.status(500).json({
@@ -1251,6 +1278,130 @@ export class AuthController {
       return res.status(400).json({
         success: false,
         message: error.message || 'Failed to reset password',
+      });
+    }
+  }
+
+  async getSecuritySettings(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+      }
+
+      const result = await this.service.getSecuritySettings(userId);
+      return res.json({ success: true, data: result });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to fetch security settings',
+      });
+    }
+  }
+
+  async updateSecuritySettings(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+      }
+
+      const { verifyWithPin, verifyWithEmail, verifyWith2FA } = req.body;
+      const result = await this.service.updateSecuritySettings(userId, {
+        verifyWithPin,
+        verifyWithEmail,
+        verifyWith2FA,
+      });
+
+      return res.json({ success: true, data: result });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to update security settings',
+      });
+    }
+  }
+
+  async sendTransactionVerificationOTP(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+      }
+
+      const result = await this.service.sendTransactionVerificationOTP(userId);
+      return res.json({ success: true, data: result });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to send transaction verification code',
+      });
+    }
+  }
+
+  async getSessions(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+      }
+
+      const authHeader = req.headers.authorization;
+      const currentToken = authHeader?.startsWith('Bearer ')
+        ? authHeader.substring(7)
+        : undefined;
+
+      const sessions = await this.service.getUserSessions(userId, currentToken);
+      return res.json({ success: true, data: { sessions } });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to fetch sessions',
+      });
+    }
+  }
+
+  async revokeSession(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+      }
+
+      const sessionId = req.params.sessionId;
+      const authHeader = req.headers.authorization;
+      const currentToken = authHeader?.startsWith('Bearer ')
+        ? authHeader.substring(7)
+        : undefined;
+
+      const result = await this.service.revokeSession(userId, sessionId, currentToken);
+      return res.json({ success: true, data: result });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to terminate session',
+      });
+    }
+  }
+
+  async revokeOtherSessions(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+      }
+
+      const authHeader = req.headers.authorization;
+      const currentToken = authHeader?.startsWith('Bearer ')
+        ? authHeader.substring(7)
+        : undefined;
+
+      const result = await this.service.revokeOtherSessions(userId, currentToken);
+      return res.json({ success: true, data: result });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to terminate other sessions',
       });
     }
   }

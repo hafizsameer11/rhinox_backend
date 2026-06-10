@@ -9,6 +9,7 @@ import {
   isUnifiedStable,
 } from '../../services/crypto/unified-stablecoin.service.js';
 import { NotificationAction, notifyP2P } from '../../core/utils/notification.events.js';
+import { ensureRhinoxPayId } from '../../core/utils/rhinox-pay-id.service.js';
 
 /**
  * P2P Order Service
@@ -324,6 +325,7 @@ export class P2POrderService {
             lastName: true,
             email: true,
             phone: true,
+            rhinoxPayId: true,
           },
         },
       },
@@ -398,6 +400,7 @@ export class P2POrderService {
           phoneNumber: pm.phoneNumber ? this.maskPhoneNumber(pm.phoneNumber) : null,
           countryCode: pm.countryCode,
           currency: pm.currency,
+          rhinoxpayId: pm.type === 'rhinoxpay_id' ? ad.user.rhinoxPayId : null,
         }));
       
       return {
@@ -426,6 +429,7 @@ export class P2POrderService {
           name: `${ad.user.firstName} ${ad.user.lastName}`,
           email: ad.user.email,
           phone: ad.user.phone,
+          rhinoxPayId: ad.user.rhinoxPayId,
         },
         createdAt: ad.createdAt,
         updatedAt: ad.updatedAt,
@@ -453,6 +457,7 @@ export class P2POrderService {
             lastName: true,
             email: true,
             phone: true,
+            rhinoxPayId: true,
           },
         },
       },
@@ -487,6 +492,7 @@ export class P2POrderService {
 
     // Transform to user perspective
     const userAction = this.getUserAction(ad.type);
+    const vendorRhinoxPayId = ad.user.rhinoxPayId || (await ensureRhinoxPayId(ad.user.id));
 
     return {
       id: ad.id,
@@ -520,6 +526,7 @@ export class P2POrderService {
         phoneNumber: pm.phoneNumber ? this.maskPhoneNumber(pm.phoneNumber) : null,
         countryCode: pm.countryCode,
         currency: pm.currency,
+        rhinoxpayId: pm.type === 'rhinoxpay_id' ? vendorRhinoxPayId : null,
         _isVendorMethod: true, // Flag to indicate this is vendor's method
       })),
       status: ad.status,
@@ -535,6 +542,7 @@ export class P2POrderService {
         name: `${ad.user.firstName} ${ad.user.lastName}`,
         email: ad.user.email,
         phone: ad.user.phone,
+        rhinoxPayId: vendorRhinoxPayId,
       },
       createdAt: ad.createdAt,
       updatedAt: ad.updatedAt,
@@ -1444,6 +1452,7 @@ export class P2POrderService {
             lastName: true,
             email: true,
             phone: true,
+            rhinoxPayId: true,
           },
         },
         user: {
@@ -1453,6 +1462,7 @@ export class P2POrderService {
             lastName: true,
             email: true,
             phone: true,
+            rhinoxPayId: true,
           },
         },
         paymentMethod: {
@@ -1518,6 +1528,11 @@ export class P2POrderService {
     const isUserBuyer = parsedBuyerId === parsedUserId;
     const isUserSeller = parsedSellerId === parsedUserId;
 
+    const vendorRhinoxPayId =
+      order.vendor.rhinoxPayId || (await ensureRhinoxPayId(order.vendorId));
+    const userRhinoxPayId =
+      order.user.rhinoxPayId || (await ensureRhinoxPayId(order.userId));
+
     return {
       id: order.id,
       chatId: order.id, // Chat ID is same as order ID (chat messages are linked via orderId)
@@ -1540,10 +1555,14 @@ export class P2POrderService {
       completedAt: order.completedAt,
       cancelledAt: order.cancelledAt,
       txId: order.txId,
-      buyer: parsedBuyerId === order.vendorId ? order.vendor : order.user,
-      seller: parsedSellerId === order.vendorId ? order.vendor : order.user,
-      vendor: order.vendor,
-      user: order.user,
+      buyer: parsedBuyerId === order.vendorId
+        ? { ...order.vendor, rhinoxPayId: vendorRhinoxPayId }
+        : { ...order.user, rhinoxPayId: userRhinoxPayId },
+      seller: parsedSellerId === order.vendorId
+        ? { ...order.vendor, rhinoxPayId: vendorRhinoxPayId }
+        : { ...order.user, rhinoxPayId: userRhinoxPayId },
+      vendor: { ...order.vendor, rhinoxPayId: vendorRhinoxPayId },
+      user: { ...order.user, rhinoxPayId: userRhinoxPayId },
       isUserBuyer,
       isUserSeller,
       paymentMethod: order.paymentMethod ? {
@@ -1560,6 +1579,8 @@ export class P2POrderService {
         phoneNumber: order.paymentMethod.phoneNumber ? this.maskPhoneNumber(order.paymentMethod.phoneNumber) : null,
         countryCode: order.paymentMethod.countryCode,
         currency: order.paymentMethod.currency,
+        rhinoxpayId:
+          order.paymentMethod.type === 'rhinoxpay_id' ? vendorRhinoxPayId : null,
       } : null,
       chatMessages: order.chatMessages.map((msg: any) => ({
         id: msg.id,

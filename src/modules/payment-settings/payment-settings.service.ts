@@ -2,6 +2,7 @@ import prisma from '../../core/config/database.js';
 import { encryptPrivateKey, decryptPrivateKey } from '../../core/utils/encryption.js';
 import { PalmPayPayoutService } from '../../services/palmpay/palmpay.payout.service.js';
 import { createProviderUnavailableError } from '../../services/palmpay/palmpay.utils.js';
+import { ensureRhinoxPayId } from '../../core/utils/rhinox-pay-id.service.js';
 
 /**
  * Payment Settings Service
@@ -48,6 +49,8 @@ export class PaymentSettingsService {
     });
 
     // Decrypt account numbers
+    const userRhinoxPayId = await ensureRhinoxPayId(parsedUserId);
+
     return paymentMethods.map((method: any) => ({
       id: method.id,
       type: method.type,
@@ -60,6 +63,7 @@ export class PaymentSettingsService {
       phoneNumber: method.phoneNumber ? this.maskPhoneNumber(method.phoneNumber) : null,
       countryCode: method.countryCode,
       currency: method.currency,
+      rhinoxpayId: method.type === 'rhinoxpay_id' ? userRhinoxPayId : null,
       isDefault: method.isDefault,
       isActive: method.isActive,
       createdAt: method.createdAt,
@@ -386,6 +390,8 @@ export class PaymentSettingsService {
       });
     }
 
+    const userRhinoxPayId = await ensureRhinoxPayId(parsedUserId);
+
     // Create payment method
     const paymentMethod = await prisma.userPaymentMethod.create({
       data: {
@@ -404,6 +410,7 @@ export class PaymentSettingsService {
       accountName: paymentMethod.accountName,
       countryCode: paymentMethod.countryCode,
       currency: paymentMethod.currency,
+      rhinoxpayId: userRhinoxPayId,
       isDefault: paymentMethod.isDefault,
       message: 'Rhinox Pay ID added successfully',
     };

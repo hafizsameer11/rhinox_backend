@@ -4,6 +4,7 @@ import { WalletService } from '../wallet/wallet.service.js';
 import { sendDepositInitiatedEmail } from '../../core/utils/transaction-email.service.js';
 import { PalmPayDepositService } from '../../services/palmpay/palmpay.deposit.service.js';
 import { createProviderUnavailableError } from '../../services/palmpay/palmpay.utils.js';
+import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
 
 /**
  * Deposit Service
@@ -205,8 +206,50 @@ export class DepositService {
   async confirmDeposit(
     userId: string,
     transactionId: string,
-    pin: string
+    pin?: string,
+    emailOtp?: string
   ) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const parsedTransactionId =
+      typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
+
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+    if (isNaN(parsedTransactionId) || parsedTransactionId <= 0) {
+      throw new Error('Invalid transaction ID format');
+    }
+
+    const transaction = await prisma.transaction.findUnique({
+      where: { id: parsedTransactionId },
+      include: {
+        wallet: {
+          include: {
+            user: true,
+            currencyRef: true,
+          },
+        },
+      },
+    });
+
+    if (!transaction) {
+      throw new Error('Transaction not found');
+    }
+
+    if (transaction.wallet.userId !== parsedUserId) {
+      throw new Error('Unauthorized access to transaction');
+    }
+
+    if (transaction.type !== 'deposit') {
+      throw new Error('Transaction is not a deposit');
+    }
+
+    if (transaction.status !== 'pending') {
+      throw new Error(`Transaction is already ${transaction.status}`);
+    }
+
+    await assertTransactionSecurity(transaction.wallet.user, { pin, emailOtp });
+
     throw new Error('Bank transfer deposits are confirmed automatically. Manual deposit confirmation is disabled.');
   }
 

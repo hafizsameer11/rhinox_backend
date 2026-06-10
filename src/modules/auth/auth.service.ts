@@ -13,6 +13,11 @@ import {
   notifyPinSetup,
   notifyRegistration,
 } from '../../core/utils/notification.events.js';
+import {
+  isSupportedAfricanCountry,
+  isSupportedAfricanFiatCurrency,
+} from '../../core/constants/supported-countries.js';
+import { ensureRhinoxPayId, generateUniqueRhinoxPayId } from '../../core/utils/rhinox-pay-id.service.js';
 
 /**
  * Auth Service
@@ -23,15 +28,20 @@ export class AuthService {
   /**
    * Register a new user
    */
-  async register(data: {
-    email: string;
-    phone: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-    countryId?: string;
-    termsAccepted: boolean;
-  }) {
+  async register(
+    data: {
+      email: string;
+      phone: string;
+      password: string;
+      firstName: string;
+      lastName: string;
+      countryId?: string;
+      termsAccepted: boolean;
+    },
+    ipAddress?: string,
+    userAgent?: string,
+    deviceName?: string
+  ) {
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email },
@@ -59,11 +69,15 @@ export class AuthService {
         if (!country) {
           throw new Error('Invalid country selected');
         }
+        if (!isSupportedAfricanCountry(country.code)) {
+          throw new Error('Selected country is not supported. Please choose an African country.');
+        }
       }
     }
 
     // Hash password
     const passwordHash = await bcrypt.hash(data.password, 10);
+    const rhinoxPayId = await generateUniqueRhinoxPayId();
 
     // Create user (not verified yet)
     const userData: any = {
@@ -74,6 +88,7 @@ export class AuthService {
       lastName: data.lastName,
       termsAccepted: data.termsAccepted,
       isEmailVerified: false, // Will be verified after OTP
+      rhinoxPayId,
       ...(parsedCountryId && { countryId: parsedCountryId }),
     };
     
@@ -102,12 +117,26 @@ export class AuthService {
     const tokens = this.generateTokens(user.id.toString());
 
     // Create session
+    const sessionData: any = {
+      userId: user.id,
+      token: tokens.accessToken,
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+    };
+
+    if (ipAddress) {
+      sessionData.ipAddress = ipAddress;
+    }
+
+    if (userAgent) {
+      sessionData.userAgent = userAgent;
+    }
+
+    if (deviceName) {
+      sessionData.deviceName = deviceName;
+    }
+
     await prisma.session.create({
-      data: {
-        userId: user.id,
-        token: tokens.accessToken,
-        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
-      },
+      data: sessionData,
     });
 
     notifyRegistration(user.id);
@@ -120,6 +149,7 @@ export class AuthService {
         phone: user.phone,
         firstName: user.firstName,
         lastName: user.lastName,
+        rhinoxPayId: user.rhinoxPayId,
         isEmailVerified: false,
       },
       ...tokens,
@@ -130,7 +160,13 @@ export class AuthService {
   /**
    * Login user
    */
-  async login(email: string, password: string, ipAddress?: string, userAgent?: string) {
+  async login(
+    email: string,
+    password: string,
+    ipAddress?: string,
+    userAgent?: string,
+    deviceName?: string
+  ) {
     // Find user
     const user = await prisma.user.findUnique({
       where: { email },
@@ -167,12 +203,18 @@ export class AuthService {
     if (userAgent) {
       sessionData.userAgent = userAgent;
     }
+
+    if (deviceName) {
+      sessionData.deviceName = deviceName;
+    }
     
     await prisma.session.create({
       data: sessionData,
     });
 
     notifyLogin(user.id, ipAddress ?? null);
+
+    const rhinoxPayId = await ensureRhinoxPayId(user.id);
 
     return {
       user: {
@@ -181,6 +223,7 @@ export class AuthService {
         phone: user.phone,
         firstName: user.firstName,
         lastName: user.lastName,
+        rhinoxPayId,
       },
       ...tokens,
     };
@@ -595,7 +638,7 @@ export class AuthService {
         return;
       }
 
-      // Get ALL active fiat currencies from database
+      // Create wallets only for supported African fiat currencies
       const fiatCurrencies = await prisma.currency.findMany({
         where: {
           type: 'fiat',
@@ -604,7 +647,7 @@ export class AuthService {
         orderBy: {
           code: 'asc',
         },
-      });
+      }).then((items) => items.filter((currency) => isSupportedAfricanFiatCurrency(currency.code)));
 
       if (fiatCurrencies.length === 0) {
         console.log('No active fiat currencies found in database');
@@ -801,6 +844,245 @@ export class AuthService {
 
     return {
       message: 'Password reset successfully. Please login with your new password.',
+    };
+  }
+
+  async getSecuritySettings(userId: string | number) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: parsedUserId },
+      select: {
+        verifyTransactionsWithPin: true,
+        verifyTransactionsWithEmail: true,
+        verifyTransactionsWith2FA: true,
+      },
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    return {
+      verifyWithPin: user.verifyTransactionsWithPin,
+      verifyWithEmail: user.verifyTransactionsWithEmail,
+      verifyWith2FA: user.verifyTransactionsWith2FA,
+    };
+  }
+
+  async updateSecuritySettings(
+    userId: string | number,
+    settings: {
+      verifyWithPin?: boolean;
+      verifyWithEmail?: boolean;
+      verifyWith2FA?: boolean;
+    }
+  ) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    const data: {
+      verifyTransactionsWithPin?: boolean;
+      verifyTransactionsWithEmail?: boolean;
+      verifyTransactionsWith2FA?: boolean;
+    } = {};
+
+    if (typeof settings.verifyWithPin === 'boolean') {
+      data.verifyTransactionsWithPin = settings.verifyWithPin;
+    }
+    if (typeof settings.verifyWithEmail === 'boolean') {
+      data.verifyTransactionsWithEmail = settings.verifyWithEmail;
+    }
+    if (typeof settings.verifyWith2FA === 'boolean') {
+      if (settings.verifyWith2FA) {
+        throw new Error('Two-factor authentication for transactions is coming soon');
+      }
+      data.verifyTransactionsWith2FA = settings.verifyWith2FA;
+    }
+
+    const user = await prisma.user.update({
+      where: { id: parsedUserId },
+      data,
+      select: {
+        verifyTransactionsWithPin: true,
+        verifyTransactionsWithEmail: true,
+        verifyTransactionsWith2FA: true,
+      },
+    });
+
+    return {
+      verifyWithPin: user.verifyTransactionsWithPin,
+      verifyWithEmail: user.verifyTransactionsWithEmail,
+      verifyWith2FA: user.verifyTransactionsWith2FA,
+    };
+  }
+
+  async sendTransactionVerificationOTP(userId: string | number) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: parsedUserId },
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (!user.verifyTransactionsWithEmail) {
+      throw new Error('Email verification for transactions is disabled');
+    }
+
+    const otpCode = generateOTP();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await prisma.oTP.create({
+      data: {
+        userId: user.id,
+        email: user.email,
+        code: otpCode,
+        type: 'transaction',
+        expiresAt,
+      },
+    });
+
+    await sendOTPEmail(user.email, otpCode, 'transaction');
+
+    return {
+      message: 'Transaction verification code sent to your email',
+    };
+  }
+
+  private parseDeviceLabel(session: {
+    deviceName?: string | null;
+    userAgent?: string | null;
+  }): string {
+    if (session.deviceName) {
+      return session.deviceName;
+    }
+
+    const userAgent = session.userAgent || '';
+    if (/iPhone/i.test(userAgent)) return 'iPhone';
+    if (/iPad/i.test(userAgent)) return 'iPad';
+    if (/Android/i.test(userAgent)) {
+      const match = userAgent.match(/Android.*?;\s*([^;)]+)/);
+      return match?.[1]?.trim() || 'Android Device';
+    }
+    if (userAgent) return 'Web Browser';
+    return 'Unknown Device';
+  }
+
+  async getUserSessions(userId: string | number, currentToken?: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    const sessions = await prisma.session.findMany({
+      where: {
+        userId: parsedUserId,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return sessions.map((session) => ({
+      id: session.id,
+      name: this.parseDeviceLabel(session),
+      app: session.userAgent?.includes('RhinoxPay')
+        ? session.userAgent
+        : 'RhinoxPay Mobile',
+      location: session.ipAddress || 'Unknown location',
+      isCurrentDevice: Boolean(currentToken && session.token === currentToken),
+      lastUsed: session.createdAt,
+    }));
+  }
+
+  async revokeSession(userId: string | number, sessionId: string | number, currentToken?: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const parsedSessionId = typeof sessionId === 'string' ? parseInt(sessionId, 10) : sessionId;
+
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+    if (isNaN(parsedSessionId) || parsedSessionId <= 0) {
+      throw new Error('Invalid session ID format');
+    }
+
+    const session = await prisma.session.findFirst({
+      where: {
+        id: parsedSessionId,
+        userId: parsedUserId,
+      },
+    });
+
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    await prisma.session.delete({
+      where: { id: session.id },
+    });
+
+    return {
+      revokedCurrentSession: Boolean(currentToken && session.token === currentToken),
+      message: 'Session terminated successfully',
+    };
+  }
+
+  async revokeOtherSessions(userId: string | number, currentToken?: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    if (!currentToken) {
+      throw new Error('Current session token is required');
+    }
+
+    const result = await prisma.session.deleteMany({
+      where: {
+        userId: parsedUserId,
+        token: {
+          not: currentToken,
+        },
+      },
+    });
+
+    return {
+      revokedCount: result.count,
+      message: 'Other sessions terminated successfully',
+    };
+  }
+
+  async logout(userId: string | number, token?: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    if (token) {
+      await prisma.session.deleteMany({
+        where: {
+          userId: parsedUserId,
+          token,
+        },
+      });
+    }
+
+    return {
+      message: 'Logged out successfully',
     };
   }
 }

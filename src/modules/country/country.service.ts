@@ -1,4 +1,5 @@
 import prisma from '../../core/config/database.js';
+import { SUPPORTED_AFRICAN_COUNTRY_CODES } from '../../core/constants/supported-countries.js';
 
 /**
  * Country Service
@@ -10,6 +11,11 @@ export class CountryService {
    */
   async getAllCountries() {
     const countries = await prisma.country.findMany({
+      where: {
+        code: {
+          in: [...SUPPORTED_AFRICAN_COUNTRY_CODES],
+        },
+      },
       orderBy: { name: 'asc' },
     });
 

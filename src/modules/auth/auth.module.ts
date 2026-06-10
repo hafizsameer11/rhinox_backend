@@ -52,6 +52,16 @@ export class AuthModule implements IModule {
     
     // Get current user (requires authentication)
     this.router.get('/me', authMiddleware, this.controller.getCurrentUser.bind(this.controller));
+
+    // Security confirmation settings
+    this.router.get('/security-settings', authMiddleware, this.controller.getSecuritySettings.bind(this.controller));
+    this.router.patch('/security-settings', authMiddleware, this.controller.updateSecuritySettings.bind(this.controller));
+    this.router.post('/transaction-verification-otp', authMiddleware, this.controller.sendTransactionVerificationOTP.bind(this.controller));
+
+    // Device sessions
+    this.router.get('/sessions', authMiddleware, this.controller.getSessions.bind(this.controller));
+    this.router.delete('/sessions/others', authMiddleware, this.controller.revokeOtherSessions.bind(this.controller));
+    this.router.delete('/sessions/:sessionId', authMiddleware, this.controller.revokeSession.bind(this.controller));
   }
 }
 
