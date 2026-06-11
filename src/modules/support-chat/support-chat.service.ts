@@ -253,6 +253,7 @@ export class SupportChatService {
         senderId: msg.senderId,
         sender: msg.sender,
         message: msg.message,
+        imageUrl: msg.imageUrl,
         isRead: msg.isRead,
         readAt: msg.readAt,
         createdAt: msg.createdAt,
@@ -268,7 +269,8 @@ export class SupportChatService {
   async sendMessage(
     chatId: string | number,
     userId: string | number,
-    message: string
+    message: string,
+    imageUrl?: string | null
   ) {
     const chatIdNum = typeof chatId === 'string' ? parseInt(chatId, 10) : chatId;
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
@@ -280,11 +282,14 @@ export class SupportChatService {
       throw new Error(`Invalid userId: ${userId}`);
     }
 
-    if (!message || message.trim().length === 0) {
-      throw new Error('Message is required');
+    const trimmedMessage = (message || '').trim();
+    const normalizedImageUrl = imageUrl?.trim() || null;
+
+    if (!trimmedMessage && !normalizedImageUrl) {
+      throw new Error('Message or image is required');
     }
 
-    if (message.length > 2000) {
+    if (trimmedMessage.length > 2000) {
       throw new Error('Message must not exceed 2000 characters');
     }
 
@@ -311,7 +316,8 @@ export class SupportChatService {
       data: {
         chatId: chatIdNum,
         senderId: userIdNum,
-        message: message.trim(),
+        message: trimmedMessage || '[Image attached]',
+        imageUrl: normalizedImageUrl,
       },
       include: {
         sender: {
@@ -337,6 +343,7 @@ export class SupportChatService {
       senderId: supportMessage.senderId,
       sender: supportMessage.sender,
       message: supportMessage.message,
+      imageUrl: supportMessage.imageUrl,
       isRead: supportMessage.isRead,
       readAt: supportMessage.readAt,
       createdAt: supportMessage.createdAt,

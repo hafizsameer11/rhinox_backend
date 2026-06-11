@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { Decimal } from 'decimal.js';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
@@ -893,6 +894,27 @@ async function main() {
     }
   }
   console.log(`✅ Seeded ${cablePlans.length} cable TV plans`);
+
+  // Seed super admin user
+  const adminEmail = process.env.ADMIN_SEED_EMAIL || 'admin@rhinoxpay.com';
+  const adminPassword = process.env.ADMIN_SEED_PASSWORD || 'Admin@123456';
+  const existingAdmin = await prisma.adminUser.findUnique({ where: { email: adminEmail } });
+  if (!existingAdmin) {
+    await prisma.adminUser.create({
+      data: {
+        email: adminEmail,
+        passwordHash: await bcrypt.hash(adminPassword, 10),
+        firstName: 'Super',
+        lastName: 'Admin',
+        role: 'SUPER_ADMIN',
+        country: 'NG',
+        status: 'active',
+      },
+    });
+    console.log(`✅ Seeded super admin: ${adminEmail}`);
+  } else {
+    console.log(`ℹ️ Super admin already exists: ${adminEmail}`);
+  }
 
   console.log('🎉 Database seed completed!');
 }

@@ -623,6 +623,39 @@ export class DepositController {
    *         description: Transaction not found
    *         $ref: '#/components/schemas/Error'
    */
+  async checkDepositStatus(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
+      const { transactionId } = req.params;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      if (!transactionId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Transaction ID is required',
+        });
+      }
+
+      const status = await this.service.checkDepositStatus(userId, transactionId);
+
+      return res.json({
+        success: true,
+        data: status,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to check deposit status',
+      });
+    }
+  }
+
   async getReceipt(req: Request, res: Response) {
     try {
       const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;

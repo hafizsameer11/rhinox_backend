@@ -55,11 +55,11 @@ model User {
   p2pReviewsAsReviewee    P2PReview[]         @relation("P2PReviewsAsReviewee")
   beneficiaries           Beneficiary[]
   supportChats            SupportChat[]
-  supportChatsAssigned    SupportChat[]       @relation("SupportChatsAssigned")
   supportMessagesAsSender SupportMessage[]    @relation("SupportMessagesAsSender")
   notifications           Notification[]
   applicationLogs          ApplicationLog[]
   rewardClaims            RewardClaim[]
+  userRewards             UserReward[]
 
   @@index([email])
   @@index([phone])
@@ -861,7 +861,7 @@ model SupportChat {
 
   // Relations
   user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assignee User?            @relation("SupportChatsAssigned", fields: [assignedTo], references: [id], onDelete: SetNull)
+  assignee AdminUser?       @relation("SupportChatsAssigned", fields: [assignedTo], references: [id], onDelete: SetNull)
   messages SupportMessage[]
 
   @@index([userId])
@@ -876,6 +876,8 @@ model SupportMessage {
   chatId    Int       @map("chat_id")
   senderId  Int       @map("sender_id") // User ID (can be user or support agent/admin)
   message   String    @db.Text
+  imageUrl  String?   @map("image_url")
+  isFromSupport Boolean @default(false) @map("is_from_support")
   isRead    Boolean   @default(false) @map("is_read")
   readAt    DateTime? @map("read_at")
   createdAt DateTime  @default(now()) @map("created_at")
@@ -945,4 +947,167 @@ model RewardClaim {
   @@index([userId])
   @@index([claimedAt])
   @@map("reward_claims")
+}
+
+// ============================================
+// MODULE: ADMIN
+// ============================================
+
+model AdminUser {
+  id           Int       @id @default(autoincrement())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  firstName    String?   @map("first_name")
+  lastName     String?   @map("last_name")
+  role         String    @default("ADMIN") @db.VarChar(40)
+  country      String?   @db.VarChar(10)
+  status       String    @default("active") @db.VarChar(20)
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  sessions          AdminSession[]
+  otps              AdminOTP[]
+  auditLogs         AdminAuditLog[]
+  assignedChats     SupportChat[]       @relation("SupportChatsAssigned")
+  sentNotifications AdminNotification[]
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+  @@map("admin_users")
+}
+
+model AdminSession {
+  id           Int      @id @default(autoincrement())
+  adminId      Int      @map("admin_id")
+  token        String   @unique @db.VarChar(500)
+  refreshToken String?  @unique @map("refresh_token") @db.VarChar(500)
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  admin AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@map("admin_sessions")
+}
+
+model AdminOTP {
+  id        Int      @id @default(autoincrement())
+  adminId   Int      @map("admin_id")
+  code      String   @db.VarChar(10)
+  type      String   @default("admin_login") @db.VarChar(40)
+  expiresAt DateTime @map("expires_at")
+  isUsed    Boolean  @default(false) @map("is_used")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  admin AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([code])
+  @@map("admin_otps")
+}
+
+model AdminAuditLog {
+  id         Int      @id @default(autoincrement())
+  adminId    Int      @map("admin_id")
+  action     String   @db.VarChar(120)
+  resource   String   @db.VarChar(80)
+  resourceId String?  @map("resource_id") @db.VarChar(80)
+  metadata   Json?
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  admin AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([resource])
+  @@index([createdAt])
+  @@map("admin_audit_logs")
+}
+
+model PlatformFeeConfig {
+  id          Int      @id @default(autoincrement())
+  walletType  String   @map("wallet_type") @db.VarChar(20)
+  serviceType String   @map("service_type") @db.VarChar(80)
+  subType     String?  @map("sub_type") @db.VarChar(80)
+  feeType     String   @default("percentage") @map("fee_type") @db.VarChar(20)
+  value       Decimal  @db.Decimal(10, 4)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([walletType, serviceType])
+  @@map("platform_fee_configs")
+}
+
+model RewardRule {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(255)
+  service     String   @db.VarChar(80)
+  metric      String   @db.VarChar(40)
+  period      String   @db.VarChar(40)
+  threshold   Decimal  @db.Decimal(20, 8)
+  rewardType  String   @map("reward_type") @db.VarChar(40)
+  rewardValue String   @map("reward_value") @db.VarChar(255)
+  rewardMeta  Json?    @map("reward_meta")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  userRewards UserReward[]
+
+  @@index([service])
+  @@index([isActive])
+  @@map("reward_rules")
+}
+
+model UserReward {
+  id         Int       @id @default(autoincrement())
+  userId     Int       @map("user_id")
+  ruleId     Int       @map("rule_id")
+  status     String    @default("eligible") @db.VarChar(40)
+  eligibleAt DateTime  @default(now()) @map("eligible_at")
+  claimedAt  DateTime? @map("claimed_at")
+  expiresAt  DateTime? @map("expires_at")
+  claimMeta  Json?     @map("claim_meta")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rule RewardRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([ruleId])
+  @@index([status])
+  @@map("user_rewards")
+}
+
+model AdminNotification {
+  id          Int      @id @default(autoincrement())
+  adminId     Int?     @map("admin_id")
+  title       String   @db.VarChar(255)
+  message     String   @db.Text
+  countries   Json?
+  userSegment String?  @map("user_segment") @db.VarChar(80)
+  sentCount   Int      @default(0) @map("sent_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  admin AdminUser? @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("admin_notifications")
+}
+
+model AdminBanner {
+  id        Int      @id @default(autoincrement())
+  imageUrl  String   @map("image_url") @db.VarChar(500)
+  regions   Json?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("admin_banners")
 }

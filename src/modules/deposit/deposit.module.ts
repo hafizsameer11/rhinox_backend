@@ -31,6 +31,7 @@ export class DepositModule implements IModule {
     this.router.get('/bank-details', this.controller.getBankDetails.bind(this.controller));
     this.router.post('/initiate', this.controller.initiateDeposit.bind(this.controller));
     this.router.post('/confirm', this.controller.confirmDeposit.bind(this.controller));
+    this.router.get('/status/:transactionId', this.controller.checkDepositStatus.bind(this.controller));
     this.router.get('/receipt/:transactionId', this.controller.getReceipt.bind(this.controller));
   }
 }

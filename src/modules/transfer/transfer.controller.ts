@@ -70,16 +70,17 @@ export class TransferController {
    */
   async validateRecipient(req: Request, res: Response) {
     try {
-      const { email, userId } = req.query;
+      const { email, userId, rhinoxPayId } = req.query;
 
-      if (!email && !userId) {
+      if (!email && !userId && !rhinoxPayId) {
         return res.status(400).json({
           success: false,
-          message: 'Email or userId parameter is required',
+          message: 'Email, Rhinox Pay ID, or userId parameter is required',
         });
       }
 
-      const recipientIdentifier = (email as string) || (userId as string);
+      const recipientIdentifier =
+        (rhinoxPayId as string) || (email as string) || (userId as string);
       const recipientInfo = await this.service.validateRhionXUser(recipientIdentifier);
 
       return res.json({
@@ -332,6 +333,7 @@ export class TransferController {
         channel,
         recipientUserId,
         recipientEmail, // For RhionX user transfers (from QR scan)
+        recipientRhinoxPayId,
         paymentMethodId, // For bank_account withdrawals
         accountNumber, // Legacy
         bankName, // Legacy
@@ -363,10 +365,15 @@ export class TransferController {
       }
 
       // Validate channel-specific requirements
-      if (channel === 'rhionx_user' && !recipientUserId && !recipientEmail) {
+      if (
+        channel === 'rhionx_user' &&
+        !recipientUserId &&
+        !recipientEmail &&
+        !recipientRhinoxPayId
+      ) {
         return res.status(400).json({
           success: false,
-          message: 'Recipient email or user ID is required for RhionX user transfers',
+          message: 'Recipient Rhinox Pay ID, email, or user ID is required for RhionX user transfers',
         });
       }
 
@@ -391,6 +398,7 @@ export class TransferController {
         channel,
         recipientUserId,
         recipientEmail,
+        recipientRhinoxPayId,
         paymentMethodId,
         accountNumber,
         bankName,

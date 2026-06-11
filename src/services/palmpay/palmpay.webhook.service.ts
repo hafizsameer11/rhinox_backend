@@ -7,9 +7,25 @@ import {
   notifyWithdrawal,
 } from '../../core/utils/notification.events.js';
 import { fromPalmPayAmount, mapPalmPayStatus } from './palmpay.utils.js';
+import { PalmPayDepositService } from './palmpay.deposit.service.js';
 import type { PalmPayWebhookPayload } from './palmpay.types.js';
 
 export class PalmPayWebhookService {
+  private readonly palmPayDepositService = new PalmPayDepositService();
+
+  /**
+   * Poll PalmPay for deposit status and apply the same ledger updates as webhooks.
+   */
+  async syncDepositStatus(merchantOrderId: string) {
+    const order = await this.palmPayDepositService.queryOrderStatus(merchantOrderId);
+    await this.processDepositWebhook({
+      orderId: merchantOrderId,
+      orderNo: order.orderNo,
+      orderStatus: order.orderStatus,
+      amount: order.orderAmount,
+      completeTime: (order as any).completeTime ?? (order as any).completedTime,
+    });
+  }
   async handleWebhook(payload: PalmPayWebhookPayload, context: { headers?: any; ipAddress?: string; userAgent?: string }) {
     const rawWebhook = await prisma.palmPayRawWebhook.create({
       data: {

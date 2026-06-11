@@ -3,6 +3,7 @@ import { type IModule } from '../../core/types/module.types.js';
 import { SupportChatController } from './support-chat.controller.js';
 import { SupportChatService } from './support-chat.service.js';
 import { authMiddleware } from '../../core/middleware/auth.middleware.js';
+import { uploadSingle } from '../../core/middleware/upload.middleware.js';
 
 /**
  * Support Chat Module
@@ -31,7 +32,7 @@ export class SupportChatModule implements IModule {
     this.router.post('/chats', authMiddleware, this.controller.createChat.bind(this.controller));
     this.router.get('/chats', authMiddleware, this.controller.getUserChats.bind(this.controller));
     this.router.get('/chats/:id', authMiddleware, this.controller.getChatDetails.bind(this.controller));
-    this.router.post('/chats/:id/messages', authMiddleware, this.controller.sendMessage.bind(this.controller));
+    this.router.post('/chats/:id/messages', authMiddleware, uploadSingle('image'), this.controller.sendMessage.bind(this.controller));
     this.router.put('/chats/:id/messages/read', authMiddleware, this.controller.markMessagesAsRead.bind(this.controller));
     this.router.get('/chats/unread-count', authMiddleware, this.controller.getUnreadCount.bind(this.controller));
   }

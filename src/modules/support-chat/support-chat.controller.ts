@@ -381,7 +381,9 @@ export class SupportChatController {
     try {
       const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
       const { id } = req.params;
-      const { message } = req.body;
+      const message = typeof req.body?.message === 'string' ? req.body.message : '';
+      const uploadedFile = (req as any).file as Express.Multer.File | undefined;
+      const imageUrl = uploadedFile ? `/uploads/${uploadedFile.filename}` : null;
 
       if (!userId) {
         return res.status(401).json({
@@ -390,10 +392,10 @@ export class SupportChatController {
         });
       }
 
-      if (!message || message.trim().length === 0) {
+      if (!message.trim() && !imageUrl) {
         return res.status(400).json({
           success: false,
-          message: 'Message is required',
+          message: 'Message or image is required',
         });
       }
 
@@ -411,7 +413,7 @@ export class SupportChatController {
         });
       }
 
-      const chatMessage = await this.service.sendMessage(id, userId, message);
+      const chatMessage = await this.service.sendMessage(id, userId, message, imageUrl);
 
       return res.status(201).json({
         success: true,

@@ -24,6 +24,7 @@ export { BillPaymentModule } from './bill-payment/bill-payment.module.js';
 export { SupportChatModule } from './support-chat/support-chat.module.js';
 export { NotificationModule } from './notification/notification.module.js';
 export { RewardsModule } from './rewards/rewards.module.js';
+export { AdminModule } from './admin/admin.module.js';
 
 // Add more module exports here as you create them
 // export { TransactionModule } from './transaction/transaction.module.js';

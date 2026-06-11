@@ -7,8 +7,10 @@ import cookieParser from 'cookie-parser';
 import swaggerUi from 'swagger-ui-express';
 import dotenv from 'dotenv';
 import { ModuleLoader } from './src/core/utils/module-loader.js';
-import { AuthModule, WalletModule, KYCModule, HomeModule, CountryModule, CryptoModule, DepositModule, ExchangeModule, ConversionModule, TransferModule, PaymentSettingsModule, P2PModule, P2POrderModule, P2PChatModule, P2PReviewModule, BankAccountModule, TransactionHistoryModule, BillPaymentModule, SupportChatModule, NotificationModule, RewardsModule } from './src/modules/index.js';
+import { AuthModule, WalletModule, KYCModule, HomeModule, CountryModule, CryptoModule, DepositModule, ExchangeModule, ConversionModule, TransferModule, PaymentSettingsModule, P2PModule, P2POrderModule, P2PChatModule, P2PReviewModule, BankAccountModule, TransactionHistoryModule, BillPaymentModule, SupportChatModule, NotificationModule, RewardsModule, AdminModule } from './src/modules/index.js';
 import { authMiddleware } from './src/core/middleware/auth.middleware.js';
+import { adminAuthMiddleware } from './src/core/middleware/admin-auth.middleware.js';
+import { requirePermission } from './src/core/middleware/require-permission.middleware.js';
 import ApiError from './src/core/utils/ApiError.js';
 import { swaggerSpec } from './src/core/config/swagger.js';
 import { PalmPayWebhookService } from './src/services/palmpay/palmpay.webhook.service.js';
@@ -295,6 +297,9 @@ moduleLoader.registerMany([
     module: new AuthModule(),
   },
   {
+    module: new AdminModule(),
+  },
+  {
     module: new CountryModule(),
   },
   
@@ -382,7 +387,7 @@ moduleLoader.registerMany([
 
 // Register exchange admin routes separately (require auth)
 const exchangeModule = new ExchangeModule();
-app.use('/api/exchange', authMiddleware, exchangeModule.getAdminRouter());
+app.use('/api/exchange', adminAuthMiddleware, requirePermission('exchange.write'), exchangeModule.getAdminRouter());
 
 // Register crypto public routes separately (no auth)
 const cryptoModule = new CryptoModule();

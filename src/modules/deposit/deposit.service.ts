@@ -3,6 +3,7 @@ import prisma from '../../core/config/database.js';
 import { WalletService } from '../wallet/wallet.service.js';
 import { sendDepositInitiatedEmail } from '../../core/utils/transaction-email.service.js';
 import { PalmPayDepositService } from '../../services/palmpay/palmpay.deposit.service.js';
+import { PalmPayWebhookService } from '../../services/palmpay/palmpay.webhook.service.js';
 import { createProviderUnavailableError } from '../../services/palmpay/palmpay.utils.js';
 import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
 
@@ -13,10 +14,12 @@ import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.
 export class DepositService {
   private walletService: WalletService;
   private palmPayDepositService: PalmPayDepositService;
+  private palmPayWebhookService: PalmPayWebhookService;
 
   constructor() {
     this.walletService = new WalletService();
     this.palmPayDepositService = new PalmPayDepositService();
+    this.palmPayWebhookService = new PalmPayWebhookService();
   }
 
   private toNullableString(value: unknown): string | null {
@@ -251,6 +254,99 @@ export class DepositService {
     await assertTransactionSecurity(transaction.wallet.user, { pin, emailOtp });
 
     throw new Error('Bank transfer deposits are confirmed automatically. Manual deposit confirmation is disabled.');
+  }
+
+  /**
+   * Check deposit status for the app waiting screen.
+   * If still pending, syncs with PalmPay before returning the latest status.
+   */
+  async checkDepositStatus(userId: string, transactionId: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const parsedTransactionId =
+      typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
+
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+    if (isNaN(parsedTransactionId) || parsedTransactionId <= 0) {
+      throw new Error('Invalid transaction ID format');
+    }
+
+    let transaction = await prisma.transaction.findUnique({
+      where: { id: parsedTransactionId },
+      include: {
+        wallet: {
+          include: {
+            user: true,
+          },
+        },
+        palmPayVirtualAccounts: true,
+      },
+    });
+
+    if (!transaction) {
+      throw new Error('Transaction not found');
+    }
+
+    if (transaction.wallet.userId !== parsedUserId) {
+      throw new Error('Unauthorized access to transaction');
+    }
+
+    if (transaction.type !== 'deposit') {
+      throw new Error('Transaction is not a deposit');
+    }
+
+    if (transaction.status === 'pending') {
+      const merchantOrderId =
+        transaction.palmPayVirtualAccounts[0]?.merchantOrderId ||
+        (transaction.metadata as any)?.merchantOrderId;
+
+      if (merchantOrderId) {
+        try {
+          await this.palmPayWebhookService.syncDepositStatus(merchantOrderId);
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error('[DepositService] Failed to sync PalmPay deposit status:', message);
+        }
+
+        transaction = await prisma.transaction.findUnique({
+          where: { id: parsedTransactionId },
+          include: {
+            wallet: {
+              include: {
+                user: true,
+              },
+            },
+            palmPayVirtualAccounts: true,
+          },
+        });
+
+        if (!transaction) {
+          throw new Error('Transaction not found');
+        }
+      }
+    }
+
+    const fee = Number(transaction.fee);
+    const amount = Number(transaction.amount);
+    const creditedAmount = amount - fee;
+
+    return {
+      id: transaction.id,
+      reference: transaction.reference,
+      status: transaction.status,
+      amount: transaction.amount.toString(),
+      currency: transaction.currency,
+      fee: transaction.fee.toString(),
+      creditedAmount: creditedAmount.toString(),
+      completedAt: transaction.completedAt,
+      message:
+        transaction.status === 'completed'
+          ? 'Payment received and wallet credited'
+          : transaction.status === 'failed' || transaction.status === 'cancelled'
+          ? 'Payment was not completed'
+          : 'Waiting for bank transfer confirmation',
+    };
   }
 
   /**

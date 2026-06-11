@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { type IModule } from '../../core/types/module.types.js';
+import { adminAuthMiddleware } from '../../core/middleware/admin-auth.middleware.js';
+import { requirePermission } from '../../core/middleware/require-permission.middleware.js';
 import { KYCController } from './kyc.controller.js';
 import { KYCService } from './kyc.service.js';
 
@@ -32,9 +34,19 @@ export class KYCModule implements IModule {
     this.router.post('/face-verification', this.controller.submitFaceVerification.bind(this.controller));
     this.router.post('/upload-id', this.controller.uploadIDDocument.bind(this.controller));
     
-    // Admin routes (for testing/approval)
-    this.router.post('/admin/approve', this.controller.approveKYC.bind(this.controller));
-    this.router.post('/admin/reject', this.controller.rejectKYC.bind(this.controller));
+    // Admin routes (legacy — protected with admin auth + kyc.write)
+    this.router.post(
+      '/admin/approve',
+      adminAuthMiddleware,
+      requirePermission('kyc.write'),
+      this.controller.approveKYC.bind(this.controller)
+    );
+    this.router.post(
+      '/admin/reject',
+      adminAuthMiddleware,
+      requirePermission('kyc.write'),
+      this.controller.rejectKYC.bind(this.controller)
+    );
   }
 }
 
