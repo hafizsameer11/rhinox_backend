@@ -2,8 +2,6 @@ import bcrypt from 'bcryptjs';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import prisma from '../../core/config/database.js';
 import { generateOTP, sendOTPEmail } from '../../core/utils/email.service.js';
-import { CryptoService } from '../crypto/crypto.service.js';
-import { WalletService } from '../wallet/wallet.service.js';
 import { parseOptionalId } from '../../core/utils/idParser.js';
 import {
   notifyEmailVerified,
@@ -15,9 +13,21 @@ import {
 } from '../../core/utils/notification.events.js';
 import {
   isSupportedAfricanCountry,
-  isSupportedAfricanFiatCurrency,
 } from '../../core/constants/supported-countries.js';
 import { ensureRhinoxPayId, generateUniqueRhinoxPayId } from '../../core/utils/rhinox-pay-id.service.js';
+import { initializeUserWallets } from '../../services/user-wallet-init.service.js';
+
+export class EmailNotVerifiedError extends Error {
+  readonly code = 'EMAIL_NOT_VERIFIED';
+
+  constructor(
+    readonly userId: number,
+    message = 'Please verify your email before logging in. A new verification code has been sent to your email.'
+  ) {
+    super(message);
+    this.name = 'EmailNotVerifiedError';
+  }
+}
 
 /**
  * Auth Service
@@ -186,6 +196,14 @@ export class AuthService {
       throw new Error('Account is deactivated');
     }
 
+    if (!user.isEmailVerified) {
+      await this.resendEmailOTP(String(user.id)).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Failed to resend verification OTP for user ${user.id}:`, message);
+      });
+      throw new EmailNotVerifiedError(user.id);
+    }
+
     // Generate tokens
     const tokens = this.generateTokens(user.id.toString());
 
@@ -318,15 +336,13 @@ export class AuthService {
       },
     });
 
-    // Initialize crypto wallets after email verification (async, don't wait)
-    this.initializeCryptoWallets(user.id).catch(error => {
-      console.error('Failed to initialize crypto wallets:', error);
-    });
-
-    // Initialize fiat wallets after email verification (async, don't wait)
-    this.initializeFiatWallets(user.id).catch(error => {
-      console.error('Failed to initialize fiat wallets:', error);
-    });
+    // Create fiat + crypto wallets before returning (ensures wallets exist on live)
+    try {
+      await initializeUserWallets(user.id);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to initialize wallets for user ${user.id}:`, message);
+    }
 
     notifyEmailVerified(user.id);
 
@@ -602,94 +618,6 @@ export class AuthService {
       faceVerificationSuccessful: updatedKYC.faceVerificationSuccessful,
       message: 'Face verification marked as successful',
     };
-  }
-
-  /**
-   * Initialize crypto wallets for user (called after email verification)
-   */
-  private async initializeCryptoWallets(userId: string | number) {
-    try {
-      console.log(`🚀 Starting crypto wallet initialization for user ${userId}...`);
-      const cryptoService = new CryptoService();
-      const result = await cryptoService.initializeUserCryptoWallets(userId);
-      console.log(`✅ Successfully initialized ${result.length} crypto virtual accounts for user ${userId}`);
-    } catch (error: any) {
-      console.error(`❌ Failed to initialize crypto wallets for user ${userId}:`, error.message || error);
-      // Don't throw - this is a background operation
-    }
-  }
-
-  /**
-   * Initialize fiat wallets for user (called after email verification)
-   * Creates wallets for ALL active fiat currencies in the database
-   */
-  private async initializeFiatWallets(userId: number | string) {
-    try {
-      const walletService = new WalletService();
-      const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-
-      // Get user to verify they exist
-      const user = await prisma.user.findUnique({
-        where: { id: userIdNum },
-      });
-
-      if (!user) {
-        console.error(`User ${userId} not found for fiat wallet initialization`);
-        return;
-      }
-
-      // Create wallets only for supported African fiat currencies
-      const fiatCurrencies = await prisma.currency.findMany({
-        where: {
-          type: 'fiat',
-          isActive: true,
-        },
-        orderBy: {
-          code: 'asc',
-        },
-      }).then((items) => items.filter((currency) => isSupportedAfricanFiatCurrency(currency.code)));
-
-      if (fiatCurrencies.length === 0) {
-        console.log('No active fiat currencies found in database');
-        return;
-      }
-
-      console.log(`Creating ${fiatCurrencies.length} fiat wallets for user ${userId}`);
-
-      // Create wallets for each fiat currency
-      for (const currency of fiatCurrencies) {
-        try {
-          // Check if wallet already exists
-          const existingWallet = await prisma.wallet.findUnique({
-            where: {
-              userId_currency: {
-                userId: userIdNum,
-                currency: currency.code,
-              },
-            },
-          });
-
-          if (existingWallet) {
-            console.log(`Wallet for ${currency.code} already exists for user ${userId}`);
-            continue;
-          }
-
-          // Create wallet
-          await walletService.createWallet(String(userIdNum), currency.code, 'fiat');
-          console.log(`✅ Created fiat wallet for ${currency.code} (${currency.name}) for user ${userId}`);
-        } catch (error: any) {
-          // If wallet already exists, that's fine - continue
-          if (error.message?.includes('already exists')) {
-            console.log(`Wallet for ${currency.code} already exists for user ${userId}`);
-            continue;
-          }
-          console.error(`❌ Failed to create wallet for ${currency.code}:`, error.message || error);
-        }
-      }
-    } catch (error) {
-      console.error(`Failed to initialize fiat wallets for user ${userId}:`, error);
-      // Don't throw - this is a background operation
-    }
   }
 
   /**

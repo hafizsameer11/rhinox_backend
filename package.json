@@ -15,6 +15,8 @@
     "tatum:master-wallets:dev": "tsx scripts/create-master-wallets.ts",
     "tatum:backfill-users": "node --import dotenv/config dist/scripts/backfill-crypto-wallets.js",
     "tatum:backfill-users:dev": "tsx scripts/backfill-crypto-wallets.ts",
+    "wallets:backfill": "node --import dotenv/config dist/scripts/backfill-user-wallets.js",
+    "wallets:backfill:dev": "tsx scripts/backfill-user-wallets.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

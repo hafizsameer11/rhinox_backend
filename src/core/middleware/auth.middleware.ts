@@ -71,6 +71,21 @@ const authenticateUser = async (
       throw ApiError.unauthorized('User not found');
     }
 
+    if (!isUser.isActive) {
+      throw ApiError.unauthorized('Account is deactivated');
+    }
+
+    const requestPath = req.originalUrl.split('?')[0];
+    const emailVerificationExempt =
+      requestPath.includes('/auth/verify-email') ||
+      requestPath.includes('/auth/resend-verification');
+
+    if (!isUser.isEmailVerified && !emailVerificationExempt) {
+      throw ApiError.forbidden(
+        'Please verify your email before using the app. Check your inbox for the verification code.'
+      );
+    }
+
     // Attach user to request (ensure req.body exists first)
     if (!req.body) {
       req.body = {};

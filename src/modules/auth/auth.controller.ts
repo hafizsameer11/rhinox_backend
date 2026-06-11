@@ -1,5 +1,5 @@
 import { type Request, type Response } from 'express';
-import { AuthService } from './auth.service.js';
+import { AuthService, EmailNotVerifiedError } from './auth.service.js';
 
 /**
  * Auth Controller
@@ -271,6 +271,14 @@ export class AuthController {
         data: result,
       });
     } catch (error: any) {
+      if (error instanceof EmailNotVerifiedError) {
+        return res.status(403).json({
+          success: false,
+          code: error.code,
+          message: error.message,
+          data: { userId: error.userId },
+        });
+      }
       return res.status(401).json({
         success: false,
         message: error.message || 'Login failed',
