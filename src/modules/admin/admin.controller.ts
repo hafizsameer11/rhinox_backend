@@ -47,26 +47,6 @@ export class AdminController {
     }
   };
 
-  verifyOtp = async (req: AdminRequest, res: Response) => {
-    try {
-      const { email, code } = req.body;
-      const result = await this.authService.verifyOtp(email, code, req.ip, req.get('user-agent') || undefined);
-      return res.json({ success: true, data: result });
-    } catch (error: any) {
-      return res.status(400).json({ success: false, message: error.message });
-    }
-  };
-
-  resendOtp = async (req: AdminRequest, res: Response) => {
-    try {
-      const { email } = req.body;
-      const result = await this.authService.resendOtp(email);
-      return res.json({ success: true, data: result });
-    } catch (error: any) {
-      return res.status(400).json({ success: false, message: error.message });
-    }
-  };
-
   me = async (req: AdminRequest, res: Response) => {
     try {
       const admin = await this.authService.getMe(req.adminId!);

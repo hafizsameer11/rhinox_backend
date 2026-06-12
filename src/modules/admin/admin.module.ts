@@ -23,8 +23,6 @@ export class AdminModule implements IModule {
 
     // Auth (public)
     this.router.post('/auth/login', c.login);
-    this.router.post('/auth/verify-otp', c.verifyOtp);
-    this.router.post('/auth/resend-otp', c.resendOtp);
 
     // Auth (protected)
     this.router.get('/auth/me', auth, c.me);

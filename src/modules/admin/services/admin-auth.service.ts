@@ -1,6 +1,5 @@
 import bcrypt from 'bcryptjs';
 import prisma from '../../../core/config/database.js';
-import { generateOTP, sendEmail } from '../../../core/utils/email.service.js';
 import {
   generateAdminAccessToken,
   generateAdminRefreshToken,
@@ -19,58 +18,21 @@ export class AdminAuthService {
       throw new Error('Invalid email or password');
     }
 
-    await prisma.adminOTP.updateMany({
-      where: { adminId: admin.id, type: 'admin_login', isUsed: false },
-      data: { isUsed: true },
-    });
-
-    const code = generateOTP();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    await prisma.adminOTP.create({
-      data: {
-        adminId: admin.id,
-        code,
-        type: 'admin_login',
-        expiresAt,
-      },
-    });
-
-    await sendEmail(
-      admin.email,
-      'Rhinox Pay Admin Login Code',
-      `<p>Your admin login verification code is:</p><h2>${code}</h2><p>This code expires in 10 minutes.</p>`
-    );
-
-    return {
-      requiresOtp: true,
-      email: admin.email,
-      message: 'Verification code sent to your email',
-    };
+    return this.issueSession(admin, ipAddress, userAgent);
   }
 
-  async verifyOtp(email: string, code: string, ipAddress?: string, userAgent?: string) {
-    const admin = await prisma.adminUser.findUnique({ where: { email: email.toLowerCase().trim() } });
-    if (!admin || admin.status !== 'active') {
-      throw new Error('Invalid verification request');
-    }
-
-    const otp = await prisma.adminOTP.findFirst({
-      where: {
-        adminId: admin.id,
-        code,
-        type: 'admin_login',
-        isUsed: false,
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!otp) {
-      throw new Error('Invalid or expired verification code');
-    }
-
-    await prisma.adminOTP.update({ where: { id: otp.id }, data: { isUsed: true } });
-
+  private async issueSession(
+    admin: {
+      id: number;
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+      role: string;
+      country: string | null;
+    },
+    ipAddress?: string,
+    userAgent?: string
+  ) {
     const accessToken = generateAdminAccessToken(admin.id, admin.role);
     const refreshToken = generateAdminRefreshToken(admin.id, admin.role);
     const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
@@ -110,27 +72,6 @@ export class AdminAuthService {
         country: admin.country,
       },
     };
-  }
-
-  async resendOtp(email: string) {
-    const admin = await prisma.adminUser.findUnique({ where: { email: email.toLowerCase().trim() } });
-    if (!admin || admin.status !== 'active') {
-      throw new Error('Invalid email');
-    }
-
-    const code = generateOTP();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    await prisma.adminOTP.create({
-      data: { adminId: admin.id, code, type: 'admin_login', expiresAt },
-    });
-
-    await sendEmail(
-      admin.email,
-      'Rhinox Pay Admin Login Code',
-      `<p>Your admin login verification code is:</p><h2>${code}</h2><p>This code expires in 10 minutes.</p>`
-    );
-
-    return { message: 'Verification code resent' };
   }
 
   async getMe(adminId: number) {
