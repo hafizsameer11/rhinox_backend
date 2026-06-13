@@ -5,6 +5,7 @@ import {
   paginatedResponse,
   type AdminListQuery,
 } from '../../../core/admin/admin-query.helpers.js';
+import { WalletService } from '../../wallet/wallet.service.js';
 
 export class AdminDashboardService {
   async getStats(query: AdminListQuery) {
@@ -96,6 +97,58 @@ export class AdminDashboardService {
 }
 
 export class AdminUsersService {
+  private walletService = new WalletService();
+
+  async resolveUserId(identifier: string | number): Promise<number> {
+    if (typeof identifier === 'number' && identifier > 0) return identifier;
+
+    const decoded = decodeURIComponent(String(identifier)).trim();
+    const asNum = parseInt(decoded, 10);
+    if (!Number.isNaN(asNum) && String(asNum) === decoded) return asNum;
+
+    const directMatch = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: decoded },
+          { rhinoxPayId: decoded },
+        ],
+      },
+      select: { id: true },
+    });
+    if (directMatch) return directMatch.id;
+
+    const nameParts = decoded.split(/\s+/).filter(Boolean);
+    if (nameParts.length >= 2) {
+      const byName = await prisma.user.findFirst({
+        where: {
+          AND: [
+            { firstName: { contains: nameParts[0] } },
+            { lastName: { contains: nameParts.slice(1).join(' ') } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (byName) return byName.id;
+    }
+
+    if (nameParts.length === 1) {
+      const bySingle = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { firstName: { contains: nameParts[0] } },
+            { lastName: { contains: nameParts[0] } },
+            { rhinoxPayId: { contains: nameParts[0] } },
+            { email: { contains: nameParts[0] } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (bySingle) return bySingle.id;
+    }
+
+    throw new Error('User not found');
+  }
+
   private buildUserWhere(query: AdminListQuery) {
     const where: any = { ...buildDateFilter(query.from, query.to) };
     if (query.search) {
@@ -175,7 +228,8 @@ export class AdminUsersService {
     };
   }
 
-  async getById(userId: number) {
+  async getById(identifier: string | number) {
+    const userId = await this.resolveUserId(identifier);
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -252,7 +306,8 @@ export class AdminUsersService {
     return { updated: userIds.length };
   }
 
-  async getActivities(userId: number, query: AdminListQuery) {
+  async getActivities(identifier: string | number, query: AdminListQuery) {
+    const userId = await this.resolveUserId(identifier);
     const [transactions, kyc] = await Promise.all([
       prisma.transaction.findMany({
         where: { wallet: { userId }, ...buildDateFilter(query.from, query.to) },
@@ -280,15 +335,13 @@ export class AdminUsersService {
     return paginatedResponse(activities, activities.length, query.page, query.limit);
   }
 
-  async getUserWallets(userId: number) {
-    return prisma.wallet.findMany({
-      where: { userId },
-      include: { currencyRef: true },
-      orderBy: { createdAt: 'desc' },
-    });
+  async getUserWallets(identifier: string | number) {
+    const userId = await this.resolveUserId(identifier);
+    return this.walletService.getAllBalances(userId);
   }
 
-  async getUserP2P(userId: number) {
+  async getUserP2P(identifier: string | number) {
+    const userId = await this.resolveUserId(identifier);
     const [ads, orders] = await Promise.all([
       prisma.p2PAd.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 20 }),
       prisma.p2POrder.findMany({

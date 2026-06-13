@@ -94,7 +94,7 @@ export class AdminController {
 
   getUser = async (req: AdminRequest, res: Response) => {
     try {
-      const data = await this.usersService.getById(Number(req.params.id));
+      const data = await this.usersService.getById(req.params.id);
       return res.json({ success: true, data });
     } catch (error: any) {
       return res.status(404).json({ success: false, message: error.message });
@@ -113,8 +113,9 @@ export class AdminController {
 
   updateUser = async (req: AdminRequest, res: Response) => {
     try {
-      const data = await this.usersService.update(Number(req.params.id), req.body);
-      await this.audit(req, 'update', 'users', req.params.id, req.body);
+      const userId = await this.usersService.resolveUserId(req.params.id);
+      const data = await this.usersService.update(userId, req.body);
+      await this.audit(req, 'update', 'users', userId, req.body);
       return res.json({ success: true, data });
     } catch (error: any) {
       return res.status(400).json({ success: false, message: error.message });
@@ -128,8 +129,9 @@ export class AdminController {
         return res.status(400).json({ success: false, message: 'No image uploaded' });
       }
       const imageUrl = `/uploads/${uploadedFile.filename}`;
-      const data = await this.usersService.updateProfilePicture(Number(req.params.id), imageUrl);
-      await this.audit(req, 'upload_profile_picture', 'users', req.params.id);
+      const userId = await this.usersService.resolveUserId(req.params.id);
+      const data = await this.usersService.updateProfilePicture(userId, imageUrl);
+      await this.audit(req, 'upload_profile_picture', 'users', userId);
       return res.json({ success: true, data });
     } catch (error: any) {
       return res.status(400).json({ success: false, message: error.message });
@@ -147,25 +149,39 @@ export class AdminController {
   };
 
   userActivities = async (req: AdminRequest, res: Response) => {
-    const data = await this.usersService.getActivities(Number(req.params.id), parseAdminListQuery(req));
-    return res.json({ success: true, data });
+    try {
+      const data = await this.usersService.getActivities(req.params.id, parseAdminListQuery(req));
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(404).json({ success: false, message: error.message });
+    }
   };
 
   userWallets = async (req: AdminRequest, res: Response) => {
-    const data = await this.usersService.getUserWallets(Number(req.params.id));
-    return res.json({ success: true, data });
+    try {
+      const data = await this.usersService.getUserWallets(req.params.id);
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(404).json({ success: false, message: error.message });
+    }
   };
 
   userTransactions = async (req: AdminRequest, res: Response) => {
-    const query = parseAdminListQuery(req);
-    query.userId = req.params.id;
-    const data = await this.transactionsService.list(query);
-    return res.json({ success: true, data });
+    try {
+      const userId = await this.usersService.resolveUserId(req.params.id);
+      const query = parseAdminListQuery(req);
+      query.userId = String(userId);
+      const data = await this.transactionsService.list(query);
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(404).json({ success: false, message: error.message });
+    }
   };
 
   userKyc = async (req: AdminRequest, res: Response) => {
     try {
-      const data = await this.kycService.getByUserId(Number(req.params.id));
+      const userId = await this.usersService.resolveUserId(req.params.id);
+      const data = await this.kycService.getByUserId(userId);
       return res.json({ success: true, data });
     } catch (error: any) {
       return res.status(404).json({ success: false, message: error.message });
@@ -173,8 +189,12 @@ export class AdminController {
   };
 
   userP2P = async (req: AdminRequest, res: Response) => {
-    const data = await this.usersService.getUserP2P(Number(req.params.id));
-    return res.json({ success: true, data });
+    try {
+      const data = await this.usersService.getUserP2P(req.params.id);
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(404).json({ success: false, message: error.message });
+    }
   };
 
   listTransactions = async (req: AdminRequest, res: Response) => {
