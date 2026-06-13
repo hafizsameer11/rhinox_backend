@@ -86,12 +86,19 @@ export class AdminSupportService {
     const chat = await prisma.supportChat.findUnique({ where: { id: chatId } });
     if (!chat) throw new Error('Support chat not found');
 
+    const trimmedMessage = (message || '').trim();
+    const normalizedImageUrl = imageUrl?.trim() || null;
+
+    if (!trimmedMessage && !normalizedImageUrl) {
+      throw new Error('Message or image is required');
+    }
+
     return prisma.supportMessage.create({
       data: {
         chatId,
         senderId: chat.userId,
-        message,
-        imageUrl: imageUrl || null,
+        message: trimmedMessage || '[Image attached]',
+        imageUrl: normalizedImageUrl,
         isFromSupport: true,
       },
     });

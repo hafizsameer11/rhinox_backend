@@ -420,7 +420,7 @@ export class AdminController {
     const data = await this.supportService.sendMessage(
       Number(req.params.id),
       req.adminId!,
-      req.body.message,
+      req.body.message || '',
       imageUrl
     );
     await this.audit(req, 'send_message', 'support_chats', req.params.id);
