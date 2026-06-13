@@ -121,6 +121,21 @@ export class AdminController {
     }
   };
 
+  uploadUserProfilePicture = async (req: AdminRequest, res: Response) => {
+    try {
+      const uploadedFile = (req as any).file as Express.Multer.File | undefined;
+      if (!uploadedFile) {
+        return res.status(400).json({ success: false, message: 'No image uploaded' });
+      }
+      const imageUrl = `/uploads/${uploadedFile.filename}`;
+      const data = await this.usersService.updateProfilePicture(Number(req.params.id), imageUrl);
+      await this.audit(req, 'upload_profile_picture', 'users', req.params.id);
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+  };
+
   bulkUsers = async (req: AdminRequest, res: Response) => {
     try {
       const data = await this.usersService.bulkAction(req.body.userIds || [], req.body.action);
@@ -164,6 +179,11 @@ export class AdminController {
 
   listTransactions = async (req: AdminRequest, res: Response) => {
     const data = await this.transactionsService.list(parseAdminListQuery(req));
+    return res.json({ success: true, data });
+  };
+
+  transactionStats = async (req: AdminRequest, res: Response) => {
+    const data = await this.transactionsService.getStats(parseAdminListQuery(req));
     return res.json({ success: true, data });
   };
 
@@ -398,19 +418,44 @@ export class AdminController {
     return res.status(201).json({ success: true, data });
   };
 
+  deleteNotification = async (req: AdminRequest, res: Response) => {
+    await this.notificationsService.deleteNotification(Number(req.params.id));
+    await this.audit(req, 'delete', 'notifications', req.params.id);
+    return res.json({ success: true, data: { deleted: true } });
+  };
+
   listBanners = async (req: AdminRequest, res: Response) => {
     const data = await this.notificationsService.listBanners(parseAdminListQuery(req));
     return res.json({ success: true, data });
   };
 
   createBanner = async (req: AdminRequest, res: Response) => {
-    const data = await this.notificationsService.createBanner(req.body);
+    const uploadedFile = (req as any).file as Express.Multer.File | undefined;
+    const imageUrl = uploadedFile
+      ? `/uploads/${uploadedFile.filename}`
+      : req.body.imageUrl;
+    const regionsRaw = req.body.regions || req.body.countries;
+    const regions = Array.isArray(regionsRaw)
+      ? regionsRaw
+      : regionsRaw
+        ? [String(regionsRaw).toUpperCase()]
+        : [];
+    const data = await this.notificationsService.createBanner({ imageUrl, regions });
     await this.audit(req, 'create', 'banners', data.id, req.body);
     return res.status(201).json({ success: true, data });
   };
 
   updateBanner = async (req: AdminRequest, res: Response) => {
-    const data = await this.notificationsService.updateBanner(Number(req.params.id), req.body);
+    const uploadedFile = (req as any).file as Express.Multer.File | undefined;
+    const payload: Record<string, unknown> = { ...req.body };
+    if (uploadedFile) payload.imageUrl = `/uploads/${uploadedFile.filename}`;
+    const regionsRaw = req.body.regions || req.body.countries;
+    if (regionsRaw) {
+      payload.regions = Array.isArray(regionsRaw)
+        ? regionsRaw
+        : [String(regionsRaw).toUpperCase()];
+    }
+    const data = await this.notificationsService.updateBanner(Number(req.params.id), payload as any);
     await this.audit(req, 'update', 'banners', req.params.id, req.body);
     return res.json({ success: true, data });
   };

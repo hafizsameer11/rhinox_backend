@@ -1,6 +1,7 @@
 import { Decimal, type Decimal as DecimalType } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 import { getBaseSymbol } from '../../services/crypto/unified-stablecoin.service.js';
+import { ensureRhinoxPayId } from '../../core/utils/rhinox-pay-id.service.js';
 
 /**
  * Transaction History Service
@@ -18,6 +19,50 @@ export class TransactionHistoryService {
     if (!user) return null;
     const name = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
     return name || user.name || user.email || null;
+  }
+
+  private async resolveSenderInfo(metadata: any) {
+    if (!metadata) return null;
+
+    const embedded = metadata.senderInfo;
+    if (embedded?.name) {
+      return {
+        userId: embedded.userId || metadata.senderUserId || null,
+        name: embedded.name,
+        email: embedded.email || null,
+        phone: embedded.phone || null,
+        rhinoxPayId: embedded.rhinoxPayId || metadata.senderRhinoxPayId || null,
+      };
+    }
+
+    const senderUserId = metadata.senderUserId;
+    if (!senderUserId) return null;
+
+    const parsedSenderId =
+      typeof senderUserId === 'string' ? parseInt(senderUserId, 10) : senderUserId;
+    if (isNaN(parsedSenderId) || parsedSenderId <= 0) return null;
+
+    const user = await prisma.user.findUnique({
+      where: { id: parsedSenderId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        rhinoxPayId: true,
+      },
+    });
+    if (!user) return null;
+
+    const rhinoxPayId = user.rhinoxPayId || (await ensureRhinoxPayId(user.id));
+    return {
+      userId: user.id,
+      name: this.formatUserName(user) || user.email || 'RhionX User',
+      email: user.email,
+      phone: user.phone,
+      rhinoxPayId,
+    };
   }
 
   private summarizeP2POrder(order: any, currentUserId: number) {
@@ -689,12 +734,69 @@ export class TransactionHistoryService {
       totalIncoming = totalIncoming.plus(new Decimal(tx.amount).abs());
     });
 
+    const rhinoxDeposits = transactions.filter(
+      (tx: any) =>
+        tx.channel === 'rhionx_user' || (tx.metadata as any)?.senderUserId || (tx.metadata as any)?.senderInfo
+    );
+    const senderIds = [
+      ...new Set(
+        rhinoxDeposits
+          .map((tx: any) => {
+            const metadata = (tx.metadata as any) || {};
+            return metadata.senderInfo?.userId || metadata.senderUserId;
+          })
+          .filter(Boolean)
+          .map((id: string | number) => Number(id))
+          .filter((id: number) => !isNaN(id) && id > 0)
+      ),
+    ];
+    const senderUsers =
+      senderIds.length > 0
+        ? await prisma.user.findMany({
+            where: { id: { in: senderIds } },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true,
+              rhinoxPayId: true,
+            },
+          })
+        : [];
+    const senderMap = new Map(senderUsers.map((user) => [user.id, user]));
+
+    const buildSenderInfo = (metadata: any) => {
+      if (!metadata) return null;
+      if (metadata.senderInfo?.name) {
+        return metadata.senderInfo;
+      }
+      const senderUserId = metadata.senderUserId;
+      if (!senderUserId) return null;
+      const parsedSenderId = Number(senderUserId);
+      if (isNaN(parsedSenderId) || parsedSenderId <= 0) return null;
+      const user = senderMap.get(parsedSenderId);
+      if (!user) return null;
+      return {
+        userId: user.id,
+        name: this.formatUserName(user) || user.email || 'RhionX User',
+        email: user.email,
+        phone: user.phone,
+        rhinoxPayId: user.rhinoxPayId,
+      };
+    };
+
     // Normalize transactions
     const normalizedTransactions = transactions.map((tx: any) => {
       const normalizedType = this.getDepositTypeLabel(tx.channel || '');
       const amount = new Decimal(tx.amount);
       const fee = new Decimal(tx.fee);
       const creditedAmount = amount.minus(fee);
+      const metadata = (tx.metadata as any) || {};
+      const senderInfo =
+        tx.channel === 'rhionx_user' || metadata.senderUserId || metadata.senderInfo
+          ? buildSenderInfo(metadata)
+          : null;
 
       return {
         id: tx.id,
@@ -708,8 +810,11 @@ export class TransactionHistoryService {
         reference: tx.reference,
         description: tx.description || normalizedType,
         channel: tx.channel,
-        paymentMethod: tx.paymentMethod,
+        paymentMethod:
+          tx.paymentMethod ||
+          (tx.channel === 'rhionx_user' ? 'RhionX User Transfer' : undefined),
         country: tx.country,
+        senderInfo,
         provider: tx.provider ? {
           name: tx.provider.name,
           code: tx.provider.code,
@@ -751,6 +856,7 @@ export class TransactionHistoryService {
       mobile_money: 'Fund Wallet - Mobile Money',
       conversion: 'Fund Wallet - Conversion',
       p2p: 'Fund Wallet - P2P',
+      rhionx_user: 'RhinoxPay Transfer Received',
     };
     return labelMap[channel] || 'Fund Transaction';
   }
@@ -1211,14 +1317,41 @@ export class TransactionHistoryService {
         orderNo: transaction.palmPayVirtualAccounts[0].palmpayOrderNo,
         merchantOrderId: transaction.palmPayVirtualAccounts[0].merchantOrderId,
       } : null;
+
+      if (
+        transaction.channel === 'rhionx_user' ||
+        metadata?.senderUserId ||
+        metadata?.senderInfo
+      ) {
+        details.senderInfo = await this.resolveSenderInfo(metadata);
+        details.paymentMethod = details.paymentMethod || 'RhionX User Transfer';
+      }
     } else if (transaction.type === 'transfer' || transaction.type === 'withdrawal') {
       const totalAmount = amount.plus(fee);
       details.totalAmount = totalAmount.toString();
-      details.recipientInfo = metadata?.recipientInfo || null;
-      details.accountNumber = metadata?.accountNumber || metadata?.recipientInfo?.accountNumber || null;
-      details.accountName = metadata?.accountName || metadata?.recipientInfo?.accountName || metadata?.recipientInfo?.name || null;
-      details.bankName = metadata?.bankName || metadata?.recipientInfo?.bankName || null;
-      details.phoneNumber = metadata?.phoneNumber || metadata?.recipientInfo?.phoneNumber || null;
+      const recipientInfo = metadata?.recipientInfo || {};
+      details.recipientInfo = {
+        ...recipientInfo,
+        rhinoxPayId:
+          recipientInfo.rhinoxPayId ||
+          metadata?.recipientRhinoxPayId ||
+          null,
+        email: recipientInfo.email || metadata?.recipientEmail || null,
+        phone: recipientInfo.phone || metadata?.phoneNumber || null,
+        name: recipientInfo.name || recipientInfo.accountName || metadata?.accountName || null,
+        accountName: recipientInfo.accountName || recipientInfo.name || metadata?.accountName || null,
+      };
+      details.accountNumber = metadata?.accountNumber || recipientInfo.accountNumber || null;
+      details.accountName =
+        recipientInfo.accountName ||
+        recipientInfo.name ||
+        metadata?.accountName ||
+        null;
+      details.bankName = metadata?.bankName || recipientInfo.bankName || null;
+      details.phoneNumber = metadata?.phoneNumber || recipientInfo.phoneNumber || recipientInfo.phone || null;
+      if (transaction.channel === 'rhionx_user') {
+        details.rhinoxPayId = details.recipientInfo.rhinoxPayId;
+      }
     } else if (transaction.type === 'p2p') {
       details.orderId = metadata?.orderId || null;
       details.adId = metadata?.adId || null;

@@ -40,6 +40,7 @@ export class AdminModule implements IModule {
     this.router.post('/users/bulk', auth, perm('users.write'), c.bulkUsers);
     this.router.get('/users/:id', auth, perm('users.read'), c.getUser);
     this.router.patch('/users/:id', auth, perm('users.write'), c.updateUser);
+    this.router.post('/users/:id/profile-picture', auth, perm('users.write'), uploadSingle('avatar'), c.uploadUserProfilePicture);
     this.router.get('/users/:id/activities', auth, perm('users.read'), c.userActivities);
     this.router.get('/users/:id/wallets', auth, perm('users.read'), c.userWallets);
     this.router.get('/users/:id/transactions', auth, perm('transactions.read'), c.userTransactions);
@@ -48,6 +49,7 @@ export class AdminModule implements IModule {
 
     // Transactions
     this.router.get('/transactions', auth, perm('transactions.read'), c.listTransactions);
+    this.router.get('/transactions/stats', auth, perm('transactions.read'), c.transactionStats);
     this.router.get('/transactions/:id', auth, perm('transactions.read'), c.getTransaction);
 
     // KYC
@@ -103,9 +105,10 @@ export class AdminModule implements IModule {
     // Notifications / Banners
     this.router.get('/notifications', auth, perm('notifications.read'), c.listNotifications);
     this.router.post('/notifications/send', auth, perm('notifications.write'), c.sendNotification);
+    this.router.delete('/notifications/:id', auth, perm('notifications.write'), c.deleteNotification);
     this.router.get('/banners', auth, perm('notifications.read'), c.listBanners);
-    this.router.post('/banners', auth, perm('notifications.write'), c.createBanner);
-    this.router.patch('/banners/:id', auth, perm('notifications.write'), c.updateBanner);
+    this.router.post('/banners', auth, perm('notifications.write'), uploadSingle('image'), c.createBanner);
+    this.router.patch('/banners/:id', auth, perm('notifications.write'), uploadSingle('image'), c.updateBanner);
     this.router.delete('/banners/:id', auth, perm('notifications.write'), c.deleteBanner);
 
     // Staff

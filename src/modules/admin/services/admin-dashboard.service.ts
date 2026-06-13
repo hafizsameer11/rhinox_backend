@@ -150,18 +150,29 @@ export class AdminUsersService {
       total,
       query.page,
       query.limit,
-      await this.getStats()
+      await this.getStats(query)
     );
   }
 
-  async getStats() {
-    const [total, verified, pending, rejected] = await Promise.all([
+  async getStats(query?: AdminListQuery) {
+    const dateFilter = query ? buildDateFilter(query.from, query.to) : {};
+    const [total, verified, pending, rejected, activeUsers, newUsers] = await Promise.all([
       prisma.user.count(),
       prisma.kYC.count({ where: { status: 'verified' } }),
       prisma.kYC.count({ where: { status: 'pending' } }),
       prisma.kYC.count({ where: { status: 'rejected' } }),
+      prisma.user.count({ where: { isActive: true } }),
+      prisma.user.count({ where: dateFilter }),
     ]);
-    return { total, verified, pending, rejected, unverified: total - verified - pending - rejected };
+    return {
+      total,
+      verified,
+      pending,
+      rejected,
+      unverified: total - verified - pending - rejected,
+      activeUsers,
+      newUsers,
+    };
   }
 
   async getById(userId: number) {
@@ -200,8 +211,37 @@ export class AdminUsersService {
     });
   }
 
-  async update(userId: number, data: Partial<{ firstName: string; lastName: string; phone: string; isActive: boolean }>) {
-    return prisma.user.update({ where: { id: userId }, data });
+  async update(
+    userId: number,
+    data: Partial<{
+      firstName: string;
+      lastName: string;
+      phone: string;
+      isActive: boolean;
+      countryId: number;
+      password: string;
+      profilePictureUrl: string;
+    }>
+  ) {
+    const updateData: Record<string, unknown> = {};
+    if (data.firstName !== undefined) updateData.firstName = data.firstName;
+    if (data.lastName !== undefined) updateData.lastName = data.lastName;
+    if (data.phone !== undefined) updateData.phone = data.phone;
+    if (data.isActive !== undefined) updateData.isActive = data.isActive;
+    if (data.countryId !== undefined) updateData.countryId = data.countryId;
+    if (data.profilePictureUrl !== undefined) updateData.profilePictureUrl = data.profilePictureUrl;
+    if (data.password) {
+      const bcrypt = await import('bcryptjs');
+      updateData.passwordHash = await bcrypt.default.hash(data.password, 10);
+    }
+    return prisma.user.update({ where: { id: userId }, data: updateData });
+  }
+
+  async updateProfilePicture(userId: number, imageUrl: string) {
+    return prisma.user.update({
+      where: { id: userId },
+      data: { profilePictureUrl: imageUrl },
+    });
   }
 
   async bulkAction(userIds: number[], action: 'activate' | 'deactivate') {

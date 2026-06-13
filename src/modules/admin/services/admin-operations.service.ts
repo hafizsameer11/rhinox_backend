@@ -6,6 +6,8 @@ import {
   type AdminListQuery,
 } from '../../../core/admin/admin-query.helpers.js';
 
+const CRYPTO_CURRENCIES = ['BTC', 'ETH', 'USDT', 'USDC', 'BNB'];
+
 export class AdminTransactionsService {
   private mapActionToType(action?: string) {
     const map: Record<string, string> = {
@@ -19,7 +21,7 @@ export class AdminTransactionsService {
     return action ? map[action] : undefined;
   }
 
-  async list(query: AdminListQuery) {
+  private buildWhere(query: AdminListQuery) {
     const where: any = { ...buildDateFilter(query.from, query.to) };
 
     const action = query.action ? String(query.action) : undefined;
@@ -27,8 +29,8 @@ export class AdminTransactionsService {
     if (mappedType) where.type = mappedType;
     else if (query.type && query.type !== 'All') where.type = String(query.type);
 
-    if (query.assetType === 'Fiat') where.currency = { notIn: ['BTC', 'ETH', 'USDT', 'USDC', 'BNB'] };
-    if (query.assetType === 'Crypto') where.currency = { in: ['BTC', 'ETH', 'USDT', 'USDC', 'BNB'] };
+    if (query.assetType === 'Fiat') where.currency = { notIn: CRYPTO_CURRENCIES };
+    if (query.assetType === 'Crypto') where.currency = { in: CRYPTO_CURRENCIES };
 
     if (query.country && query.country !== 'Country' && query.country !== 'All') {
       where.country = String(query.country).toUpperCase().slice(0, 2);
@@ -36,8 +38,10 @@ export class AdminTransactionsService {
     if (query.status && query.status !== 'All Status') {
       where.status = String(query.status).toLowerCase();
     }
-    if (query.channel && query.channel !== 'All Routes' && query.channel !== 'All types') {
-      where.channel = { contains: String(query.channel).replace(/\s+/g, '_').toLowerCase() };
+    const channel = query.channel ? String(query.channel) : '';
+    const ignoredChannels = ['Tx Type', 'Route', 'All Routes', 'All types'];
+    if (channel && !ignoredChannels.includes(channel)) {
+      where.channel = { contains: channel.replace(/\s+/g, '_').toLowerCase() };
     }
     if (query.search) {
       where.OR = [
@@ -50,7 +54,27 @@ export class AdminTransactionsService {
       where.wallet = { userId: Number(query.userId) };
     }
 
-    const [items, total] = await Promise.all([
+    return where;
+  }
+
+  async getStats(query: AdminListQuery) {
+    const baseWhere = this.buildWhere({ ...query, assetType: undefined });
+    const [total, fiat, crypto] = await Promise.all([
+      prisma.transaction.count({ where: baseWhere }),
+      prisma.transaction.count({
+        where: { ...baseWhere, currency: { notIn: CRYPTO_CURRENCIES } },
+      }),
+      prisma.transaction.count({
+        where: { ...baseWhere, currency: { in: CRYPTO_CURRENCIES } },
+      }),
+    ]);
+    return { total, fiat, crypto };
+  }
+
+  async list(query: AdminListQuery) {
+    const where = this.buildWhere(query);
+
+    const [items, total, stats] = await Promise.all([
       prisma.transaction.findMany({
         where,
         skip: query.skip,
@@ -65,6 +89,7 @@ export class AdminTransactionsService {
         },
       }),
       prisma.transaction.count({ where }),
+      this.getStats(query),
     ]);
 
     return paginatedResponse(
@@ -94,7 +119,8 @@ export class AdminTransactionsService {
       })),
       total,
       query.page,
-      query.limit
+      query.limit,
+      stats
     );
   }
 
@@ -143,6 +169,7 @@ export class AdminKycService {
         userId: kyc.userId,
         name: formatUserName(kyc.user),
         email: kyc.user.email,
+        phone: kyc.user.phone || null,
         country: kyc.user.country?.code || null,
         status: kyc.status,
         tier: kyc.tier,

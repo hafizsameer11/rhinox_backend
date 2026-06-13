@@ -178,6 +178,10 @@ export class AdminNotificationsService {
   async deleteBanner(id: number) {
     return prisma.adminBanner.delete({ where: { id } });
   }
+
+  async deleteNotification(id: number) {
+    return prisma.adminNotification.delete({ where: { id } });
+  }
 }
 
 export class AdminStaffService {

@@ -935,6 +935,14 @@ export class TransferService {
         }
 
         // Create credit transaction for recipient
+        const senderUser = updatedTransaction.wallet?.user;
+        const senderName = senderUser
+          ? `${senderUser.firstName || ''} ${senderUser.lastName || ''}`.trim()
+          : 'RhionX User';
+        const senderRhinoxPayId = senderUser
+          ? senderUser.rhinoxPayId || (await ensureRhinoxPayId(senderUser.id))
+          : undefined;
+
         await prisma.transaction.create({
           data: {
             walletId: recipientWallet.id,
@@ -945,10 +953,19 @@ export class TransferService {
             fee: 0,
             reference: `${transaction.reference}-CREDIT`,
             channel: 'rhionx_user',
-            description: `Received ${transaction.amount} ${transaction.currency} from ${transaction.wallet?.user?.firstName || 'User'}`,
+            paymentMethod: this.getPaymentMethodName('rhionx_user'),
+            description: `Received ${transaction.amount} ${transaction.currency} from ${senderName}`,
             metadata: {
-              senderUserId: userId,
+              senderUserId: parsedUserId,
               senderTransactionId: transaction.id,
+              senderInfo: {
+                userId: parsedUserId,
+                name: senderName,
+                email: senderUser?.email || null,
+                rhinoxPayId: senderRhinoxPayId || null,
+                phone: senderUser?.phone || null,
+              },
+              transferType: 'rhionx_user',
             },
             completedAt: now,
           },
@@ -1003,6 +1020,8 @@ export class TransferService {
       fee: updatedTransaction.fee.toString(),
       status: updatedTransaction.status,
       channel: updatedTransaction.channel,
+      paymentMethod: updatedTransaction.paymentMethod,
+      country: updatedTransaction.country,
       recipientInfo,
       date: updatedTransaction.completedAt,
       createdAt: updatedTransaction.createdAt,
@@ -1101,7 +1120,20 @@ export class TransferService {
       country: receiptTransaction.country,
       channel: receiptTransaction.channel,
       paymentMethod: receiptTransaction.paymentMethod,
-      recipientInfo: metadata?.recipientInfo || {},
+      recipientInfo: {
+        ...(metadata?.recipientInfo || {}),
+        rhinoxPayId:
+          metadata?.recipientRhinoxPayId ||
+          metadata?.recipientInfo?.rhinoxPayId ||
+          null,
+        email: metadata?.recipientInfo?.email || metadata?.recipientEmail || null,
+        phone: metadata?.recipientInfo?.phone || metadata?.phoneNumber || null,
+        bankName: metadata?.bankName || metadata?.recipientInfo?.bankName,
+        accountNumber: metadata?.accountNumber || metadata?.recipientInfo?.accountNumber,
+        accountName: metadata?.accountName || metadata?.recipientInfo?.accountName,
+        name: metadata?.recipientInfo?.name || metadata?.accountName || metadata?.recipientInfo?.accountName,
+      },
+      metadata,
       provider: metadata?.provider,
       orderId: metadata?.palmpayOrderId,
       orderNo: metadata?.palmpayOrderNo,
