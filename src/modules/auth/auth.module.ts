@@ -3,6 +3,7 @@ import { type IModule } from '../../core/types/module.types.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { authMiddleware } from '../../core/middleware/auth.middleware.js';
+import { uploadSingle } from '../../core/middleware/upload.middleware.js';
 
 /**
  * Auth Module
@@ -52,6 +53,13 @@ export class AuthModule implements IModule {
     
     // Get current user (requires authentication)
     this.router.get('/me', authMiddleware, this.controller.getCurrentUser.bind(this.controller));
+    this.router.put('/me', authMiddleware, this.controller.updateProfile.bind(this.controller));
+    this.router.post(
+      '/me/profile-picture',
+      authMiddleware,
+      uploadSingle('avatar'),
+      this.controller.updateProfilePicture.bind(this.controller)
+    );
 
     // Security confirmation settings
     this.router.get('/security-settings', authMiddleware, this.controller.getSecuritySettings.bind(this.controller));

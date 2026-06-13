@@ -396,6 +396,69 @@ export class AuthController {
     }
   }
 
+  async updateProfile(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      const { firstName, lastName, phone, countryId } = req.body;
+      const user = await this.service.updateProfile(userId, {
+        firstName,
+        lastName,
+        phone,
+        countryId: countryId != null ? Number(countryId) : undefined,
+      });
+
+      return res.json({
+        success: true,
+        data: user,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to update profile',
+      });
+    }
+  }
+
+  async updateProfilePicture(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      const uploadedFile = (req as any).file as Express.Multer.File | undefined;
+      if (!uploadedFile) {
+        return res.status(400).json({
+          success: false,
+          message: 'Profile picture file is required',
+        });
+      }
+
+      const imageUrl = `/uploads/${uploadedFile.filename}`;
+      const user = await this.service.updateProfilePicture(userId, imageUrl);
+
+      return res.json({
+        success: true,
+        data: user,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to update profile picture',
+      });
+    }
+  }
+
   /**
    * @swagger
    * /api/auth/verify-email:

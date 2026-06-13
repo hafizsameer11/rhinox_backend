@@ -30,6 +30,7 @@ model User {
   isPhoneVerified Boolean  @default(false)
   isActive        Boolean  @default(true)
   rhinoxPayId     String?  @unique @map("rhinox_pay_id") @db.VarChar(20)
+  profilePictureUrl String? @map("profile_picture_url") @db.VarChar(500)
   verifyTransactionsWithPin   Boolean @default(false) @map("verify_transactions_with_pin")
   verifyTransactionsWithEmail Boolean @default(false) @map("verify_transactions_with_email")
   verifyTransactionsWith2FA   Boolean @default(false) @map("verify_transactions_with_2fa")

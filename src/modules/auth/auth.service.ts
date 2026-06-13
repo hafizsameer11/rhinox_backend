@@ -287,6 +287,136 @@ export class AuthService {
       phone: user.phone,
       firstName: user.firstName,
       lastName: user.lastName,
+      countryId: user.countryId,
+      profilePictureUrl: user.profilePictureUrl,
+      isEmailVerified: user.isEmailVerified,
+      isPhoneVerified: user.isPhoneVerified,
+      hasPin: !!user.pinHash,
+    };
+  }
+
+  /**
+   * Update current user profile
+   */
+  async updateProfile(
+    userId: string,
+    data: {
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+      countryId?: number;
+    }
+  ) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    const updateData: {
+      firstName?: string;
+      lastName?: string;
+      phone?: string | null;
+      countryId?: number | null;
+    } = {};
+
+    if (data.firstName !== undefined) {
+      const firstName = data.firstName.trim();
+      if (!firstName) {
+        throw new Error('First name is required');
+      }
+      updateData.firstName = firstName;
+    }
+
+    if (data.lastName !== undefined) {
+      const lastName = data.lastName.trim();
+      if (!lastName) {
+        throw new Error('Last name is required');
+      }
+      updateData.lastName = lastName;
+    }
+
+    if (data.phone !== undefined) {
+      const phone = data.phone.trim();
+      if (!phone) {
+        throw new Error('Phone number is required');
+      }
+
+      const existingPhone = await prisma.user.findFirst({
+        where: {
+          phone,
+          id: { not: parsedUserId },
+        },
+      });
+      if (existingPhone) {
+        throw new Error('Phone number is already in use');
+      }
+
+      updateData.phone = phone;
+    }
+
+    if (data.countryId !== undefined) {
+      const countryId = Number(data.countryId);
+      if (!Number.isInteger(countryId) || countryId <= 0) {
+        throw new Error('Invalid country selected');
+      }
+
+      const country = await prisma.country.findUnique({ where: { id: countryId } });
+      if (!country) {
+        throw new Error('Selected country was not found');
+      }
+
+      updateData.countryId = countryId;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      throw new Error('No profile fields provided to update');
+    }
+
+    const user = await prisma.user.update({
+      where: { id: parsedUserId },
+      data: updateData,
+    });
+
+    return {
+      id: user.id,
+      email: user.email,
+      phone: user.phone,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      countryId: user.countryId,
+      profilePictureUrl: user.profilePictureUrl,
+      isEmailVerified: user.isEmailVerified,
+      isPhoneVerified: user.isPhoneVerified,
+      hasPin: !!user.pinHash,
+    };
+  }
+
+  /**
+   * Update current user profile picture
+   */
+  async updateProfilePicture(userId: string, imageUrl: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    if (!imageUrl?.trim()) {
+      throw new Error('Profile picture is required');
+    }
+
+    const user = await prisma.user.update({
+      where: { id: parsedUserId },
+      data: { profilePictureUrl: imageUrl },
+    });
+
+    return {
+      id: user.id,
+      email: user.email,
+      phone: user.phone,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      countryId: user.countryId,
+      profilePictureUrl: user.profilePictureUrl,
       isEmailVerified: user.isEmailVerified,
       isPhoneVerified: user.isPhoneVerified,
       hasPin: !!user.pinHash,
