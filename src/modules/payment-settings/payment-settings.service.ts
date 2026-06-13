@@ -10,6 +10,19 @@ import { ensureRhinoxPayId } from '../../core/utils/rhinox-pay-id.service.js';
  */
 export class PaymentSettingsService {
   private palmPayPayoutService = new PalmPayPayoutService();
+  private static banksCache: {
+    data: Array<{
+      name: string;
+      bankName: string;
+      bankCode: string;
+      code: string;
+      logoUrl?: string;
+      countryCode: string;
+      currency: string;
+    }>;
+    expiresAt: number;
+  } | null = null;
+  private static readonly BANKS_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
   /**
    * Get all payment methods for a user
@@ -647,9 +660,18 @@ export class PaymentSettingsService {
       throw new Error('Only NGN withdrawals to Nigerian banks are currently supported');
     }
 
+    const now = Date.now();
+    if (
+      PaymentSettingsService.banksCache &&
+      PaymentSettingsService.banksCache.expiresAt > now &&
+      PaymentSettingsService.banksCache.data.length > 0
+    ) {
+      return PaymentSettingsService.banksCache.data;
+    }
+
     try {
       const banks = await this.palmPayPayoutService.getBanks();
-      return banks.map((bank) => ({
+      const mapped = banks.map((bank) => ({
         name: bank.bankName,
         bankName: bank.bankName,
         bankCode: bank.bankCode,
@@ -658,7 +680,18 @@ export class PaymentSettingsService {
         countryCode: 'NG',
         currency: 'NGN',
       }));
+
+      PaymentSettingsService.banksCache = {
+        data: mapped,
+        expiresAt: now + PaymentSettingsService.BANKS_CACHE_TTL_MS,
+      };
+
+      return mapped;
     } catch (error: any) {
+      if (PaymentSettingsService.banksCache?.data.length) {
+        console.warn('[PaymentSettingsService] Returning stale bank cache after provider error');
+        return PaymentSettingsService.banksCache.data;
+      }
       throw createProviderUnavailableError(error.message || 'Bank list is unavailable');
     }
   }
