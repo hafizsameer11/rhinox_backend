@@ -77,6 +77,7 @@ export const parseAdminListQuery = (req: Request): AdminListQuery => {
   const status = req.query.status ? String(req.query.status) : undefined;
 
   return {
+    ...(req.query as Record<string, unknown>),
     page,
     limit,
     skip,
@@ -86,7 +87,6 @@ export const parseAdminListQuery = (req: Request): AdminListQuery => {
     to,
     country,
     status,
-    ...req.query,
   } as AdminListQuery;
 };
 

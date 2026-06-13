@@ -98,6 +98,14 @@ export class SupportChatService {
     const chats = await prisma.supportChat.findMany({
       where,
       include: {
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
         messages: {
           orderBy: {
             createdAt: 'desc',
@@ -154,6 +162,7 @@ export class SupportChatService {
         reason: chat.reason,
         status: chat.status,
         assignedTo: chat.assignedTo,
+        assignee: chat.assignee,
         resolvedAt: chat.resolvedAt,
         appealedAt: chat.appealedAt,
         lastMessage: lastMessage
