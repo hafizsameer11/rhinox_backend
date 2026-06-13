@@ -5,6 +5,7 @@ import {
   paginatedResponse,
   type AdminListQuery,
 } from '../../../core/admin/admin-query.helpers.js';
+import { ensureRhinoxPayId } from '../../../core/utils/rhinox-pay-id.service.js';
 
 const CRYPTO_CURRENCIES = ['BTC', 'ETH', 'USDT', 'USDC', 'BNB'];
 
@@ -134,7 +135,84 @@ export class AdminTransactionsService {
       },
     });
     if (!tx) throw new Error('Transaction not found');
-    return tx;
+
+    const metadata = (tx.metadata as Record<string, any>) || {};
+    let senderInfo = metadata.senderInfo || null;
+
+    if (
+      (tx.channel === 'rhionx_user' || metadata.senderUserId || metadata.senderInfo) &&
+      !senderInfo?.name &&
+      metadata.senderUserId
+    ) {
+      const senderUserId =
+        typeof metadata.senderUserId === 'string'
+          ? parseInt(metadata.senderUserId, 10)
+          : metadata.senderUserId;
+      if (!isNaN(senderUserId) && senderUserId > 0) {
+        const sender = await prisma.user.findUnique({
+          where: { id: senderUserId },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true,
+            rhinoxPayId: true,
+          },
+        });
+        if (sender) {
+          senderInfo = {
+            userId: sender.id,
+            name: formatUserName(sender) || sender.email,
+            email: sender.email,
+            phone: sender.phone,
+            rhinoxPayId: sender.rhinoxPayId || (await ensureRhinoxPayId(sender.id)),
+          };
+        }
+      }
+    }
+
+    const recipientInfo = metadata.recipientInfo || null;
+
+    return {
+      id: tx.id,
+      reference: tx.reference,
+      type: tx.type,
+      status: tx.status,
+      amount: Number(tx.amount),
+      currency: tx.currency,
+      fee: Number(tx.fee),
+      country: tx.country,
+      channel: tx.channel,
+      paymentMethod: tx.paymentMethod,
+      description: tx.description,
+      metadata: tx.metadata,
+      recipientInfo,
+      senderInfo,
+      bankAccount: tx.bankAccount
+        ? {
+            bankName: tx.bankAccount.bankName,
+            accountNumber: tx.bankAccount.accountNumber,
+            accountName: tx.bankAccount.accountName,
+          }
+        : null,
+      provider: tx.provider
+        ? {
+            name: tx.provider.name,
+            code: tx.provider.code,
+          }
+        : null,
+      user: tx.wallet?.user
+        ? {
+            id: tx.wallet.user.id,
+            name: formatUserName(tx.wallet.user),
+            email: tx.wallet.user.email,
+            username: tx.wallet.user.rhinoxPayId,
+          }
+        : null,
+      createdAt: tx.createdAt,
+      completedAt: tx.completedAt,
+    };
   }
 }
 
