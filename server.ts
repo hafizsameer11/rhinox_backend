@@ -24,7 +24,10 @@ const PORT = process.env.PORT || 3000;
 // ============================================
 // Middleware Setup
 // ============================================
-app.use(helmet()); // Security headers
+app.use(helmet({
+  // Allow admin panel / mobile app on other origins to embed uploaded images
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 app.use(cors()); // Enable CORS
 app.use(compression()); // Compress responses
 app.use(morgan('dev')); // Logging
@@ -110,6 +113,7 @@ app.use('/uploads', (req, res, next) => {
       'application/octet-stream';
     
     res.setHeader('Content-Type', contentType);
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.sendFile(fullPath, (err) => {
       if (err) {
         console.error(`📁 Error sending file ${fullPath}:`, err.message);

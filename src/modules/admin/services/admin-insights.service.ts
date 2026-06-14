@@ -202,6 +202,8 @@ export class AdminRewardsService {
         country: claim.user.country?.code || null,
         totalReward: claim.value,
         lastReward: claim.rewardTitle,
+        status: claim.status,
+        rewardCode: claim.rewardCode,
         claimedAt: claim.claimedAt,
       })),
       total,

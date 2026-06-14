@@ -4,16 +4,28 @@ import {
   REWARD_CATALOG,
   REWARD_TIERS,
   TIER_ORDER,
+  getRewardByCode,
   type RewardTierCode,
   type RewardTierDefinition,
+  type RewardDefinition,
 } from './rewards.constants.js';
+import {
+  RewardEligibilityService,
+  buildRuleRewardCode,
+  getRuleIdFromCode,
+  isRuleRewardCode,
+} from './reward-eligibility.service.js';
 
 interface UserRewardStats {
   completedTransactions: number;
   monthlyBalanceUsd: number;
 }
 
+type ClaimStatus = 'none' | 'pending' | 'completed' | 'failed';
+
 export class RewardsService {
+  private eligibilityService = new RewardEligibilityService();
+
   private getTierByCode(code: RewardTierCode): RewardTierDefinition {
     const tier = REWARD_TIERS.find((entry) => entry.code === code);
     if (!tier) {
@@ -160,6 +172,100 @@ export class RewardsService {
     return Number(((transactionProgress + balanceProgress) / 2).toFixed(2));
   }
 
+  private resolveClaimStatus(status?: string): ClaimStatus {
+    if (status === 'completed') return 'completed';
+    if (status === 'pending') return 'pending';
+    if (status === 'failed') return 'failed';
+    return 'none';
+  }
+
+  private buildClaimResponse(reward: RewardDefinition, claim: {
+    id: number;
+    status: string;
+    claimedAt: Date;
+    expiresAt: Date | null;
+  }) {
+    return {
+      id: claim.id,
+      code: reward.code,
+      title: reward.title,
+      description: reward.description,
+      value: reward.value,
+      tierCode: reward.tierCode,
+      status: claim.status,
+      fulfillmentType: reward.fulfillmentType,
+      amountNgn: reward.amountNgn ?? null,
+      categoryCode: reward.categoryCode ?? null,
+      dataHint: reward.dataHint ?? null,
+      icon: reward.icon,
+      claimedAt: claim.claimedAt,
+      expiresAt: claim.expiresAt,
+    };
+  }
+
+  private mapRewardListItem(
+    reward: RewardDefinition,
+    existingClaim?: { id: number; status: string } | null,
+    userRewardStatus?: string | null
+  ) {
+    let claimStatus = this.resolveClaimStatus(existingClaim?.status);
+    if (!existingClaim && userRewardStatus === 'eligible') claimStatus = 'none';
+    if (!existingClaim && userRewardStatus === 'pending') claimStatus = 'pending';
+    if (userRewardStatus === 'claimed') claimStatus = 'completed';
+
+    const isClaimed = claimStatus === 'completed';
+    const canClaim =
+      claimStatus === 'none' || claimStatus === 'pending' || claimStatus === 'failed';
+
+    return {
+      id: reward.code,
+      code: reward.code,
+      title: reward.title,
+      description: reward.description,
+      value: reward.value,
+      icon: reward.icon,
+      tierCode: reward.tierCode,
+      fulfillmentType: reward.fulfillmentType,
+      amountNgn: reward.amountNgn ?? null,
+      categoryCode: reward.categoryCode ?? null,
+      dataHint: reward.dataHint ?? null,
+      claimId: existingClaim?.id ?? null,
+      claimStatus,
+      isClaimed,
+      canClaim: userRewardStatus === 'eligible' ? true : canClaim,
+    };
+  }
+
+  private async buildRuleBasedRewards(
+    userIdNum: number,
+    claimByCode: Map<string, { id: number; status: string; rewardCode: string }>
+  ) {
+    const userRewards = await this.eligibilityService.getEligibleRuleRewards(userIdNum);
+    const items = [];
+
+    for (const entry of userRewards) {
+      if (!entry.rule) continue;
+      if (entry.status !== 'eligible' && entry.status !== 'pending' && entry.status !== 'claimed') {
+        continue;
+      }
+
+      const rewardCode = buildRuleRewardCode(entry.rule.id);
+      const rewardDef = await this.eligibilityService.getRuleRewardDefinition(entry.rule.id);
+      if (!rewardDef) continue;
+
+      const existingClaim = claimByCode.get(rewardCode);
+      const mapped = this.mapRewardListItem(rewardDef, existingClaim, entry.status);
+      if (entry.status === 'claimed' && !existingClaim) {
+        mapped.isClaimed = true;
+        mapped.canClaim = false;
+        mapped.claimStatus = 'completed';
+      }
+      items.push(mapped);
+    }
+
+    return items;
+  }
+
   async getRewardsDashboard(userId: string | number) {
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(userIdNum) || userIdNum <= 0) {
@@ -175,41 +281,38 @@ export class RewardsService {
       throw new Error('User not found');
     }
 
+    await this.eligibilityService.syncUserRewards(userIdNum);
+
     const stats = await this.getUserStats(userIdNum);
     const currentTier = this.resolveCurrentTier(stats);
     const nextTier = this.getNextTier(currentTier);
     const claims = await prisma.rewardClaim.findMany({
       where: { userId: userIdNum },
-      select: { rewardCode: true, status: true },
     });
-    const claimedCodes = new Set(
-      claims.filter((claim) => claim.status === 'completed').map((claim) => claim.rewardCode)
-    );
+    const claimByCode = new Map(claims.map((claim) => [claim.rewardCode, claim]));
 
     const fullName = [user.firstName, user.middleName, user.lastName]
       .filter(Boolean)
       .join(' ')
       .trim();
 
-    const rewards = REWARD_CATALOG.filter(
+    const catalogRewards = REWARD_CATALOG.filter(
       (reward) => TIER_ORDER[reward.tierCode] <= TIER_ORDER[currentTier.code as RewardTierCode]
-    ).map((reward) => ({
-      id: reward.code,
-      code: reward.code,
-      title: reward.title,
-      description: reward.description,
-      value: reward.value,
-      icon: reward.icon,
-      tierCode: reward.tierCode,
-      isClaimed: claimedCodes.has(reward.code),
-      canClaim: !claimedCodes.has(reward.code),
-    }));
+    ).map((reward) => this.mapRewardListItem(reward, claimByCode.get(reward.code)));
+
+    const ruleRewards = await this.buildRuleBasedRewards(userIdNum, claimByCode);
+    const catalogCodes = new Set(catalogRewards.map((reward) => reward.code));
+    const mergedRewards = [
+      ...catalogRewards,
+      ...ruleRewards.filter((reward) => !catalogCodes.has(reward.code)),
+    ];
 
     return {
       user: {
         id: user.id,
         name: fullName || user.email,
         email: user.email,
+        profilePictureUrl: user.profilePictureUrl,
         isVerified:
           user.isEmailVerified ||
           user.kyc?.status === 'approved' ||
@@ -226,7 +329,7 @@ export class RewardsService {
           : 'Top tier unlocked',
         criteria: this.buildCriteria(stats, nextTier),
       },
-      rewards,
+      rewards: mergedRewards,
     };
   }
 
@@ -297,9 +400,24 @@ export class RewardsService {
       throw new Error(`Invalid userId: ${userId}`);
     }
 
-    const reward = REWARD_CATALOG.find((entry) => entry.code === rewardCode);
+    const reward = isRuleRewardCode(rewardCode)
+      ? await this.eligibilityService.getRuleRewardDefinition(getRuleIdFromCode(rewardCode)!)
+      : getRewardByCode(rewardCode);
     if (!reward) {
       throw new Error('Reward not found');
+    }
+
+    if (isRuleRewardCode(rewardCode)) {
+      const ruleId = getRuleIdFromCode(rewardCode);
+      if (!ruleId) {
+        throw new Error('Invalid rule reward');
+      }
+      const userReward = await prisma.userReward.findFirst({
+        where: { userId: userIdNum, ruleId },
+      });
+      if (!userReward || !['eligible', 'pending'].includes(userReward.status)) {
+        throw new Error('Reward is not available for claiming');
+      }
     }
 
     const dashboard = await this.getRewardsDashboard(userIdNum);
@@ -316,32 +434,88 @@ export class RewardsService {
     const expiresAt = new Date();
     expiresAt.setMonth(expiresAt.getMonth() + 3);
 
-    const claim = await prisma.rewardClaim.create({
-      data: {
-        userId: userIdNum,
-        rewardCode: reward.code,
-        rewardTitle: reward.title,
-        tierCode: reward.tierCode,
-        value: reward.value,
-        status: 'completed',
-        expiresAt,
-        metadata: {
-          description: reward.description,
-          icon: reward.icon,
+    const existingClaim = await prisma.rewardClaim.findUnique({
+      where: {
+        userId_rewardCode: {
+          userId: userIdNum,
+          rewardCode: reward.code,
         },
       },
     });
 
-    return {
-      id: claim.id,
-      code: reward.code,
-      title: reward.title,
-      description: reward.description,
-      value: reward.value,
-      tierCode: reward.tierCode,
-      status: claim.status,
-      claimedAt: claim.claimedAt,
-      expiresAt: claim.expiresAt,
-    };
+    if (existingClaim?.status === 'completed') {
+      throw new Error('Reward has already been claimed');
+    }
+
+    if (existingClaim?.status === 'pending') {
+      return this.buildClaimResponse(reward, existingClaim);
+    }
+
+    let claim;
+    if (existingClaim?.status === 'failed') {
+      claim = await prisma.rewardClaim.update({
+        where: { id: existingClaim.id },
+        data: {
+          status: 'pending',
+          rewardTitle: reward.title,
+          value: reward.value,
+          tierCode: reward.tierCode,
+          expiresAt,
+          metadata: {
+            description: reward.description,
+            icon: reward.icon,
+            fulfillmentType: reward.fulfillmentType,
+            amountNgn: reward.amountNgn ?? null,
+            categoryCode: reward.categoryCode ?? null,
+            dataHint: reward.dataHint ?? null,
+          },
+        },
+      });
+    } else {
+      claim = await prisma.rewardClaim.create({
+        data: {
+          userId: userIdNum,
+          rewardCode: reward.code,
+          rewardTitle: reward.title,
+          tierCode: reward.tierCode,
+          value: reward.value,
+          status: 'pending',
+          expiresAt,
+          metadata: {
+            description: reward.description,
+            icon: reward.icon,
+            fulfillmentType: reward.fulfillmentType,
+            amountNgn: reward.amountNgn ?? null,
+            categoryCode: reward.categoryCode ?? null,
+            dataHint: reward.dataHint ?? null,
+          },
+        },
+      });
+    }
+
+    if (reward.fulfillmentType === 'instant') {
+      const completed = await prisma.rewardClaim.update({
+        where: { id: claim.id },
+        data: { status: 'completed' },
+      });
+
+      if (isRuleRewardCode(reward.code)) {
+        const ruleId = getRuleIdFromCode(reward.code);
+        if (ruleId) {
+          await this.eligibilityService.markUserRewardClaimed(userIdNum, ruleId, 'claimed');
+        }
+      }
+
+      return this.buildClaimResponse(reward, completed);
+    }
+
+    if (isRuleRewardCode(reward.code)) {
+      const ruleId = getRuleIdFromCode(reward.code);
+      if (ruleId) {
+        await this.eligibilityService.markUserRewardPending(userIdNum, ruleId);
+      }
+    }
+
+    return this.buildClaimResponse(reward, claim);
   }
 }

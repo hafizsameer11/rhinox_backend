@@ -11,6 +11,7 @@ import {
 } from '../../services/palmpay/palmpay.utils.js';
 import { notifyBillPayment } from '../../core/utils/notification.events.js';
 import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
+import { RewardFulfillmentService } from '../rewards/reward-fulfillment.service.js';
 
 /**
  * Bill Payment Service
@@ -19,10 +20,12 @@ import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.
 export class BillPaymentService {
   private walletService: WalletService;
   private palmPayBillPaymentService: PalmPayBillPaymentService;
+  private rewardFulfillmentService: RewardFulfillmentService;
 
   constructor() {
     this.walletService = new WalletService();
     this.palmPayBillPaymentService = new PalmPayBillPaymentService();
+    this.rewardFulfillmentService = new RewardFulfillmentService();
   }
 
   /**
@@ -235,6 +238,7 @@ export class BillPaymentService {
       accountType?: string; // prepaid, postpaid (for electricity)
       planId?: string | number; // PalmPay itemId for supported bill scenes
       beneficiaryId?: number; // If using saved beneficiary
+      rewardClaimId?: number;
     }
   ) {
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
@@ -247,6 +251,18 @@ export class BillPaymentService {
     }
     if (data.currency !== 'NGN') {
       throw new Error('Only NGN bill payments are currently supported');
+    }
+
+    let rewardContext: Awaited<ReturnType<RewardFulfillmentService['validatePendingClaim']>> | null = null;
+    if (data.rewardClaimId) {
+      rewardContext = await this.rewardFulfillmentService.validatePendingClaim(
+        userIdNum,
+        data.rewardClaimId
+      );
+      this.rewardFulfillmentService.assertCategoryMatchesReward(
+        rewardContext.reward,
+        data.categoryCode
+      );
     }
 
     const { sceneCode, billerId } = this.parsePalmPayProviderId(data.providerId.toString(), data.categoryCode);
@@ -329,17 +345,28 @@ export class BillPaymentService {
       accountNumber = `02340${last10}`;
     }
 
-    // Calculate amount from user input unless the selected item is a fixed-price bundle.
-    const amount = this.resolveBillPaymentAmount(sceneCode, data.amount, item);
+    const isRewardFulfillment = Boolean(rewardContext);
+    const resolvedAmountInput = rewardContext
+      ? this.rewardFulfillmentService.resolveRewardAmount(
+          rewardContext.reward,
+          data.amount,
+          sceneCode
+        )
+      : data.amount;
 
-    // Calculate fee
-    const fee = this.calculateFee(amount.toNumber(), data.currency);
+    // Calculate amount from user input unless the selected item is a fixed-price bundle.
+    const amount = this.resolveBillPaymentAmount(sceneCode, resolvedAmountInput, item);
+
+    // Calculate fee — reward redemptions are platform-funded with no user fee
+    const fee = isRewardFulfillment ? 0 : this.calculateFee(amount.toNumber(), data.currency);
     const totalAmount = amount.plus(fee);
 
-    // Check balance
-    const walletBalance = new Decimal(wallet.balance);
-    if (walletBalance.lessThan(totalAmount)) {
-      throw new Error('Insufficient balance');
+    // Check balance (skip for reward fulfillment — platform pays)
+    if (!isRewardFulfillment) {
+      const walletBalance = new Decimal(wallet.balance);
+      if (walletBalance.lessThan(totalAmount)) {
+        throw new Error('Insufficient balance');
+      }
     }
 
     // Validate account number based on category
@@ -384,6 +411,14 @@ export class BillPaymentService {
           planName: item.itemName,
           planDataAmount: item.raw?.dataAmount || null,
           beneficiaryId: beneficiary?.id || null,
+          ...(isRewardFulfillment && rewardContext
+            ? {
+                isRewardFulfillment: true,
+                rewardClaimId: rewardContext.claim.id,
+                rewardCode: rewardContext.claim.rewardCode,
+                rewardAmountNgn: amount.toNumber(),
+              }
+            : {}),
         },
       },
     });
@@ -479,11 +514,14 @@ export class BillPaymentService {
     const amount = new Decimal(transaction.amount);
     const fee = new Decimal(transaction.fee);
     const totalAmount = amount.plus(fee);
+    const isRewardFulfillment = Boolean(metadata?.isRewardFulfillment && metadata?.rewardClaimId);
 
-    // Check balance
-    const walletBalance = new Decimal(transaction.wallet.balance);
-    if (walletBalance.lessThan(totalAmount)) {
-      throw new Error('Insufficient balance');
+    // Check balance (skip for reward fulfillment)
+    if (!isRewardFulfillment) {
+      const walletBalance = new Decimal(transaction.wallet.balance);
+      if (walletBalance.lessThan(totalAmount)) {
+        throw new Error('Insufficient balance');
+      }
     }
 
     if (!isSupportedPalmPayScene(metadata?.categoryCode)) {
@@ -492,36 +530,56 @@ export class BillPaymentService {
 
     const palmPayOrderId = `bill_${transaction.reference.toLowerCase()}`;
 
-    const debitedTransaction = await prisma.$transaction(async (tx) => {
-      await tx.wallet.update({
-        where: { id: transaction.walletId },
-        data: {
-          balance: {
-            decrement: totalAmount.toNumber(),
-          },
-        },
-      });
-
-      return tx.transaction.update({
-        where: { id: txIdNum },
-        data: {
-          status: 'processing',
-          metadata: {
-            ...metadata,
-            palmpayOrderId: palmPayOrderId,
-            walletDebited: true,
-            walletDebitedAt: new Date().toISOString(),
-          },
-        },
-        include: {
-          wallet: {
-            include: {
-              currencyRef: true,
+    const debitedTransaction = isRewardFulfillment
+      ? await prisma.transaction.update({
+          where: { id: txIdNum },
+          data: {
+            status: 'processing',
+            metadata: {
+              ...metadata,
+              palmpayOrderId: palmPayOrderId,
+              walletDebited: false,
+              rewardFulfillment: true,
             },
           },
-        },
-      });
-    });
+          include: {
+            wallet: {
+              include: {
+                currencyRef: true,
+              },
+            },
+          },
+        })
+      : await prisma.$transaction(async (tx) => {
+          await tx.wallet.update({
+            where: { id: transaction.walletId },
+            data: {
+              balance: {
+                decrement: totalAmount.toNumber(),
+              },
+            },
+          });
+
+          return tx.transaction.update({
+            where: { id: txIdNum },
+            data: {
+              status: 'processing',
+              metadata: {
+                ...metadata,
+                palmpayOrderId: palmPayOrderId,
+                walletDebited: true,
+                walletDebitedAt: new Date().toISOString(),
+              },
+            },
+            include: {
+              wallet: {
+                include: {
+                  currencyRef: true,
+                },
+              },
+            },
+          });
+        });
 
     let palmPayOrder;
     try {
@@ -535,33 +593,66 @@ export class BillPaymentService {
         userId: userIdNum,
       });
     } catch (error: any) {
-      await prisma.$transaction(async (tx) => {
-        await tx.wallet.update({
-          where: { id: transaction.walletId },
-          data: {
-            balance: {
-              increment: totalAmount.toNumber(),
-            },
-          },
-        });
-        await tx.transaction.update({
+      if (isRewardFulfillment && metadata?.rewardClaimId) {
+        await this.rewardFulfillmentService.failRewardClaim(
+          metadata.rewardClaimId,
+          error.message || 'Bill payment failed'
+        );
+        await prisma.transaction.update({
           where: { id: txIdNum },
           data: {
             status: 'failed',
             metadata: {
               ...metadata,
               palmpayOrderId: palmPayOrderId,
-              refunded: true,
-              refundReason: error.message || 'Bill payment failed',
               providerError: error.providerResponse || error.message,
             },
           },
         });
-      });
+      } else {
+        await prisma.$transaction(async (tx) => {
+          await tx.wallet.update({
+            where: { id: transaction.walletId },
+            data: {
+              balance: {
+                increment: totalAmount.toNumber(),
+              },
+            },
+          });
+          await tx.transaction.update({
+            where: { id: txIdNum },
+            data: {
+              status: 'failed',
+              metadata: {
+                ...metadata,
+                palmpayOrderId: palmPayOrderId,
+                refunded: true,
+                refundReason: error.message || 'Bill payment failed',
+                providerError: error.providerResponse || error.message,
+              },
+            },
+          });
+        });
+      }
       throw createProviderUnavailableError(error.message || 'Bill payment failed');
     }
 
     const mappedStatus = mapPalmPayStatus(palmPayOrder.orderStatus);
+
+    if (isRewardFulfillment && metadata?.rewardClaimId) {
+      if (mappedStatus === 'completed') {
+        await this.rewardFulfillmentService.completeRewardClaim(
+          metadata.rewardClaimId,
+          txIdNum
+        );
+      } else if (mappedStatus === 'failed') {
+        await this.rewardFulfillmentService.failRewardClaim(
+          metadata.rewardClaimId,
+          'Bill payment provider returned failed status'
+        );
+      }
+    }
+
     const updatedTransaction = await prisma.transaction.update({
       where: { id: txIdNum },
       data: {
@@ -574,7 +665,7 @@ export class BillPaymentService {
           palmpayStatus: palmPayOrder.orderStatus,
           palmpayRequestId: palmPayOrder.requestId,
           providerResponse: palmPayOrder,
-          walletDebited: true,
+          walletDebited: !isRewardFulfillment,
         },
       },
       include: {
