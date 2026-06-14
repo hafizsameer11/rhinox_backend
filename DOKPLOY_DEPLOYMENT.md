@@ -95,20 +95,20 @@ Dokploy will automatically use this for container health monitoring.
 
 ### 6. Database Migration
 
-After deployment, run database migrations:
+Schema sync runs **automatically on container start** via `docker-entrypoint.sh`:
 
-**Option 1: Via Dokploy Terminal**
 ```bash
-# Connect to container terminal in Dokploy
-npx prisma migrate deploy
-npx prisma db seed  # Optional: seed initial data
+npx prisma db push --skip-generate
+npx prisma generate
 ```
 
-**Option 2: Via SSH/Remote**
+You should **not** need to run this manually after each deploy.
+
+**Optional manual steps (first deploy / seeding):**
+
 ```bash
-# If you have SSH access
-docker exec -it <container-name> npx prisma migrate deploy
-docker exec -it <container-name> npx prisma db seed
+# Connect to container terminal in Dokploy
+npx prisma db seed  # Optional: seed initial data
 ```
 
 ### 7. Build Settings in Dokploy
@@ -189,14 +189,9 @@ GET https://yourdomain.com/health
 
 When updating:
 
-1. Push changes to repository
-2. Dokploy will detect changes (if auto-deploy enabled)
-3. Build new image
-4. Deploy new container
-5. Run migrations if schema changed:
-   ```bash
-   npx prisma migrate deploy
-   ```
+1. Push changes to repository (GitHub Actions builds on push to `main`)
+2. Dokploy builds and deploys the new container (auto-deploy or webhook)
+3. Container entrypoint runs `prisma db push` before the API starts
 
 ### 12. Backup Strategy
 

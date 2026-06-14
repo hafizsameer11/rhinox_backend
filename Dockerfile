@@ -72,6 +72,10 @@ COPY --from=builder /app/dist ./dist
 # Copy as root user first, then change ownership
 COPY --chown=nodejs:nodejs uploads ./uploads
 
+# Startup script: sync DB schema before the app starts
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Ensure uploads directory structure exists (create if COPY didn't work)
 RUN mkdir -p uploads/billpayments uploads/flags uploads/wallet_symbols || true
 
@@ -89,7 +93,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Use dumb-init to handle signals properly
-ENTRYPOINT ["dumb-init", "--"]
+ENTRYPOINT ["dumb-init", "--", "/usr/local/bin/docker-entrypoint.sh"]
 
 # Start the application
 CMD ["node", "dist/server.js"]
