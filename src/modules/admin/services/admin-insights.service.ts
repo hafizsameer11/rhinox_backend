@@ -205,6 +205,7 @@ export class AdminRewardsService {
         status: claim.status,
         rewardCode: claim.rewardCode,
         claimedAt: claim.claimedAt,
+        profilePictureUrl: claim.user.profilePictureUrl,
       })),
       total,
       query.page,

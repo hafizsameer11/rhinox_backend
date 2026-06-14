@@ -84,7 +84,16 @@ export class AdminTransactionsService {
         include: {
           wallet: {
             include: {
-              user: { select: { id: true, email: true, firstName: true, lastName: true, rhinoxPayId: true } },
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true,
+                  rhinoxPayId: true,
+                  profilePictureUrl: true,
+                },
+              },
             },
           },
         },
@@ -113,6 +122,7 @@ export class AdminTransactionsService {
               name: formatUserName(tx.wallet.user),
               email: tx.wallet.user.email,
               username: tx.wallet.user.rhinoxPayId,
+              profilePictureUrl: tx.wallet.user.profilePictureUrl,
             }
           : null,
         createdAt: tx.createdAt,
@@ -252,6 +262,7 @@ export class AdminKycService {
         status: kyc.status,
         tier: kyc.tier,
         idType: kyc.idType,
+        profilePictureUrl: kyc.user.profilePictureUrl,
         createdAt: kyc.createdAt,
       })),
       total,
@@ -335,6 +346,7 @@ export class AdminWalletsService {
         name: formatUserName(wallet.user),
         email: wallet.user.email,
         country: wallet.user.country?.code || null,
+        profilePictureUrl: wallet.user.profilePictureUrl,
         fiatWalletBalance: 0,
         cryptoWalletBalance: 0,
         primaryFiatWallet: wallet.currency,

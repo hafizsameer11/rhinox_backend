@@ -43,6 +43,7 @@ export class AdminSupportService {
         status: chat.status,
         agent: chat.assignee ? formatUserName(chat.assignee) : 'Unassigned',
         agentId: chat.assignedTo,
+        profilePictureUrl: chat.user?.profilePictureUrl || null,
         date: chat.createdAt,
         updatedAt: chat.updatedAt,
       })),

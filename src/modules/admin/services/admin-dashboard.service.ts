@@ -263,6 +263,7 @@ export class AdminUsersService {
         phone: user.phone,
         country: user.country?.code || null,
         kycStatus: user.kyc?.status || 'unverified',
+        profilePictureUrl: user.profilePictureUrl,
         walletBalance: user.wallets[0] ? Number(user.wallets[0].balance) : 0,
         walletCurrency: user.wallets[0]?.currency || 'NGN',
         isActive: user.isActive,
