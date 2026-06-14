@@ -10,31 +10,53 @@ import { WalletService } from '../../wallet/wallet.service.js';
 export class AdminDashboardService {
   async getStats(query: AdminListQuery) {
     const dateFilter = buildDateFilter(query.from, query.to);
+    const userDateFilter = buildDateFilter(query.from, query.to, 'createdAt');
     const [totalUsers, totalTransactions, completedTransactions, newUsers] = await Promise.all([
       prisma.user.count(),
       prisma.transaction.count({ where: dateFilter }),
       prisma.transaction.findMany({
         where: { ...dateFilter, status: 'completed' },
-        select: { amount: true, currency: true, type: true },
+        select: { amount: true, fee: true, currency: true, type: true },
       }),
-      prisma.user.count({ where: dateFilter }),
+      prisma.user.count({ where: userDateFilter }),
     ]);
 
-    let fiatRevenue = 0;
-    let cryptoRevenue = 0;
+    const cryptoCurrencies = new Set(['BTC', 'ETH', 'USDT', 'USDC', 'BNB']);
+    let fiatFees = 0;
+    let cryptoFees = 0;
+    let fiatVolume = 0;
+    let cryptoVolume = 0;
+    let primaryFiatCurrency = 'NGN';
+
     for (const tx of completedTransactions) {
-      const amount = Number(tx.amount);
-      const isCrypto = ['BTC', 'ETH', 'USDT', 'USDC', 'BNB'].includes((tx.currency || '').toUpperCase());
-      if (isCrypto) cryptoRevenue += amount;
-      else fiatRevenue += amount;
+      const fee = Number(tx.fee || 0);
+      const amount = Number(tx.amount || 0);
+      const currency = (tx.currency || '').toUpperCase();
+      const isCrypto = cryptoCurrencies.has(currency);
+
+      if (isCrypto) {
+        cryptoFees += fee;
+        cryptoVolume += amount;
+      } else {
+        fiatFees += fee;
+        fiatVolume += amount;
+        if (currency) primaryFiatCurrency = currency;
+      }
     }
 
     return {
       totalUsers,
       totalTransactions,
-      totalRevenue: fiatRevenue + cryptoRevenue,
-      fiatRevenue,
-      cryptoRevenue,
+      newUsers,
+      transactionGrowth: totalTransactions,
+      // Platform revenue = fees collected (not transaction volume)
+      totalRevenue: fiatFees + cryptoFees,
+      fiatRevenue: fiatFees,
+      cryptoRevenue: cryptoFees,
+      fiatCurrency: primaryFiatCurrency,
+      cryptoCurrency: 'USD',
+      fiatVolume,
+      cryptoVolume,
       userGrowth: newUsers,
     };
   }
@@ -42,9 +64,41 @@ export class AdminDashboardService {
   async getCharts(query: AdminListQuery) {
     const metric = String(query.metric || 'revenue');
     const dateFilter = buildDateFilter(query.from, query.to);
+    const cryptoCurrencies = new Set(['BTC', 'ETH', 'USDT', 'USDC', 'BNB']);
+
+    if (metric === 'users') {
+      const users = await prisma.user.findMany({
+        where: { ...buildDateFilter(query.from, query.to, 'createdAt') },
+        select: { createdAt: true },
+        orderBy: { createdAt: 'asc' },
+        take: 500,
+      });
+      const buckets: Record<string, number> = {};
+      for (const user of users) {
+        const key = user.createdAt.toISOString().slice(0, 10);
+        buckets[key] = (buckets[key] || 0) + 1;
+      }
+      return { metric, labels: Object.keys(buckets), values: Object.values(buckets) };
+    }
+
+    if (metric === 'transactions') {
+      const transactions = await prisma.transaction.findMany({
+        where: { ...dateFilter, status: 'completed' },
+        select: { createdAt: true },
+        orderBy: { createdAt: 'asc' },
+        take: 500,
+      });
+      const buckets: Record<string, number> = {};
+      for (const tx of transactions) {
+        const key = tx.createdAt.toISOString().slice(0, 10);
+        buckets[key] = (buckets[key] || 0) + 1;
+      }
+      return { metric, labels: Object.keys(buckets), values: Object.values(buckets) };
+    }
+
     const transactions = await prisma.transaction.findMany({
       where: { ...dateFilter, status: 'completed' },
-      select: { amount: true, createdAt: true, currency: true },
+      select: { amount: true, fee: true, createdAt: true, currency: true },
       orderBy: { createdAt: 'asc' },
       take: 500,
     });
@@ -52,7 +106,20 @@ export class AdminDashboardService {
     const buckets: Record<string, number> = {};
     for (const tx of transactions) {
       const key = tx.createdAt.toISOString().slice(0, 10);
-      buckets[key] = (buckets[key] || 0) + Number(tx.amount);
+      const currency = (tx.currency || '').toUpperCase();
+      const isCrypto = cryptoCurrencies.has(currency);
+      const value =
+        metric === 'volume'
+          ? Number(tx.amount || 0)
+          : Number(tx.fee || 0);
+
+      if (query.currency && currency !== String(query.currency).toUpperCase()) {
+        continue;
+      }
+      if (query.walletType === 'crypto' && !isCrypto) continue;
+      if (query.walletType === 'fiat' && isCrypto) continue;
+
+      buckets[key] = (buckets[key] || 0) + value;
     }
 
     return {
@@ -74,6 +141,7 @@ export class AdminDashboardService {
       name: formatUserName(user),
       email: user.email,
       phone: user.phone,
+      profilePictureUrl: user.profilePictureUrl,
       country: user.country?.code || null,
       kycStatus: user.kyc?.status || 'unverified',
       createdAt: user.createdAt,
