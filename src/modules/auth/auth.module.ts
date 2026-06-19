@@ -31,6 +31,8 @@ export class AuthModule implements IModule {
     // Auth routes (public)
     this.router.post('/register', this.controller.register.bind(this.controller));
     this.router.post('/login', this.controller.login.bind(this.controller));
+    this.router.post('/verify-device-login', this.controller.verifyDeviceLogin.bind(this.controller));
+    this.router.post('/resend-device-login-otp', this.controller.resendDeviceLoginOTP.bind(this.controller));
     this.router.post('/logout', authMiddleware, this.controller.logout.bind(this.controller));
     
     // Email verification (can be called without auth for new registrations)

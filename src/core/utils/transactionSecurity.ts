@@ -38,7 +38,7 @@ export async function assertTransactionSecurity(
   }
 
   if (user.verifyTransactionsWithEmail) {
-    if (!input.emailOtp || !/^\d{5}$/.test(input.emailOtp)) {
+    if (!input.emailOtp || !/^\d{6}$/.test(input.emailOtp)) {
       throw new Error('Email OTP is required');
     }
 

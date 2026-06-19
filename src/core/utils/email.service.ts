@@ -88,7 +88,7 @@ export const sendEmail = async (to: string, subject: string, html: string): Prom
 export const sendOTPEmail = async (
   email: string,
   code: string,
-  type: 'email' | 'phone' | 'password_reset' | 'transaction' = 'email'
+  type: 'email' | 'phone' | 'password_reset' | 'transaction' | 'device_login' = 'email'
 ): Promise<void> => {
   let subject: string;
   let title: string;
@@ -102,6 +102,9 @@ export const sendOTPEmail = async (
   } else if (type === 'email') {
     subject = 'Email Verification Code - Rhinox Pay';
     title = 'Email Verification Code';
+  } else if (type === 'device_login') {
+    subject = 'New Device Sign-In Verification - Rhinox Pay';
+    title = 'Verify New Device Sign-In';
   } else {
     subject = 'Phone Verification Code - Rhinox Pay';
     title = 'Phone Verification Code';
@@ -125,8 +128,8 @@ export const sendOTPEmail = async (
 };
 
 /**
- * Generate 5-digit OTP code
+ * Generate 6-digit OTP code
  */
 export const generateOTP = (): string => {
-  return Math.floor(10000 + Math.random() * 90000).toString(); // 5-digit code
+  return Math.floor(100000 + Math.random() * 900000).toString();
 };

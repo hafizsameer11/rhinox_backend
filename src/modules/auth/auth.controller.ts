@@ -1,5 +1,6 @@
 import { type Request, type Response } from 'express';
 import { AuthService, EmailNotVerifiedError } from './auth.service.js';
+import { isValidOtpCode, otpValidationMessage } from '../../core/utils/password.validation.js';
 
 /**
  * Auth Controller
@@ -246,7 +247,7 @@ export class AuthController {
    */
   async login(req: Request, res: Response) {
     try {
-      const { email, password, deviceName } = req.body;
+      const { email, password, deviceName, deviceId } = req.body;
 
       if (!email || !password) {
         return res.status(400).json({
@@ -263,7 +264,8 @@ export class AuthController {
         password,
         ipAddress,
         userAgent,
-        deviceName
+        deviceName,
+        deviceId
       );
 
       return res.json({
@@ -282,6 +284,67 @@ export class AuthController {
       return res.status(401).json({
         success: false,
         message: error.message || 'Login failed',
+      });
+    }
+  }
+
+  async verifyDeviceLogin(req: Request, res: Response) {
+    try {
+      const { pendingLoginToken, code, deviceId, deviceName } = req.body;
+
+      if (!pendingLoginToken || !code || !deviceId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Verification token, OTP code, and device ID are required',
+        });
+      }
+
+      if (!isValidOtpCode(code)) {
+        return res.status(400).json({
+          success: false,
+          message: otpValidationMessage(),
+        });
+      }
+
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const userAgent = req.get('user-agent');
+
+      const result = await this.service.verifyDeviceLogin(
+        pendingLoginToken,
+        code,
+        deviceId,
+        ipAddress,
+        userAgent,
+        deviceName
+      );
+
+      return res.json({ success: true, data: result });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Device verification failed',
+      });
+    }
+  }
+
+  async resendDeviceLoginOTP(req: Request, res: Response) {
+    try {
+      const { pendingLoginToken } = req.body;
+
+      if (!pendingLoginToken) {
+        return res.status(400).json({
+          success: false,
+          message: 'Verification token is required',
+        });
+      }
+
+      const result = await this.service.resendDeviceLoginOTP(pendingLoginToken);
+
+      return res.json({ success: true, data: result });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to resend verification code',
       });
     }
   }
@@ -566,11 +629,11 @@ export class AuthController {
         });
       }
 
-      // Validate code format (5 digits)
-      if (!/^\d{5}$/.test(code)) {
+      // Validate code format (6 digits)
+      if (!isValidOtpCode(code)) {
         return res.status(400).json({
           success: false,
-          message: 'OTP code must be 5 digits',
+          message: otpValidationMessage(),
         });
       }
 
@@ -1242,6 +1305,13 @@ export class AuthController {
         });
       }
 
+      if (!isValidOtpCode(String(otp))) {
+        return res.status(400).json({
+          success: false,
+          message: otpValidationMessage(),
+        });
+      }
+
       const result = await this.service.verifyPasswordResetOTP(email, otp);
 
       return res.json({
@@ -1329,6 +1399,13 @@ export class AuthController {
         return res.status(400).json({
           success: false,
           message: 'Email, OTP, and new password are required',
+        });
+      }
+
+      if (!isValidOtpCode(String(otp))) {
+        return res.status(400).json({
+          success: false,
+          message: otpValidationMessage(),
         });
       }
 

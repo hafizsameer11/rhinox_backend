@@ -41,6 +41,7 @@ model User {
   country                 Country?            @relation(fields: [countryId], references: [id])
   wallets                 Wallet[]
   sessions                Session[]
+  trustedDevices          TrustedDevice[]
   refreshTokens           RefreshToken[]
   otps                    OTP[]
   kyc                     KYC?
@@ -108,6 +109,21 @@ model Session {
   @@map("sessions")
 }
 
+model TrustedDevice {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @map("user_id")
+  deviceId   String   @map("device_id") @db.VarChar(128)
+  deviceName String?  @map("device_name") @db.VarChar(255)
+  trustedAt  DateTime @default(now()) @map("trusted_at")
+  lastUsedAt DateTime @default(now()) @map("last_used_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+  @@map("trusted_devices")
+}
+
 model RefreshToken {
   id        Int      @id @default(autoincrement())
   userId    Int
@@ -157,7 +173,7 @@ model OTP {
   id        Int      @id @default(autoincrement())
   userId    Int
   email     String? // Email address (for email and password_reset OTPs)
-  code      String // 5-digit code
+  code      String // 6-digit code
   type      String // email, phone, password_reset
   expiresAt DateTime
   isUsed    Boolean  @default(false)

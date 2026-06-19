@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import prisma from '../../core/config/database.js';
 import { generateOTP, sendOTPEmail } from '../../core/utils/email.service.js';
+import { validatePasswordStrength } from '../../core/utils/password.validation.js';
 import { parseOptionalId } from '../../core/utils/idParser.js';
 import {
   notifyEmailVerified,
@@ -67,6 +68,12 @@ export class AuthService {
     if (existingPhone) {
       throw new Error('User with this phone number already exists');
     }
+
+    validatePasswordStrength(data.password, {
+      firstName: data.firstName,
+      lastName: data.lastName,
+      email: data.email,
+    });
 
     // Validate country if provided and parse ID
     let parsedCountryId: number | undefined;
@@ -175,7 +182,8 @@ export class AuthService {
     password: string,
     ipAddress?: string,
     userAgent?: string,
-    deviceName?: string
+    deviceName?: string,
+    deviceId?: string
   ) {
     // Find user
     const user = await prisma.user.findUnique({
@@ -204,32 +212,196 @@ export class AuthService {
       throw new EmailNotVerifiedError(user.id);
     }
 
-    // Generate tokens
+    const normalizedDeviceId = deviceId?.trim();
+    if (normalizedDeviceId) {
+      const trusted = await prisma.trustedDevice.findUnique({
+        where: {
+          userId_deviceId: {
+            userId: user.id,
+            deviceId: normalizedDeviceId,
+          },
+        },
+      });
+
+      if (!trusted) {
+        return this.initiateDeviceLoginVerification(user, normalizedDeviceId, deviceName);
+      }
+
+      await prisma.trustedDevice.update({
+        where: { id: trusted.id },
+        data: {
+          lastUsedAt: new Date(),
+          ...(deviceName ? { deviceName } : {}),
+        },
+      });
+    }
+
+    return this.completeLogin(user, ipAddress, userAgent, deviceName);
+  }
+
+  private generatePendingLoginToken(userId: number, deviceId: string) {
+    const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
+    return jwt.sign({ userId, deviceId, purpose: 'device_login' }, jwtSecret, {
+      expiresIn: '10m',
+    }) as string;
+  }
+
+  private async initiateDeviceLoginVerification(
+    user: { id: number; email: string },
+    deviceId: string,
+    deviceName?: string
+  ) {
+    await prisma.oTP.updateMany({
+      where: {
+        userId: user.id,
+        type: 'device_login',
+        isUsed: false,
+      },
+      data: { isUsed: true },
+    });
+
+    const otpCode = generateOTP();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await prisma.oTP.create({
+      data: {
+        userId: user.id,
+        email: user.email,
+        code: otpCode,
+        type: 'device_login',
+        expiresAt,
+      },
+    });
+
+    await sendOTPEmail(user.email, otpCode, 'device_login');
+
+    return {
+      requiresDeviceVerification: true,
+      pendingLoginToken: this.generatePendingLoginToken(user.id, deviceId),
+      deviceName: deviceName || null,
+      message: 'A verification code was sent to your email for this new device.',
+    };
+  }
+
+  async verifyDeviceLogin(
+    pendingLoginToken: string,
+    code: string,
+    deviceId: string,
+    ipAddress?: string,
+    userAgent?: string,
+    deviceName?: string
+  ) {
+    const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
+    let payload: { userId?: number; deviceId?: string; purpose?: string };
+
+    try {
+      payload = jwt.verify(pendingLoginToken, jwtSecret) as typeof payload;
+    } catch {
+      throw new Error('Verification session expired. Please login again.');
+    }
+
+    if (payload.purpose !== 'device_login' || !payload.userId || !payload.deviceId) {
+      throw new Error('Invalid verification session');
+    }
+
+    const normalizedDeviceId = deviceId.trim();
+    if (payload.deviceId !== normalizedDeviceId) {
+      throw new Error('Device mismatch. Please login again.');
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: payload.userId } });
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const otp = await prisma.oTP.findFirst({
+      where: {
+        userId: user.id,
+        code,
+        type: 'device_login',
+        isUsed: false,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!otp) {
+      throw new Error('Invalid or expired OTP code');
+    }
+
+    await prisma.oTP.update({
+      where: { id: otp.id },
+      data: { isUsed: true },
+    });
+
+    await prisma.trustedDevice.upsert({
+      where: {
+        userId_deviceId: {
+          userId: user.id,
+          deviceId: normalizedDeviceId,
+        },
+      },
+      create: {
+        userId: user.id,
+        deviceId: normalizedDeviceId,
+        deviceName: deviceName || null,
+      },
+      update: {
+        lastUsedAt: new Date(),
+        ...(deviceName ? { deviceName } : {}),
+      },
+    });
+
+    return this.completeLogin(user, ipAddress, userAgent, deviceName);
+  }
+
+  async resendDeviceLoginOTP(pendingLoginToken: string) {
+    const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
+    let payload: { userId?: number; deviceId?: string; purpose?: string };
+
+    try {
+      payload = jwt.verify(pendingLoginToken, jwtSecret) as typeof payload;
+    } catch {
+      throw new Error('Verification session expired. Please login again.');
+    }
+
+    if (payload.purpose !== 'device_login' || !payload.userId || !payload.deviceId) {
+      throw new Error('Invalid verification session');
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: payload.userId } });
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    return this.initiateDeviceLoginVerification(user, payload.deviceId);
+  }
+
+  private async completeLogin(
+    user: {
+      id: number;
+      email: string;
+      phone: string | null;
+      firstName: string | null;
+      lastName: string | null;
+    },
+    ipAddress?: string,
+    userAgent?: string,
+    deviceName?: string
+  ) {
     const tokens = this.generateTokens(user.id.toString());
 
-    // Create session (long-lived to match token)
     const sessionData: any = {
       userId: user.id,
       token: tokens.accessToken,
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
     };
-    
-    if (ipAddress) {
-      sessionData.ipAddress = ipAddress;
-    }
-    
-    if (userAgent) {
-      sessionData.userAgent = userAgent;
-    }
 
-    if (deviceName) {
-      sessionData.deviceName = deviceName;
-    }
-    
-    await prisma.session.create({
-      data: sessionData,
-    });
+    if (ipAddress) sessionData.ipAddress = ipAddress;
+    if (userAgent) sessionData.userAgent = userAgent;
+    if (deviceName) sessionData.deviceName = deviceName;
 
+    await prisma.session.create({ data: sessionData });
     notifyLogin(user.id, ipAddress ?? null);
 
     const rhinoxPayId = await ensureRhinoxPayId(user.id);
@@ -874,9 +1046,11 @@ export class AuthService {
     }
 
     // Validate new password
-    if (!newPassword || newPassword.length < 8) {
-      throw new Error('Password must be at least 8 characters long');
-    }
+    validatePasswordStrength(newPassword, {
+      firstName: user.firstName || undefined,
+      lastName: user.lastName || undefined,
+      email: user.email,
+    });
 
     // Hash new password
     const passwordHash = await bcrypt.hash(newPassword, 10);
