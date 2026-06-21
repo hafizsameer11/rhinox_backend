@@ -1,6 +1,23 @@
 import prisma from '../../core/config/database.js';
 import { SUPPORTED_AFRICAN_COUNTRY_CODES } from '../../core/constants/supported-countries.js';
 
+function normalizeFlagPath(flag: string | null | undefined): string | null {
+  if (!flag) return null;
+  const trimmed = flag.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  if (trimmed.startsWith('/uploads/flags/')) {
+    return trimmed;
+  }
+  if (trimmed.includes('/uploads/flags/')) {
+    const idx = trimmed.lastIndexOf('/uploads/flags/');
+    return trimmed.slice(idx);
+  }
+  const filename = trimmed.replace(/^\/+/, '').replace(/^uploads\/flags\//, '');
+  return `/uploads/flags/${filename}`;
+}
+
 /**
  * Country Service
  * Business logic for country operations
@@ -23,7 +40,7 @@ export class CountryService {
       id: country.id,
       name: country.name,
       code: country.code,
-      flag: country.flag ? `/uploads/flags/${country.flag}` : null,
+      flag: normalizeFlagPath(country.flag),
       createdAt: country.createdAt,
       updatedAt: country.updatedAt,
     }));
@@ -45,7 +62,7 @@ export class CountryService {
       id: country.id,
       name: country.name,
       code: country.code,
-      flag: country.flag ? `/uploads/flags/${country.flag}` : null,
+      flag: normalizeFlagPath(country.flag),
       createdAt: country.createdAt,
       updatedAt: country.updatedAt,
     };
@@ -72,7 +89,7 @@ export class CountryService {
       id: country.id,
       name: country.name,
       code: country.code,
-      flag: country.flag ? `/uploads/flags/${country.flag}` : null,
+      flag: normalizeFlagPath(country.flag),
       createdAt: country.createdAt,
       updatedAt: country.updatedAt,
     };
