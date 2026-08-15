@@ -192,20 +192,6 @@ export class BillPaymentService {
     return error;
   }
 
-  private isTransientFlutterwaveCustomerError(message?: string): boolean {
-    const text = String(message || '').toLowerCase();
-    return (
-      text.includes('invalid customer') ||
-      text.includes('invalid custoemr') || // Flutterwave typo
-      text.includes('unable to validate') ||
-      text.includes('customer id')
-    );
-  }
-
-  private async sleep(ms: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
   private createCustomerValidationError(message: string) {
     const error = new Error(message || 'Unable to validate customer') as Error & {
       statusCode?: number;
@@ -217,34 +203,31 @@ export class BillPaymentService {
   }
 
   /**
-   * Validate Flutterwave customer with biller code + one retry for flaky FLW responses.
+   * Single Flutterwave customer validate call (no retries).
+   * FLW validate is flaky when hit repeatedly — call at most once per payment flow.
    */
-  private async validateFlutterwaveCustomerWithRetry(
+  private async validateFlutterwaveCustomerOnce(
     itemCode: string,
     customer: string,
     billerCode: string
   ) {
-    const run = () =>
-      this.flutterwaveBillPaymentService.validateCustomer(itemCode, customer, billerCode);
-
     try {
-      return await run();
-    } catch (firstError: any) {
-      const message = firstError?.message || '';
-      if (!this.isTransientFlutterwaveCustomerError(message)) {
-        throw this.createCustomerValidationError(message || 'Unable to validate customer');
-      }
-
-      console.warn('[Flutterwave] validateCustomer flake, retrying once:', message);
-      await this.sleep(1200);
-      try {
-        return await run();
-      } catch (secondError: any) {
-        throw this.createCustomerValidationError(
-          secondError?.message || message || 'Unable to validate customer'
-        );
-      }
+      return await this.flutterwaveBillPaymentService.validateCustomer(
+        itemCode,
+        customer,
+        billerCode
+      );
+    } catch (error: any) {
+      throw this.createCustomerValidationError(
+        error?.message || 'Unable to validate customer'
+      );
     }
+  }
+
+  private parseOptionalLimit(value: unknown): number | null {
+    if (value === undefined || value === null || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
   }
 
   private assertAmountWithinLimits(
@@ -486,7 +469,7 @@ export class BillPaymentService {
         categoryCode,
         accountType,
       });
-      const validation = await this.validateFlutterwaveCustomerWithRetry(
+      const validation = await this.validateFlutterwaveCustomerOnce(
         item.itemCode,
         normalizedMeter,
         billerCode
@@ -548,7 +531,7 @@ export class BillPaymentService {
 
       const items = await this.flutterwaveBillPaymentService.getBillItems(billerCode);
       const item = this.pickFlutterwaveItem(items, { categoryCode });
-      const validation = await this.validateFlutterwaveCustomerWithRetry(
+      const validation = await this.validateFlutterwaveCustomerOnce(
         item.itemCode,
         normalizedAccount,
         billerCode
@@ -846,9 +829,15 @@ export class BillPaymentService {
       amount: string;
       accountNumber?: string;
       accountType?: string;
+      accountName?: string;
       planId?: string | number;
       beneficiaryId?: number;
       rewardClaimId?: number;
+      /** From prior validate-meter / validate-account — skips a second FLW validate */
+      minimum?: number | string | null;
+      maximum?: number | string | null;
+      amountMinimum?: number | string | null;
+      amountMaximum?: number | string | null;
     }
   ) {
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
@@ -935,12 +924,12 @@ export class BillPaymentService {
     }
 
     let accountNumber = data.accountNumber;
-    let accountName = null;
+    let accountName = data.accountName?.trim() || null;
     let accountType = data.accountType;
 
     if (beneficiary) {
       accountNumber = beneficiary.accountNumber;
-      accountName = beneficiary.name;
+      accountName = beneficiary.name || accountName;
       accountType = beneficiary.accountType || accountType;
     }
 
@@ -970,29 +959,36 @@ export class BillPaymentService {
       }
     }
 
-    let amountMinimum: number | null = null;
-    let amountMaximum: number | null = null;
+    let amountMinimum = this.parseOptionalLimit(data.minimum ?? data.amountMinimum);
+    let amountMaximum = this.parseOptionalLimit(data.maximum ?? data.amountMaximum);
+    let customerValidatedAtInitiate = false;
 
     if (requiresFlutterwaveCustomerValidation(categoryCode)) {
-      try {
-        const validation = await this.validateFlutterwaveCustomerWithRetry(
-          item.itemCode,
-          accountNumber,
-          billerCode
-        );
-        accountName = validation.name?.trim() || accountName;
-        amountMinimum =
-          validation.minimum !== undefined && validation.minimum !== null
-            ? Number(validation.minimum)
-            : null;
-        amountMaximum =
-          validation.maximum !== undefined && validation.maximum !== null
-            ? Number(validation.maximum)
-            : null;
+      const hasPriorValidation =
+        amountMinimum !== null ||
+        amountMaximum !== null ||
+        Boolean(accountName && String(accountName).trim());
+
+      if (hasPriorValidation) {
+        // Reuse validate-meter / validate-account result — do not hit FLW validate again.
         this.assertAmountWithinLimits(amount, amountMinimum, amountMaximum);
-      } catch (error: any) {
-        if (error.statusCode && error.code) throw error;
-        throw this.createCustomerValidationError(error.message || 'Customer validation failed');
+      } else {
+        // Fallback for API clients that skip the dedicated validate endpoint.
+        try {
+          const validation = await this.validateFlutterwaveCustomerOnce(
+            item.itemCode,
+            accountNumber,
+            billerCode
+          );
+          accountName = validation.name?.trim() || accountName;
+          amountMinimum = this.parseOptionalLimit(validation.minimum);
+          amountMaximum = this.parseOptionalLimit(validation.maximum);
+          customerValidatedAtInitiate = true;
+          this.assertAmountWithinLimits(amount, amountMinimum, amountMaximum);
+        } catch (error: any) {
+          if (error.statusCode && error.code) throw error;
+          throw this.createCustomerValidationError(error.message || 'Customer validation failed');
+        }
       }
     }
 
@@ -1031,6 +1027,7 @@ export class BillPaymentService {
           beneficiaryId: beneficiary?.id || null,
           amountMinimum,
           amountMaximum,
+          customerValidatedAtInitiate,
           ...(isRewardFulfillment && rewardContext
             ? {
                 isRewardFulfillment: true,
@@ -1459,43 +1456,19 @@ export class BillPaymentService {
       throw new Error('Missing Flutterwave biller or item details');
     }
 
-    // Soft re-validate once before pay for categories that need a customer id.
+    // Do not call Flutterwave validate again on confirm — reuse initiate metadata.
+    // Repeat validateCustomer calls are flaky and caused false "Unable to validate customer".
+    metadata = {
+      ...metadata,
+      accountNumber: customerId,
+    };
+
     if (requiresFlutterwaveCustomerValidation(categoryCode)) {
-      try {
-        const validation = await this.validateFlutterwaveCustomerWithRetry(
-          itemCode,
-          customerId,
-          billerCode
-        );
-        metadata = {
-          ...metadata,
-          accountNumber: customerId,
-          accountName: validation.name?.trim() || metadata.accountName,
-          amountMinimum:
-            validation.minimum !== undefined && validation.minimum !== null
-              ? Number(validation.minimum)
-              : metadata.amountMinimum ?? null,
-          amountMaximum:
-            validation.maximum !== undefined && validation.maximum !== null
-              ? Number(validation.maximum)
-              : metadata.amountMaximum ?? null,
-        };
-        this.assertAmountWithinLimits(
-          amount,
-          metadata.amountMinimum,
-          metadata.amountMaximum
-        );
-      } catch (error: any) {
-        if (error.statusCode && error.code === 'BILL_AMOUNT_OUT_OF_RANGE') throw error;
-        // Don't hard-fail confirm on a flaky validate; payment retry below still helps.
-        console.warn(
-          '[Flutterwave] pre-pay validateCustomer warning:',
-          error?.message || error
-        );
-        metadata = { ...metadata, accountNumber: customerId };
-      }
-    } else {
-      metadata = { ...metadata, accountNumber: customerId };
+      this.assertAmountWithinLimits(
+        amount,
+        this.parseOptionalLimit(metadata.amountMinimum),
+        this.parseOptionalLimit(metadata.amountMaximum)
+      );
     }
 
     const debitedTransaction = isRewardFulfillment
@@ -1553,7 +1526,7 @@ export class BillPaymentService {
 
     let flwResult: any;
     try {
-      const payPayload = {
+      flwResult = await this.flutterwaveBillPaymentService.createBillPayment({
         billerCode,
         itemCode,
         country: 'NG',
@@ -1561,33 +1534,7 @@ export class BillPaymentService {
         amount: amount.toNumber(),
         reference: flwReference,
         callbackUrl: this.getBillCallbackUrl(),
-      };
-
-      try {
-        flwResult = await this.flutterwaveBillPaymentService.createBillPayment(payPayload);
-      } catch (firstError: any) {
-        const firstMessage = firstError?.message || '';
-        if (!this.isTransientFlutterwaveCustomerError(firstMessage)) {
-          throw firstError;
-        }
-
-        console.warn(
-          '[Flutterwave] createBillPayment customer validation flake, retrying once:',
-          firstMessage
-        );
-        await this.sleep(1500);
-
-        // Re-validate once more before retry (best-effort).
-        if (requiresFlutterwaveCustomerValidation(categoryCode)) {
-          try {
-            await this.validateFlutterwaveCustomerWithRetry(itemCode, customerId, billerCode);
-          } catch {
-            // Continue to retry payment anyway.
-          }
-        }
-
-        flwResult = await this.flutterwaveBillPaymentService.createBillPayment(payPayload);
-      }
+      });
     } catch (error: any) {
       if (isRewardFulfillment && metadata?.rewardClaimId) {
         await this.rewardFulfillmentService.failRewardClaim(
