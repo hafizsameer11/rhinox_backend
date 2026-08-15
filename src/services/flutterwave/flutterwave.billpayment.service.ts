@@ -127,17 +127,26 @@ export class FlutterwaveBillPaymentService {
     );
   }
 
-  async validateCustomer(itemCode: string, customer: string) {
-    const response = await this.client.get<any>(`/v3/bill-items/${itemCode}/validate`, {
-      customer,
-    });
+  async validateCustomer(itemCode: string, customer: string, billerCode?: string) {
+    const query: Record<string, string> = {
+      customer: String(customer || '').trim(),
+    };
+    // Flutterwave requires biller `code` for many billers (esp. electricity).
+    if (billerCode) {
+      query.code = String(billerCode).trim();
+    }
+
+    const response = await this.client.get<any>(
+      `/v3/bill-items/${encodeURIComponent(itemCode)}/validate`,
+      query
+    );
     const data = response?.data || {};
     return {
       responseCode: data.response_code,
       responseMessage: data.response_message,
       name: data.name || null,
       customer: data.customer || customer,
-      billerCode: data.biller_code,
+      billerCode: data.biller_code || billerCode,
       productCode: data.product_code,
       fee: data.fee !== undefined ? Number(data.fee) : undefined,
       minimum: data.minimum !== undefined ? Number(data.minimum) : undefined,
