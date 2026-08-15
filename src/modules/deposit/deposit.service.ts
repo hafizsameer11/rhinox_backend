@@ -6,20 +6,30 @@ import { PalmPayDepositService } from '../../services/palmpay/palmpay.deposit.se
 import { PalmPayWebhookService } from '../../services/palmpay/palmpay.webhook.service.js';
 import { createProviderUnavailableError } from '../../services/palmpay/palmpay.utils.js';
 import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
+import {
+  FlutterwaveDepositService,
+  FlutterwaveWebhookService,
+  isFlutterwaveMomoSupported,
+} from '../../services/flutterwave/index.js';
 
 /**
  * Deposit Service
- * Handles fiat wallet deposits via bank transfer
+ * Handles fiat wallet deposits via bank transfer (NG/PalmPay) and
+ * mobile money (KE/GH/UG/TZ via Flutterwave).
  */
 export class DepositService {
   private walletService: WalletService;
   private palmPayDepositService: PalmPayDepositService;
   private palmPayWebhookService: PalmPayWebhookService;
+  private flutterwaveDepositService: FlutterwaveDepositService;
+  private flutterwaveWebhookService: FlutterwaveWebhookService;
 
   constructor() {
     this.walletService = new WalletService();
     this.palmPayDepositService = new PalmPayDepositService();
     this.palmPayWebhookService = new PalmPayWebhookService();
+    this.flutterwaveDepositService = new FlutterwaveDepositService();
+    this.flutterwaveWebhookService = new FlutterwaveWebhookService();
   }
 
   private toNullableString(value: unknown): string | null {
@@ -36,10 +46,6 @@ export class DepositService {
     };
   }
 
-  /**
-   * Static deposit accounts are disabled for NGN. A PalmPay virtual account
-   * is created per deposit through initiateDeposit.
-   */
   async getBankAccountDetails(countryCode: string, currency: string) {
     if (countryCode !== 'NG' || currency !== 'NGN') {
       throw new Error('Only NGN bank transfer deposits are currently supported');
@@ -53,20 +59,36 @@ export class DepositService {
     };
   }
 
-  /**
-   * Get mobile money providers for a country
-   */
   async getMobileMoneyProviders(countryCode: string, currency: string) {
-    if (countryCode === 'NG' && currency === 'NGN') {
+    const cc = countryCode.toUpperCase();
+    const cur = currency.toUpperCase();
+
+    if (cc === 'NG' || cur === 'NGN') {
       return [];
     }
 
-    throw new Error('Mobile money deposits are currently unavailable');
+    if (!isFlutterwaveMomoSupported(cc, cur)) {
+      throw new Error('Mobile money deposits are currently unavailable for this country');
+    }
+
+    return prisma.mobileMoneyProvider.findMany({
+      where: {
+        isActive: true,
+        countryCode: cc,
+        currency: cur,
+      },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        logoUrl: true,
+        countryCode: true,
+        currency: true,
+      },
+    });
   }
 
-  /**
-   * Initiate deposit (create pending transaction)
-   */
   async initiateDeposit(
     userId: string,
     data: {
@@ -74,20 +96,40 @@ export class DepositService {
       currency: string;
       countryCode: string;
       channel: string;
-      providerId?: string; // Optional for mobile money
+      providerId?: string | number;
+      phoneNumber?: string;
     }
   ) {
-    // Parse userId to integer
     const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(parsedUserId) || parsedUserId <= 0) {
       throw new Error('Invalid user ID format');
     }
 
-    if (data.currency !== 'NGN' || data.countryCode !== 'NG' || data.channel !== 'bank_transfer') {
-      throw new Error('Only NGN bank transfer deposits are currently supported');
+    const countryCode = data.countryCode.toUpperCase();
+    const currency = data.currency.toUpperCase();
+    const channel = data.channel;
+
+    if (currency === 'NGN' && countryCode === 'NG' && channel === 'bank_transfer') {
+      return this.initiatePalmPayBankDeposit(parsedUserId, data.amount);
     }
 
-    const amount = parseFloat(data.amount);
+    if (channel === 'mobile_money' && isFlutterwaveMomoSupported(countryCode, currency)) {
+      return this.initiateFlutterwaveMomoDeposit(parsedUserId, {
+        amount: data.amount,
+        currency,
+        countryCode,
+        providerId: data.providerId,
+        phoneNumber: data.phoneNumber,
+      });
+    }
+
+    throw new Error(
+      'Unsupported deposit method. Use NGN bank transfer (Nigeria) or mobile money for KE/GH/UG/TZ.'
+    );
+  }
+
+  private async initiatePalmPayBankDeposit(parsedUserId: number, amountStr: string) {
+    const amount = parseFloat(amountStr);
     if (isNaN(amount) || amount <= 0) {
       throw new Error('Amount must be greater than 0');
     }
@@ -95,13 +137,11 @@ export class DepositService {
       throw new Error('Minimum deposit amount is 100 NGN');
     }
 
-    // Get or create wallet
     let wallet;
     try {
-      wallet = await this.walletService.getWalletByCurrency(parsedUserId, data.currency);
-    } catch (error) {
-      // Create wallet if it doesn't exist
-      wallet = await this.walletService.createWallet(parsedUserId, data.currency, 'fiat');
+      wallet = await this.walletService.getWalletByCurrency(parsedUserId, 'NGN');
+    } catch {
+      wallet = await this.walletService.createWallet(parsedUserId, 'NGN', 'fiat');
     }
 
     const reference = this.generateReference();
@@ -120,7 +160,7 @@ export class DepositService {
         channel: 'bank_transfer',
         country: 'NG',
         paymentMethod: 'Bank Transfer',
-        description: `Deposit ${data.amount} NGN via bank transfer`,
+        description: `Deposit ${amountStr} NGN via bank transfer`,
         metadata: {
           provider: 'palmpay',
           merchantOrderId,
@@ -178,7 +218,7 @@ export class DepositService {
 
     if (transaction.wallet.user.email) {
       await sendDepositInitiatedEmail(transaction.wallet.user.email, {
-        amount: data.amount,
+        amount: amountStr,
         currency: 'NGN',
         reference,
         bankName: virtualAccount.bankName || undefined,
@@ -203,9 +243,173 @@ export class DepositService {
     };
   }
 
-  /**
-   * Confirm deposit with PIN verification
-   */
+  private async initiateFlutterwaveMomoDeposit(
+    parsedUserId: number,
+    data: {
+      amount: string;
+      currency: string;
+      countryCode: string;
+      providerId?: string | number;
+      phoneNumber?: string;
+    }
+  ) {
+    const amount = parseFloat(data.amount);
+    if (isNaN(amount) || amount <= 0) {
+      throw new Error('Amount must be greater than 0');
+    }
+
+    if (!data.providerId) {
+      throw new Error('Provider ID is required for mobile money deposits');
+    }
+    if (!data.phoneNumber || String(data.phoneNumber).replace(/\D/g, '').length < 9) {
+      throw new Error('A valid mobile money phone number is required');
+    }
+
+    const providerId =
+      typeof data.providerId === 'string' ? parseInt(data.providerId, 10) : data.providerId;
+    if (isNaN(providerId) || providerId <= 0) {
+      throw new Error('Invalid provider ID');
+    }
+
+    const provider = await prisma.mobileMoneyProvider.findFirst({
+      where: {
+        id: providerId,
+        isActive: true,
+        countryCode: data.countryCode,
+        currency: data.currency,
+      },
+    });
+
+    if (!provider) {
+      throw new Error('Mobile money provider not found for this country/currency');
+    }
+
+    let wallet;
+    try {
+      wallet = await this.walletService.getWalletByCurrency(parsedUserId, data.currency);
+    } catch {
+      wallet = await this.walletService.createWallet(parsedUserId, data.currency, 'fiat');
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: parsedUserId } });
+    if (!user?.email) {
+      throw new Error('A verified email is required for mobile money deposits');
+    }
+
+    const reference = this.generateReference();
+    const flwTxRef = `flw_deposit_${reference.toLowerCase()}`;
+    const fee = 0;
+    const phoneNumber = String(data.phoneNumber).trim();
+
+    const transaction = await prisma.transaction.create({
+      data: {
+        walletId: wallet.id,
+        type: 'deposit',
+        status: 'pending',
+        amount,
+        currency: data.currency,
+        fee,
+        reference,
+        channel: 'mobile_money',
+        country: data.countryCode,
+        paymentMethod: 'Mobile Money',
+        providerId: provider.id,
+        description: `Deposit ${data.amount} ${data.currency} via ${provider.name}`,
+        metadata: {
+          provider: 'flutterwave',
+          flwTxRef,
+          phoneNumber,
+          network: provider.code,
+          providerId: provider.id,
+          providerCode: provider.code,
+          providerName: provider.name,
+        },
+      },
+      include: {
+        wallet: {
+          include: {
+            user: true,
+          },
+        },
+        provider: true,
+      },
+    });
+
+    let charge;
+    try {
+      charge = await this.flutterwaveDepositService.createMobileMoneyCharge({
+        txRef: flwTxRef,
+        amount,
+        currency: data.currency,
+        countryCode: data.countryCode,
+        providerCode: provider.code,
+        phoneNumber,
+        email: user.email,
+        fullName: [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined,
+      });
+    } catch (error: any) {
+      await prisma.transaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: 'failed',
+          metadata: {
+            provider: 'flutterwave',
+            flwTxRef,
+            phoneNumber,
+            error: error.providerResponse || error.message,
+          },
+        },
+      });
+      throw createProviderUnavailableError(
+        error.message || 'Unable to initiate mobile money deposit'
+      );
+    }
+
+    await prisma.transaction.update({
+      where: { id: transaction.id },
+      data: {
+        metadata: {
+          provider: 'flutterwave',
+          flwTxRef,
+          flwRef: charge.flwRef,
+          flwId: charge.flwId,
+          flwStatus: charge.status,
+          phoneNumber,
+          network: provider.code,
+          providerId: provider.id,
+          providerCode: provider.code,
+          providerName: provider.name,
+          chargeResponse: charge.raw,
+        },
+      },
+    });
+
+    if (user.email) {
+      await sendDepositInitiatedEmail(user.email, {
+        amount: data.amount,
+        currency: data.currency,
+        reference,
+      });
+    }
+
+    return {
+      id: transaction.id,
+      reference: transaction.reference,
+      amount: transaction.amount.toString(),
+      currency: transaction.currency,
+      fee: transaction.fee.toString(),
+      status: transaction.status,
+      provider: 'flutterwave',
+      channel: 'mobile_money',
+      flwTxRef,
+      nextAction: charge.redirectUrl
+        ? { type: 'redirect', url: charge.redirectUrl }
+        : { type: 'payment_instruction', message: charge.message },
+      message: charge.message,
+      createdAt: transaction.createdAt,
+    };
+  }
+
   async confirmDeposit(
     userId: string,
     transactionId: string,
@@ -253,13 +457,11 @@ export class DepositService {
 
     await assertTransactionSecurity(transaction.wallet.user, { pin, emailOtp });
 
-    throw new Error('Bank transfer deposits are confirmed automatically. Manual deposit confirmation is disabled.');
+    throw new Error(
+      'Deposits are confirmed automatically after payment. Manual deposit confirmation is disabled.'
+    );
   }
 
-  /**
-   * Check deposit status for the app waiting screen.
-   * If still pending, syncs with PalmPay before returning the latest status.
-   */
   async checkDepositStatus(userId: string, transactionId: string) {
     const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     const parsedTransactionId =
@@ -297,39 +499,51 @@ export class DepositService {
     }
 
     if (transaction.status === 'pending') {
-      const merchantOrderId =
-        transaction.palmPayVirtualAccounts[0]?.merchantOrderId ||
-        (transaction.metadata as any)?.merchantOrderId;
+      const metadata = (transaction.metadata as any) || {};
+      const provider = metadata.provider;
 
-      if (merchantOrderId) {
+      if (provider === 'flutterwave' && metadata.flwTxRef) {
         try {
-          await this.palmPayWebhookService.syncDepositStatus(merchantOrderId);
+          await this.flutterwaveWebhookService.syncDepositStatus(metadata.flwTxRef);
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
-          console.error('[DepositService] Failed to sync PalmPay deposit status:', message);
+          console.error('[DepositService] Failed to sync Flutterwave deposit status:', message);
         }
+      } else {
+        const merchantOrderId =
+          transaction.palmPayVirtualAccounts[0]?.merchantOrderId || metadata.merchantOrderId;
 
-        transaction = await prisma.transaction.findUnique({
-          where: { id: parsedTransactionId },
-          include: {
-            wallet: {
-              include: {
-                user: true,
-              },
+        if (merchantOrderId) {
+          try {
+            await this.palmPayWebhookService.syncDepositStatus(merchantOrderId);
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error('[DepositService] Failed to sync PalmPay deposit status:', message);
+          }
+        }
+      }
+
+      transaction = await prisma.transaction.findUnique({
+        where: { id: parsedTransactionId },
+        include: {
+          wallet: {
+            include: {
+              user: true,
             },
-            palmPayVirtualAccounts: true,
           },
-        });
+          palmPayVirtualAccounts: true,
+        },
+      });
 
-        if (!transaction) {
-          throw new Error('Transaction not found');
-        }
+      if (!transaction) {
+        throw new Error('Transaction not found');
       }
     }
 
     const fee = Number(transaction.fee);
     const amount = Number(transaction.amount);
     const creditedAmount = amount - fee;
+    const isMomo = transaction.channel === 'mobile_money';
 
     return {
       id: transaction.id,
@@ -345,21 +559,18 @@ export class DepositService {
           ? 'Payment received and wallet credited'
           : transaction.status === 'failed' || transaction.status === 'cancelled'
           ? 'Payment was not completed'
+          : isMomo
+          ? 'Waiting for mobile money authorization'
           : 'Waiting for bank transfer confirmation',
     };
   }
 
-  /**
-   * Get transaction receipt
-   */
   async getTransactionReceipt(userId: string, transactionId: string) {
-    // Parse transactionId to integer
     const parsedTransactionId = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
     if (isNaN(parsedTransactionId) || parsedTransactionId <= 0) {
       throw new Error('Invalid transaction ID format');
     }
 
-    // Parse userId to integer
     const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(parsedUserId) || parsedUserId <= 0) {
       throw new Error('Invalid user ID format');
@@ -404,37 +615,38 @@ export class DepositService {
       country: transaction.country,
       channel: transaction.channel,
       paymentMethod: transaction.paymentMethod,
-      provider: transaction.provider ? {
-        name: transaction.provider.name,
-        code: transaction.provider.code,
-      } : null,
+      provider: transaction.provider
+        ? {
+            name: transaction.provider.name,
+            code: transaction.provider.code,
+          }
+        : null,
       description: transaction.description,
       transactionId: transaction.id,
       date: transaction.completedAt || transaction.createdAt,
       createdAt: transaction.createdAt,
-      bankAccount: transaction.bankAccount ? {
-        bankName: transaction.bankAccount.bankName,
-        accountNumber: transaction.bankAccount.accountNumber,
-        accountName: transaction.bankAccount.accountName,
-      } : null,
-      virtualAccount: transaction.palmPayVirtualAccounts[0] ? {
-        bankName: transaction.palmPayVirtualAccounts[0].payerBankName,
-        accountNumber: transaction.palmPayVirtualAccounts[0].payerVirtualAccNo,
-        accountName: transaction.palmPayVirtualAccounts[0].payerAccountName,
-        orderNo: transaction.palmPayVirtualAccounts[0].palmpayOrderNo,
-        merchantOrderId: transaction.palmPayVirtualAccounts[0].merchantOrderId,
-      } : null,
+      bankAccount: transaction.bankAccount
+        ? {
+            bankName: transaction.bankAccount.bankName,
+            accountNumber: transaction.bankAccount.accountNumber,
+            accountName: transaction.bankAccount.accountName,
+          }
+        : null,
+      virtualAccount: transaction.palmPayVirtualAccounts[0]
+        ? {
+            bankName: transaction.palmPayVirtualAccounts[0].payerBankName,
+            accountNumber: transaction.palmPayVirtualAccounts[0].payerVirtualAccNo,
+            accountName: transaction.palmPayVirtualAccounts[0].payerAccountName,
+            orderNo: transaction.palmPayVirtualAccounts[0].palmpayOrderNo,
+            merchantOrderId: transaction.palmPayVirtualAccounts[0].merchantOrderId,
+          }
+        : null,
     };
   }
 
-  /**
-   * Generate unique reference number
-   */
   private generateReference(): string {
     const timestamp = Date.now().toString(36);
     const random = randomBytes(4).toString('hex');
     return `${timestamp}${random}`.toUpperCase();
   }
-
 }
-

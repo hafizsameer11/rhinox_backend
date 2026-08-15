@@ -390,11 +390,18 @@ export class DepositController {
         });
       }
 
-      // Validate providerId for mobile_money channel
+      // Validate providerId + phone for mobile_money channel
       if (channel === 'mobile_money' && !req.body.providerId) {
         return res.status(400).json({
           success: false,
           message: 'Provider ID is required for mobile money deposits',
+        });
+      }
+
+      if (channel === 'mobile_money' && !req.body.phoneNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'Phone number is required for mobile money deposits',
         });
       }
 
@@ -404,6 +411,7 @@ export class DepositController {
         countryCode,
         channel,
         providerId: req.body.providerId,
+        phoneNumber: req.body.phoneNumber,
       });
 
       return res.status(201).json({

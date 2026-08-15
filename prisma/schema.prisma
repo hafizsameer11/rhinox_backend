@@ -62,6 +62,9 @@ model User {
   applicationLogs          ApplicationLog[]
   rewardClaims            RewardClaim[]
   userRewards             UserReward[]
+  bushaCustomer           BushaCustomer?
+  bushaKycApplications    BushaKycApplication[]
+  bushaTrades             BushaTradeLog[]
 
   @@index([email])
   @@index([phone])
@@ -1127,4 +1130,109 @@ model AdminBanner {
 
   @@index([isActive])
   @@map("admin_banners")
+}
+
+// ============================================
+// MODULE: BUSHA (crypto custody + NGN ramp)
+// Tatum services remain in codebase; Busha is the live crypto provider.
+// ============================================
+
+model BushaConfig {
+  id                 Int      @id @default(1)
+  isActive           Boolean  @default(true) @map("is_active")
+  sellPayoutMode     String   @default("palmpay_temp") @map("sell_payout_mode") @db.VarChar(40)
+  payoutBankCode     String?  @map("payout_bank_code") @db.VarChar(20)
+  payoutAccountNumber String? @map("payout_account_number") @db.VarChar(50)
+  payoutAccountName  String?  @map("payout_account_name") @db.VarChar(255)
+  payoutRecipientId  String?  @map("payout_recipient_id") @db.VarChar(80)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("busha_config")
+}
+
+model BushaCustomer {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @unique @map("user_id")
+  bushaProfileId String   @unique @map("busha_profile_id") @db.VarChar(80)
+  email          String   @db.VarChar(255)
+  firstName      String?  @map("first_name") @db.VarChar(120)
+  lastName       String?  @map("last_name") @db.VarChar(120)
+  phone          String?  @db.VarChar(40)
+  countryId      String   @default("NG") @map("country_id") @db.VarChar(4)
+  birthDate      String?  @map("birth_date") @db.VarChar(20)
+  nin            String?  @db.VarChar(40)
+  status         String   @default("inactive") @db.VarChar(30)
+  providerData   Json?    @map("provider_data")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kycApplications  BushaKycApplication[]
+  trades           BushaTradeLog[]
+
+  @@index([status])
+  @@map("busha_customers")
+}
+
+model BushaKycApplication {
+  id              Int      @id @default(autoincrement())
+  userId          Int      @map("user_id")
+  bushaCustomerId Int?     @map("busha_customer_id")
+  rhinoxKycId     Int?     @map("rhinox_kyc_id")
+  source          String   @default("rhinox_kyc") @db.VarChar(40)
+  status          String   @default("pending") @db.VarChar(30)
+  attempts        Int      @default(0)
+  errorMessage    String?  @map("error_message") @db.Text
+  selfiePath      String?  @map("selfie_path") @db.VarChar(500)
+  idDocumentPath  String?  @map("id_document_path") @db.VarChar(500)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bushaCustomer BushaCustomer? @relation(fields: [bushaCustomerId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@map("busha_kyc_applications")
+}
+
+model BushaTradeLog {
+  id                    Int       @id @default(autoincrement())
+  userId                Int       @map("user_id")
+  bushaCustomerId       Int?      @map("busha_customer_id")
+  side                  String    @db.VarChar(20)
+  status                String    @default("quoted") @db.VarChar(40)
+  sourceCurrency        String    @map("source_currency") @db.VarChar(20)
+  targetCurrency        String    @map("target_currency") @db.VarChar(20)
+  sourceAmount          String    @map("source_amount") @db.VarChar(40)
+  targetAmount          String?   @map("target_amount") @db.VarChar(40)
+  network               String?   @db.VarChar(20)
+  bushaQuoteId          String?   @map("busha_quote_id") @db.VarChar(80)
+  bushaTransferId       String?   @unique @map("busha_transfer_id") @db.VarChar(80)
+  bushaStatus           String?   @map("busha_status") @db.VarChar(40)
+  payInBankCode         String?   @map("pay_in_bank_code") @db.VarChar(20)
+  payInBankName         String?   @map("pay_in_bank_name") @db.VarChar(120)
+  payInAccountNumber    String?   @map("pay_in_account_number") @db.VarChar(50)
+  payInAccountName      String?   @map("pay_in_account_name") @db.VarChar(255)
+  payInExpiresAt        DateTime? @map("pay_in_expires_at")
+  cryptoDepositAddress  String?   @map("crypto_deposit_address") @db.VarChar(255)
+  cryptoDepositNetwork  String?   @map("crypto_deposit_network") @db.VarChar(40)
+  destinationAddress    String?   @map("destination_address") @db.VarChar(255)
+  palmpayOrderId        String?   @map("palmpay_order_id") @db.VarChar(64)
+  palmpayOrderNo        String?   @map("palmpay_order_no") @db.VarChar(64)
+  palmpayStatus         String?   @map("palmpay_status") @db.VarChar(30)
+  payoutMode            String?   @map("payout_mode") @db.VarChar(40)
+  fiatTransactionId     Int?      @map("fiat_transaction_id")
+  providerResponse      Json?     @map("provider_response")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bushaCustomer BushaCustomer? @relation(fields: [bushaCustomerId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([side])
+  @@map("busha_trade_logs")
 }

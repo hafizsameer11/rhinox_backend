@@ -2,6 +2,7 @@ import prisma from '../core/config/database.js';
 import { isSupportedAfricanFiatCurrency } from '../core/constants/supported-countries.js';
 import { CryptoService } from '../modules/crypto/crypto.service.js';
 import { WalletService } from '../modules/wallet/wallet.service.js';
+import { isBushaEnabled } from './busha/busha.config.js';
 
 export interface WalletInitResult {
   fiatCreated: number;
@@ -105,6 +106,6 @@ export async function userNeedsWalletBackfill(userId: number): Promise<boolean> 
   ]);
 
   const missingFiat = expectedFiat > 0 && fiatCount < expectedFiat;
-  const missingCrypto = expectedCrypto > 0 && vaCount < expectedCrypto;
+  const missingCrypto = isBushaEnabled() ? false : expectedCrypto > 0 && vaCount < expectedCrypto;
   return missingFiat || missingCrypto;
 }

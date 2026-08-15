@@ -1,6 +1,7 @@
 import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 import { UnifiedStablecoinService } from '../../services/crypto/unified-stablecoin.service.js';
+import { BushaAppService, isBushaEnabled } from '../../services/busha/index.js';
 
 /**
  * Wallet Service
@@ -8,6 +9,7 @@ import { UnifiedStablecoinService } from '../../services/crypto/unified-stableco
  */
 export class WalletService {
   private readonly unifiedStablecoinService = new UnifiedStablecoinService();
+  private readonly bushaService = new BushaAppService();
 
   /**
    * Create a new wallet for user
@@ -272,7 +274,32 @@ export class WalletService {
 
     // Format crypto balances and convert to USDT
     let totalCryptoInUSDT = new Decimal(0);
-    const cryptoBalances = virtualAccounts.map((va: { id: number; accountBalance: any; availableBalance: any; currency: string; blockchain: string; walletCurrency: any; active: boolean; frozen: boolean }) => {
+    let cryptoBalances: Array<{
+      id: number | string;
+      type: 'crypto';
+      currency: string;
+      blockchain: string;
+      currencyName: string;
+      symbol: string;
+      balance: string;
+      lockedBalance: string;
+      availableBalance: string;
+      balanceInUSDT: string;
+      priceInUSDT: string;
+      icon: any;
+      isToken: boolean;
+      active: boolean;
+      frozen: boolean;
+      provider?: string;
+    }>;
+
+    if (isBushaEnabled()) {
+      cryptoBalances = await this.bushaService.tryMapBalancesForWallet(userIdNum);
+      for (const row of cryptoBalances) {
+        totalCryptoInUSDT = totalCryptoInUSDT.plus(new Decimal(row.balanceInUSDT || '0'));
+      }
+    } else {
+      cryptoBalances = virtualAccounts.map((va: { id: number; accountBalance: any; availableBalance: any; currency: string; blockchain: string; walletCurrency: any; active: boolean; frozen: boolean }) => {
       const balance = new Decimal(va.accountBalance || '0');
       const availableBalance = new Decimal(va.availableBalance || '0');
       const lockedBalance = balance.minus(availableBalance);
@@ -306,13 +333,16 @@ export class WalletService {
         frozen: va.frozen,
       };
     });
+    }
 
     // Convert total crypto to NGN if rate exists
     const totalCryptoInNGN = usdtToNgnRate
       ? totalCryptoInUSDT.times(new Decimal(usdtToNgnRate.rate.toString()))
       : null;
 
-    const cryptoUnified = await this.unifiedStablecoinService.getAllUnifiedBalances(userIdNum);
+    const cryptoUnified = isBushaEnabled()
+      ? await this.bushaService.tryMapUnifiedBalances(userIdNum)
+      : await this.unifiedStablecoinService.getAllUnifiedBalances(userIdNum);
 
     return {
       fiat: fiatBalances,

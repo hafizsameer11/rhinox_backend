@@ -71,7 +71,7 @@ export class CryptoController {
           availableBalance: va.availableBalance,
           active: va.active,
           frozen: va.frozen,
-          depositAddresses: va.depositAddresses.map((da) => ({
+          depositAddresses: (va.depositAddresses || []).map((da) => ({
             address: da.address,
             currency: da.currency ?? va.currency,
             blockchain: da.blockchain ?? va.blockchain,

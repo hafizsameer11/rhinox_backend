@@ -7,13 +7,16 @@ import cookieParser from 'cookie-parser';
 import swaggerUi from 'swagger-ui-express';
 import dotenv from 'dotenv';
 import { ModuleLoader } from './src/core/utils/module-loader.js';
-import { AuthModule, WalletModule, KYCModule, HomeModule, CountryModule, CryptoModule, DepositModule, ExchangeModule, ConversionModule, TransferModule, PaymentSettingsModule, P2PModule, P2POrderModule, P2PChatModule, P2PReviewModule, BankAccountModule, TransactionHistoryModule, BillPaymentModule, SupportChatModule, NotificationModule, RewardsModule, AdminModule } from './src/modules/index.js';
+import { AuthModule, WalletModule, KYCModule, HomeModule, CountryModule, CryptoModule, BushaModule, DepositModule, ExchangeModule, ConversionModule, TransferModule, PaymentSettingsModule, P2PModule, P2POrderModule, P2PChatModule, P2PReviewModule, BankAccountModule, TransactionHistoryModule, BillPaymentModule, SupportChatModule, NotificationModule, RewardsModule, AdminModule } from './src/modules/index.js';
 import { authMiddleware } from './src/core/middleware/auth.middleware.js';
 import { adminAuthMiddleware } from './src/core/middleware/admin-auth.middleware.js';
 import { requirePermission } from './src/core/middleware/require-permission.middleware.js';
 import ApiError from './src/core/utils/ApiError.js';
 import { swaggerSpec } from './src/core/config/swagger.js';
 import { PalmPayWebhookService } from './src/services/palmpay/palmpay.webhook.service.js';
+import { FlutterwaveWebhookService } from './src/services/flutterwave/flutterwave.webhook.service.js';
+import { BushaAppService } from './src/services/busha/busha.app.service.js';
+import { startBushaJobs } from './src/jobs/busha/start-busha-jobs.js';
 
 // Load environment variables
 dotenv.config();
@@ -32,7 +35,15 @@ app.use(cors()); // Enable CORS
 app.use(compression()); // Compress responses
 app.use(morgan('dev')); // Logging
 app.use(cookieParser()); // Parse cookies
-app.use(express.json()); // Parse JSON bodies
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    const incoming = req as { originalUrl?: string; url?: string };
+    const path = `${incoming.originalUrl || ''} ${incoming.url || ''}`;
+    if (path.includes('/webhooks/busha')) {
+      (req as any).rawBody = buf;
+    }
+  },
+})); // Parse JSON bodies
 app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 
 // Serve static files from uploads directory
@@ -325,6 +336,10 @@ moduleLoader.registerMany([
     middleware: [authMiddleware],
   },
   {
+    module: new BushaModule(),
+    middleware: [authMiddleware],
+  },
+  {
     module: new DepositModule(),
     middleware: [authMiddleware],
   },
@@ -417,6 +432,55 @@ const handlePalmPayWebhook = async (req: express.Request, res: express.Response)
 app.post('/api/webhooks/palmpay', handlePalmPayWebhook);
 app.post('/api/webhooks/palmpay/bill-payment', handlePalmPayWebhook);
 
+// Register Flutterwave webhook (no auth; verify via verif-hash header)
+const flutterwaveWebhookService = new FlutterwaveWebhookService();
+app.post('/api/webhooks/flutterwave', async (req: express.Request, res: express.Response) => {
+  try {
+    const verifHash = req.get('verif-hash') || req.get('Verif-Hash');
+    if (!flutterwaveWebhookService.verifySignature(verifHash || undefined)) {
+      console.warn('[Flutterwave Webhook] Invalid verif-hash');
+      return res.status(401).json({ success: false, message: 'Invalid signature' });
+    }
+
+    await flutterwaveWebhookService.handleWebhook(req.body, {
+      headers: req.headers,
+      ipAddress: req.ip || req.socket.remoteAddress,
+      userAgent: req.get('user-agent'),
+    });
+
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('[Flutterwave Webhook] Failed to process webhook:', error);
+    return res.status(200).json({ success: true });
+  }
+});
+
+const bushaAppService = new BushaAppService();
+app.post('/api/webhooks/busha', async (req: express.Request, res: express.Response) => {
+  try {
+    const signature =
+      req.get('x-busha-signature') ||
+      req.get('x-bc-signature') ||
+      req.get('x-signature');
+    const rawBody = (req as any).rawBody || Buffer.from(JSON.stringify(req.body || {}));
+    if (!bushaAppService.verifyWebhookSignature(rawBody, signature)) {
+      console.warn('[Busha Webhook] Invalid signature');
+      return res.status(401).json({ success: false, message: 'Invalid signature' });
+    }
+
+    const event = String(req.body?.event || '');
+    if (event.startsWith('customer')) {
+      await bushaAppService.handleCustomerWebhook(req.body);
+    } else {
+      await bushaAppService.handleTransferWebhook(req.body);
+    }
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('[Busha Webhook] Failed to process webhook:', error);
+    return res.status(200).json({ success: true });
+  }
+});
+
 // ============================================
 // Error Handling
 // ============================================
@@ -456,4 +520,5 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📦 Registered modules: ${moduleLoader.getAllModules().map(m => m.name).join(', ')}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  startBushaJobs();
 });

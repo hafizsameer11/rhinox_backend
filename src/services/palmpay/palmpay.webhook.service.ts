@@ -236,11 +236,33 @@ export class PalmPayWebhookService {
     const mappedStatus = mapPalmPayStatus(payload.orderStatus);
     const metadata = transaction.metadata as any || {};
 
+    if (['completed', 'failed', 'cancelled'].includes(transaction.status)) {
+      return;
+    }
+
+    const isReward = Boolean(metadata.isRewardFulfillment && metadata.rewardClaimId);
+    const shouldRefund =
+      (mappedStatus === 'failed' || mappedStatus === 'cancelled') &&
+      Boolean(metadata.walletDebited) &&
+      !Boolean(metadata.refunded) &&
+      !isReward;
+
     await prisma.$transaction(async (tx) => {
-      if ((mappedStatus === 'failed' || mappedStatus === 'cancelled') && !metadata.refunded) {
-        const refundAmount = new Decimal(transaction.amount).plus(new Decimal(transaction.fee || 0));
+      const locked = await tx.transaction.findUnique({ where: { id: transaction.id } });
+      if (!locked || ['completed', 'failed', 'cancelled'].includes(locked.status)) {
+        return;
+      }
+      const lockedMeta = (locked.metadata as any) || {};
+
+      if (
+        (mappedStatus === 'failed' || mappedStatus === 'cancelled') &&
+        lockedMeta.walletDebited &&
+        !lockedMeta.refunded &&
+        !lockedMeta.isRewardFulfillment
+      ) {
+        const refundAmount = new Decimal(locked.amount).plus(new Decimal(locked.fee || 0));
         await tx.wallet.update({
-          where: { id: transaction.walletId },
+          where: { id: locked.walletId },
           data: {
             balance: {
               increment: refundAmount.toNumber(),
@@ -252,16 +274,24 @@ export class PalmPayWebhookService {
       await tx.transaction.update({
         where: { id: transaction.id },
         data: {
-          status: mappedStatus,
+          status: mappedStatus === 'pending' ? 'processing' : mappedStatus,
           completedAt: mappedStatus === 'completed'
             ? (payload.completedTime ? new Date(payload.completedTime) : new Date())
-            : transaction.completedAt,
+            : locked.completedAt,
           metadata: {
-            ...metadata,
+            ...lockedMeta,
             palmpayOrderNo: payload.orderNo,
             palmpayStatus: payload.orderStatus,
             palmpayError: payload.errorMsg,
-            refunded: metadata.refunded || mappedStatus === 'failed' || mappedStatus === 'cancelled',
+            refunded:
+              lockedMeta.refunded ||
+              ((mappedStatus === 'failed' || mappedStatus === 'cancelled') &&
+                Boolean(lockedMeta.walletDebited) &&
+                !Boolean(lockedMeta.isRewardFulfillment)),
+            refundedAt:
+              shouldRefund || lockedMeta.refunded
+                ? lockedMeta.refundedAt || new Date().toISOString()
+                : lockedMeta.refundedAt,
             webhook: payload,
           },
         },
@@ -285,7 +315,9 @@ export class PalmPayWebhookService {
         categoryName: metadata?.categoryName,
         message: payload.errorMsg
           ? `Bill payment failed: ${payload.errorMsg}`
-          : 'Your bill payment could not be completed. Funds were refunded if debited.',
+          : shouldRefund
+            ? 'Your bill payment could not be completed. Funds were refunded.'
+            : 'Your bill payment could not be completed.',
       });
     }
   }

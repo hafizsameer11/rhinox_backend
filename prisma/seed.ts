@@ -507,36 +507,35 @@ async function main() {
   }
   console.log(`✅ Seeded ${bankAccounts.length} bank accounts`);
 
-  // Seed Mobile Money Providers
+  // Seed Mobile Money Providers (Flutterwave-aligned for KE/GH/UG/TZ)
   console.log('📱 Seeding mobile money providers...');
   const mobileMoneyProviders = [
-    // Kenya
-    { name: 'MTN', code: 'MTN', countryCode: 'KE', currency: 'KES', logoUrl: null },
-    { name: 'Vodafone', code: 'VODAFONE', countryCode: 'KE', currency: 'KES', logoUrl: null },
-    { name: 'M-Pesa', code: 'MPESA', countryCode: 'KE', currency: 'KES', logoUrl: null },
-    { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'KE', currency: 'KES', logoUrl: null },
-    
-    // Ghana
-    { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'GH', currency: 'GHS', logoUrl: null },
-    { name: 'Vodafone Cash', code: 'VODAFONE', countryCode: 'GH', currency: 'GHS', logoUrl: null },
-    { name: 'AirtelTigo Money', code: 'AIRTELTIGO', countryCode: 'GH', currency: 'GHS', logoUrl: null },
-    
-    // Nigeria
-    { name: 'MTN MoMo', code: 'MTN', countryCode: 'NG', currency: 'NGN', logoUrl: null },
-    { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'NG', currency: 'NGN', logoUrl: null },
-    
-    // Tanzania
-    { name: 'M-Pesa', code: 'MPESA', countryCode: 'TZ', currency: 'TZS', logoUrl: null },
-    { name: 'Tigo Pesa', code: 'TIGO', countryCode: 'TZ', currency: 'TZS', logoUrl: null },
-    { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'TZ', currency: 'TZS', logoUrl: null },
-    
-    // Uganda
-    { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'UG', currency: 'UGX', logoUrl: null },
-    { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'UG', currency: 'UGX', logoUrl: null },
-    
-    // South Africa
-    { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'ZA', currency: 'ZAR', logoUrl: null },
-    { name: 'Vodacom M-Pesa', code: 'VODACOM', countryCode: 'ZA', currency: 'ZAR', logoUrl: null },
+    // Kenya — Flutterwave: M-Pesa (MPS), Airtel (MPX)
+    { name: 'M-Pesa', code: 'MPESA', countryCode: 'KE', currency: 'KES', logoUrl: null, isActive: true },
+    { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'KE', currency: 'KES', logoUrl: null, isActive: true },
+
+    // Ghana — Flutterwave: MTN, Vodafone/Telecel, AirtelTigo
+    { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'GH', currency: 'GHS', logoUrl: null, isActive: true },
+    { name: 'Telecel Cash', code: 'VODAFONE', countryCode: 'GH', currency: 'GHS', logoUrl: null, isActive: true },
+    { name: 'AirtelTigo Money', code: 'AIRTELTIGO', countryCode: 'GH', currency: 'GHS', logoUrl: null, isActive: true },
+
+    // Tanzania — Flutterwave: Airtel, Tigo, Halopesa, Vodacom
+    { name: 'Vodacom M-Pesa', code: 'VODACOM', countryCode: 'TZ', currency: 'TZS', logoUrl: null, isActive: true },
+    { name: 'Tigo Pesa', code: 'TIGO', countryCode: 'TZ', currency: 'TZS', logoUrl: null, isActive: true },
+    { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'TZ', currency: 'TZS', logoUrl: null, isActive: true },
+    { name: 'HaloPesa', code: 'HALOPESA', countryCode: 'TZ', currency: 'TZS', logoUrl: null, isActive: true },
+
+    // Uganda — Flutterwave: MTN, Airtel
+    { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'UG', currency: 'UGX', logoUrl: null, isActive: true },
+    { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'UG', currency: 'UGX', logoUrl: null, isActive: true },
+
+    // Nigeria — no Flutterwave MoMo; keep inactive for historical rows
+    { name: 'MTN MoMo', code: 'MTN', countryCode: 'NG', currency: 'NGN', logoUrl: null, isActive: false },
+    { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'NG', currency: 'NGN', logoUrl: null, isActive: false },
+
+    // South Africa — not on Flutterwave MoMo; inactive
+    { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'ZA', currency: 'ZAR', logoUrl: null, isActive: false },
+    { name: 'Vodacom M-Pesa', code: 'VODACOM', countryCode: 'ZA', currency: 'ZAR', logoUrl: null, isActive: false },
   ];
 
   for (const provider of mobileMoneyProviders) {
@@ -551,7 +550,7 @@ async function main() {
       update: {
         name: provider.name,
         logoUrl: provider.logoUrl,
-        isActive: true,
+        isActive: provider.isActive,
       },
       create: {
         name: provider.name,
@@ -559,11 +558,24 @@ async function main() {
         countryCode: provider.countryCode,
         currency: provider.currency,
         logoUrl: provider.logoUrl,
-        isActive: true,
+        isActive: provider.isActive,
       },
     });
   }
   console.log(`✅ Seeded ${mobileMoneyProviders.length} mobile money providers`);
+
+  // Deactivate providers that are no longer Flutterwave-supported MoMo markets
+  await prisma.mobileMoneyProvider.updateMany({
+    where: {
+      OR: [
+        { countryCode: 'NG' },
+        { countryCode: 'ZA' },
+        { countryCode: 'KE', code: { in: ['MTN', 'VODAFONE'] } },
+        { countryCode: 'TZ', code: 'MPESA' },
+      ],
+    },
+    data: { isActive: false },
+  });
 
   // Seed Exchange Rates (NGN as base currency)
   console.log('💱 Seeding exchange rates...');

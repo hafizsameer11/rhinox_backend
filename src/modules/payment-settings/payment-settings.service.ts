@@ -2,6 +2,7 @@ import prisma from '../../core/config/database.js';
 import { encryptPrivateKey, decryptPrivateKey } from '../../core/utils/encryption.js';
 import { PalmPayPayoutService } from '../../services/palmpay/palmpay.payout.service.js';
 import { createProviderUnavailableError } from '../../services/palmpay/palmpay.utils.js';
+import { isFlutterwaveMomoSupported } from '../../services/flutterwave/index.js';
 import { ensureRhinoxPayId } from '../../core/utils/rhinox-pay-id.service.js';
 
 /**
@@ -633,23 +634,55 @@ export class PaymentSettingsService {
    * Get available mobile money providers for a country/currency
    */
   async getMobileMoneyProviders(countryCode?: string, currency?: string) {
+    const cc = countryCode?.toUpperCase();
+    const cur = currency?.toUpperCase();
+
+    if ((!cc || cc === 'NG') && (!cur || cur === 'NGN')) {
+      return [];
+    }
+
+    if (cc === 'NG' || cur === 'NGN') {
+      return [];
+    }
+
+    if (cc && cur && !isFlutterwaveMomoSupported(cc, cur)) {
+      throw new Error('Mobile money providers are currently unavailable for this country');
+    }
+
     const where: any = {
       isActive: true,
     };
 
-    if (countryCode) {
-      where.countryCode = countryCode;
+    if (cc) {
+      where.countryCode = cc;
     }
 
-    if (currency) {
-      where.currency = currency;
+    if (cur) {
+      where.currency = cur;
     }
 
-    if ((!countryCode || countryCode === 'NG') && (!currency || currency === 'NGN')) {
-      return [];
+    // When listing without filters, only return Flutterwave-supported markets
+    if (!cc && !cur) {
+      where.OR = [
+        { countryCode: 'KE', currency: 'KES' },
+        { countryCode: 'GH', currency: 'GHS' },
+        { countryCode: 'UG', currency: 'UGX' },
+        { countryCode: 'TZ', currency: 'TZS' },
+      ];
     }
 
-    throw new Error('Mobile money providers are currently unavailable');
+    return prisma.mobileMoneyProvider.findMany({
+      where,
+      orderBy: [{ countryCode: 'asc' }, { name: 'asc' }],
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        logoUrl: true,
+        countryCode: true,
+        currency: true,
+      },
+    });
   }
 
   /**

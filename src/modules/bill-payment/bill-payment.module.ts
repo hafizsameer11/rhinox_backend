@@ -38,7 +38,14 @@ export class BillPaymentModule implements IModule {
     // Payment flow
     this.router.post('/initiate', this.controller.initiatePayment.bind(this.controller));
     this.router.post('/confirm', this.controller.confirmPayment.bind(this.controller));
-
+    this.router.get(
+      '/status/:transactionId',
+      this.controller.syncPaymentStatus.bind(this.controller)
+    );
+    this.router.post(
+      '/status/:transactionId',
+      this.controller.syncPaymentStatus.bind(this.controller)
+    );
     // Beneficiaries
     this.router.get('/beneficiaries', this.controller.getBeneficiaries.bind(this.controller));
     this.router.post('/beneficiaries', this.controller.createBeneficiary.bind(this.controller));

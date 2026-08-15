@@ -216,7 +216,7 @@ export class BillPaymentController {
       }
 
       const result = await this.service.validateMeterNumber(
-        providerId,
+        String(providerId),
         meterNumber,
         accountType
       );
@@ -273,7 +273,7 @@ export class BillPaymentController {
         });
       }
 
-      const result = await this.service.validateAccountNumber(providerId, accountNumber);
+      const result = await this.service.validateAccountNumber(String(providerId), accountNumber);
       return res.json({
         success: true,
         data: result,
@@ -415,6 +415,40 @@ export class BillPaymentController {
         success: false,
         code: error.code,
         message: error.message || 'Failed to confirm payment',
+      });
+    }
+  }
+
+  /**
+   * Sync / poll bill payment status from provider
+   */
+  async syncPaymentStatus(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.userId || (req as any).user?.id;
+      const transactionId = req.params.transactionId || req.body?.transactionId;
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+      if (!transactionId) {
+        return res.status(400).json({
+          success: false,
+          message: 'transactionId is required',
+        });
+      }
+
+      const result = await this.service.syncBillPaymentStatus(userId, transactionId);
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(error.statusCode || 400).json({
+        success: false,
+        code: error.code,
+        message: error.message || 'Failed to sync bill payment status',
       });
     }
   }

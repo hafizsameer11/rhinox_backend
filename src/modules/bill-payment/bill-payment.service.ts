@@ -9,32 +9,56 @@ import {
   isSupportedPalmPayScene,
   mapPalmPayStatus,
 } from '../../services/palmpay/palmpay.utils.js';
+import {
+  FlutterwaveBillPaymentService,
+  type FlutterwaveBillItem,
+  type FlutterwaveBiller,
+} from '../../services/flutterwave/flutterwave.billpayment.service.js';
+import { FlutterwaveWebhookService } from '../../services/flutterwave/flutterwave.webhook.service.js';
+import {
+  type MappedBillStatus,
+} from '../../services/flutterwave/flutterwave.bill-status.js';
+import {
+  decodeFlutterwaveItemId,
+  decodeFlutterwaveProviderId,
+  encodeFlutterwaveItemId,
+  encodeFlutterwaveProviderId,
+  isFlutterwaveBillCategory,
+  isFlutterwaveProviderId,
+  requiresFlutterwaveCustomerValidation,
+} from '../../services/flutterwave/flutterwave.bill-map.js';
 import { notifyBillPayment } from '../../core/utils/notification.events.js';
 import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
 import { RewardFulfillmentService } from '../rewards/reward-fulfillment.service.js';
 
 /**
  * Bill Payment Service
- * Handles bill payments (airtime, data, electricity, cable TV, betting, internet)
+ * Betting → PalmPay; airtime/data/electricity/cable_tv/internet → Flutterwave (NG/NGN)
  */
 export class BillPaymentService {
   private walletService: WalletService;
   private palmPayBillPaymentService: PalmPayBillPaymentService;
+  private flutterwaveBillPaymentService: FlutterwaveBillPaymentService;
+  private flutterwaveWebhookService: FlutterwaveWebhookService;
   private rewardFulfillmentService: RewardFulfillmentService;
 
   constructor() {
     this.walletService = new WalletService();
     this.palmPayBillPaymentService = new PalmPayBillPaymentService();
+    this.flutterwaveBillPaymentService = new FlutterwaveBillPaymentService();
+    this.flutterwaveWebhookService = new FlutterwaveWebhookService();
     this.rewardFulfillmentService = new RewardFulfillmentService();
   }
 
-  /**
-   * Generate unique reference number
-   */
   private generateReference(): string {
     const timestamp = Date.now().toString(36);
     const random = randomBytes(4).toString('hex');
     return `BILL${timestamp}${random}`.toUpperCase();
+  }
+
+  private getBillCallbackUrl(): string | undefined {
+    const base = (process.env.BASE_URL || process.env.API_PUBLIC_URL || '').replace(/\/$/, '');
+    return base ? `${base}/api/webhooks/flutterwave` : undefined;
   }
 
   private parsePalmPayProviderId(providerId: string, categoryCode?: string) {
@@ -46,7 +70,7 @@ export class BillPaymentService {
       throw new Error('Invalid provider id');
     }
 
-    if (!isSupportedPalmPayScene(embeddedSceneCode)) {
+    if (embeddedSceneCode !== 'betting' || !isSupportedPalmPayScene(embeddedSceneCode)) {
       throw createMaintenanceError();
     }
 
@@ -56,19 +80,14 @@ export class BillPaymentService {
     };
   }
 
-  /**
-   * Calculate bill payment fee
-   */
   private calculateFee(amount: number, currency: string): number {
     if (currency === 'NGN') {
       return 0;
     }
 
-    // Simple fee calculation - 1% or minimum fee
     const feePercent = 0.01;
     const calculatedFee = amount * feePercent;
-    
-    // Minimum fees by currency
+
     const minFees: { [key: string]: number } = {
       NGN: 20,
       USD: 0.1,
@@ -84,7 +103,7 @@ export class BillPaymentService {
     return item.isFixAmount === 1 || item.raw?.isFixAmount === 1;
   }
 
-  private resolveBillPaymentAmount(
+  private resolvePalmPayAmount(
     sceneCode: string,
     userAmount: string,
     item: { amount?: number; isFixAmount?: number; raw?: { isFixAmount?: number } }
@@ -94,7 +113,6 @@ export class BillPaymentService {
       throw new Error('Invalid amount');
     }
 
-    // Airtime and betting are user-entered amounts; do not override from provider item defaults.
     if (sceneCode === 'airtime' || sceneCode === 'betting') {
       return parsedUserAmount;
     }
@@ -104,6 +122,73 @@ export class BillPaymentService {
     }
 
     return parsedUserAmount;
+  }
+
+  private resolveFlutterwaveAmount(
+    categoryCode: string,
+    userAmount: string,
+    item: FlutterwaveBillItem
+  ): Decimal {
+    const parsedUserAmount = new Decimal(userAmount);
+    if (parsedUserAmount.lte(0)) {
+      throw new Error('Invalid amount');
+    }
+
+    if (categoryCode === 'airtime' || categoryCode === 'electricity') {
+      return parsedUserAmount;
+    }
+
+    if (!item.isAirtime && item.amount > 0) {
+      return new Decimal(item.amount);
+    }
+
+    return parsedUserAmount;
+  }
+
+  private normalizeNgPhoneForFlutterwave(accountNumber: string): string {
+    const digitsOnly = String(accountNumber).replace(/\D/g, '');
+    if (digitsOnly.length < 10) {
+      throw new Error('Invalid phone number');
+    }
+    return `0${digitsOnly.slice(-10)}`;
+  }
+
+  private normalizeNgPhoneForPalmPay(accountNumber: string): string {
+    const digitsOnly = String(accountNumber).replace(/\D/g, '');
+    if (digitsOnly.length < 10) {
+      throw new Error('Invalid phone number');
+    }
+    return `02340${digitsOnly.slice(-10)}`;
+  }
+
+  private pickFlutterwaveItem(
+    items: FlutterwaveBillItem[],
+    opts: { planId?: string | number; accountType?: string; categoryCode: string }
+  ): FlutterwaveBillItem {
+    const decodedItemCode = decodeFlutterwaveItemId(opts.planId);
+    if (decodedItemCode) {
+      const matched = items.find((entry) => entry.itemCode === decodedItemCode);
+      if (matched) return matched;
+      throw new Error('Selected bill payment plan is unavailable');
+    }
+
+    if (opts.categoryCode === 'airtime') {
+      return items.find((entry) => entry.isAirtime) || items[0];
+    }
+
+    if (opts.categoryCode === 'electricity' && opts.accountType) {
+      const needle = opts.accountType.toLowerCase();
+      const byType = items.find((entry) => {
+        const hay = `${entry.name} ${entry.shortName || ''} ${entry.groupName || ''}`.toLowerCase();
+        return hay.includes(needle);
+      });
+      if (byType) return byType;
+    }
+
+    if (!items[0]) {
+      throw new Error('Selected bill payment plan is unavailable');
+    }
+    return items[0];
   }
 
   /**
@@ -134,28 +219,55 @@ export class BillPaymentService {
     if (countryCode && countryCode !== 'NG') {
       throw new Error('Only Nigerian bill payments are currently supported');
     }
-    if (!isSupportedPalmPayScene(categoryCode)) {
+
+    if (categoryCode === 'betting') {
+      if (!isSupportedPalmPayScene(categoryCode)) {
+        throw createMaintenanceError();
+      }
+
+      try {
+        const billers = await this.palmPayBillPaymentService.queryBillers(categoryCode);
+        return billers.map((biller) => ({
+          id: `${categoryCode}:${biller.billerId}`,
+          code: biller.billerId,
+          billerId: biller.billerId,
+          name: biller.billerName,
+          logoUrl: biller.billerIcon || null,
+          countryCode: 'NG',
+          currency: 'NGN',
+          provider: 'palmpay',
+          category: {
+            code: categoryCode,
+          },
+          metadata: biller.raw || biller,
+        }));
+      } catch (error: any) {
+        if (error.code === 'BILL_SERVICE_UNDER_MAINTENANCE') throw error;
+        throw createProviderUnavailableError(error.message || 'Bill payment providers are unavailable');
+      }
+    }
+
+    if (!isFlutterwaveBillCategory(categoryCode)) {
       throw createMaintenanceError();
     }
 
     try {
-      const billers = await this.palmPayBillPaymentService.queryBillers(categoryCode);
-      return billers.map((biller) => ({
-        id: `${categoryCode}:${biller.billerId}`,
-        code: biller.billerId,
-        billerId: biller.billerId,
-        name: biller.billerName,
-        logoUrl: biller.billerIcon || null,
+      const billers = await this.flutterwaveBillPaymentService.getBillers(categoryCode, 'NG');
+      return billers.map((biller: FlutterwaveBiller) => ({
+        id: encodeFlutterwaveProviderId(categoryCode, biller.billerCode),
+        code: biller.billerCode,
+        billerId: biller.billerCode,
+        name: biller.name,
+        logoUrl: biller.logo || null,
         countryCode: 'NG',
         currency: 'NGN',
-        provider: 'palmpay',
+        provider: 'flutterwave',
         category: {
           code: categoryCode,
         },
         metadata: biller.raw || biller,
       }));
     } catch (error: any) {
-      if (error.code === 'BILL_SERVICE_UNDER_MAINTENANCE') throw error;
       throw createProviderUnavailableError(error.message || 'Bill payment providers are unavailable');
     }
   }
@@ -164,10 +276,35 @@ export class BillPaymentService {
    * Get plans/bundles by provider
    */
   async getPlansByProvider(providerId: string, categoryCode?: string) {
-    const { sceneCode, billerId } = this.parsePalmPayProviderId(providerId, categoryCode);
-    if (!isSupportedPalmPayScene(sceneCode)) {
-      throw createMaintenanceError();
+    if (isFlutterwaveProviderId(providerId) || (categoryCode && isFlutterwaveBillCategory(categoryCode))) {
+      const decoded = isFlutterwaveProviderId(providerId)
+        ? decodeFlutterwaveProviderId(providerId)
+        : {
+            categoryCode: categoryCode as any,
+            billerCode: providerId,
+          };
+
+      try {
+        const items = await this.flutterwaveBillPaymentService.getBillItems(decoded.billerCode);
+        return items.map((item: FlutterwaveBillItem) => ({
+          id: encodeFlutterwaveItemId(item.itemCode),
+          code: item.itemCode,
+          itemId: item.itemCode,
+          providerId: encodeFlutterwaveProviderId(decoded.categoryCode, decoded.billerCode),
+          name: item.name,
+          amount: item.amount > 0 ? item.amount.toString() : undefined,
+          currency: 'NGN',
+          dataAmount: item.raw?.dataAmount || null,
+          validity: item.raw?.validity || null,
+          description: item.raw?.description || item.name,
+          metadata: item.raw || item,
+        }));
+      } catch (error: any) {
+        throw createProviderUnavailableError(error.message || 'Bill payment plans are unavailable');
+      }
     }
+
+    const { sceneCode, billerId } = this.parsePalmPayProviderId(providerId, categoryCode);
 
     try {
       const items = await this.palmPayBillPaymentService.queryItems(sceneCode, billerId);
@@ -192,21 +329,95 @@ export class BillPaymentService {
   }
 
   /**
-   * Validate meter number (electricity)
+   * Validate meter number (electricity via Flutterwave)
    */
-  async validateMeterNumber(providerId: number, meterNumber: string, accountType: 'prepaid' | 'postpaid') {
-    throw createMaintenanceError('Electricity bill payments are temporarily unavailable.');
+  async validateMeterNumber(
+    providerId: string | number,
+    meterNumber: string,
+    accountType: 'prepaid' | 'postpaid'
+  ) {
+    const providerIdStr = String(providerId);
+    if (!isFlutterwaveProviderId(providerIdStr)) {
+      throw createMaintenanceError('Electricity bill payments require a Flutterwave provider.');
+    }
+
+    const { categoryCode, billerCode } = decodeFlutterwaveProviderId(providerIdStr);
+    if (categoryCode !== 'electricity') {
+      throw new Error('Provider is not an electricity biller');
+    }
+
+    try {
+      const items = await this.flutterwaveBillPaymentService.getBillItems(billerCode);
+      const item = this.pickFlutterwaveItem(items, {
+        categoryCode,
+        accountType,
+      });
+      const validation = await this.flutterwaveBillPaymentService.validateCustomer(
+        item.itemCode,
+        meterNumber
+      );
+
+      return {
+        isValid: true,
+        meterNumber,
+        accountType,
+        accountName: validation.name || null,
+        provider: {
+          id: providerIdStr,
+          code: billerCode,
+        },
+        plan: {
+          id: encodeFlutterwaveItemId(item.itemCode),
+          code: item.itemCode,
+          name: item.name,
+        },
+        verification: validation,
+      };
+    } catch (error: any) {
+      throw createProviderUnavailableError(error.message || 'Meter validation failed');
+    }
   }
 
   /**
-   * Validate account number (betting)
+   * Validate account number (betting via PalmPay; cable/internet via Flutterwave when flw ids)
    */
-  async validateAccountNumber(providerId: number, accountNumber: string) {
+  async validateAccountNumber(providerId: string | number, accountNumber: string) {
     if (!accountNumber || accountNumber.length < 5) {
       throw new Error('Invalid account number format');
     }
 
-    const { sceneCode, billerId } = this.parsePalmPayProviderId(providerId.toString(), 'betting');
+    const providerIdStr = String(providerId);
+
+    if (isFlutterwaveProviderId(providerIdStr)) {
+      const { categoryCode, billerCode } = decodeFlutterwaveProviderId(providerIdStr);
+      if (!requiresFlutterwaveCustomerValidation(categoryCode)) {
+        return {
+          isValid: true,
+          accountNumber,
+          provider: { id: providerIdStr, code: billerCode },
+        };
+      }
+
+      const items = await this.flutterwaveBillPaymentService.getBillItems(billerCode);
+      const item = this.pickFlutterwaveItem(items, { categoryCode });
+      const validation = await this.flutterwaveBillPaymentService.validateCustomer(
+        item.itemCode,
+        accountNumber
+      );
+
+      return {
+        isValid: true,
+        accountNumber,
+        accountName: validation.name || null,
+        provider: {
+          id: providerIdStr,
+          code: billerCode,
+        },
+        verification: validation,
+      };
+    }
+
+    const { sceneCode, billerId } = this.parsePalmPayProviderId(providerIdStr, 'betting');
     const verification = await this.palmPayBillPaymentService.verifyRechargeAccount({
       sceneCode,
       billerId,
@@ -234,10 +445,33 @@ export class BillPaymentService {
       providerId: string | number;
       currency: string;
       amount: string;
-      accountNumber?: string; // Phone number, meter number, account number
-      accountType?: string; // prepaid, postpaid (for electricity)
-      planId?: string | number; // PalmPay itemId for supported bill scenes
-      beneficiaryId?: number; // If using saved beneficiary
+      accountNumber?: string;
+      accountType?: string;
+      planId?: string | number;
+      beneficiaryId?: number;
+      rewardClaimId?: number;
+    }
+  ) {
+    if (data.categoryCode === 'betting') {
+      return this.initiatePalmPayBillPayment(userId, data);
+    }
+    if (isFlutterwaveBillCategory(data.categoryCode)) {
+      return this.initiateFlutterwaveBillPayment(userId, data);
+    }
+    throw createMaintenanceError();
+  }
+
+  private async initiatePalmPayBillPayment(
+    userId: string | number,
+    data: {
+      categoryCode: string;
+      providerId: string | number;
+      currency: string;
+      amount: string;
+      accountNumber?: string;
+      accountType?: string;
+      planId?: string | number;
+      beneficiaryId?: number;
       rewardClaimId?: number;
     }
   ) {
@@ -265,7 +499,10 @@ export class BillPaymentService {
       );
     }
 
-    const { sceneCode, billerId } = this.parsePalmPayProviderId(data.providerId.toString(), data.categoryCode);
+    const { sceneCode, billerId } = this.parsePalmPayProviderId(
+      data.providerId.toString(),
+      data.categoryCode
+    );
     const category = await prisma.billPaymentCategory.findUnique({
       where: { code: sceneCode },
     });
@@ -293,13 +530,11 @@ export class BillPaymentService {
       throw createProviderUnavailableError(error.message || 'Bill payment service is unavailable');
     }
 
-    // Get wallet
     const wallet = await this.walletService.getWalletByCurrency(userIdNum, data.currency);
     if (!wallet) {
       throw new Error(`Wallet for ${data.currency} not found`);
     }
 
-    // Get beneficiary if provided
     let beneficiary = null;
     if (data.beneficiaryId) {
       beneficiary = await prisma.beneficiary.findFirst({
@@ -319,7 +554,6 @@ export class BillPaymentService {
       }
     }
 
-    // Determine account number
     let accountNumber = data.accountNumber;
     let accountName = null;
     let accountType = data.accountType;
@@ -334,15 +568,8 @@ export class BillPaymentService {
       throw new Error('Account number is required');
     }
 
-    // Airtime/Data phone normalization for PalmPay:
-    // take last 10 digits and prefix with 02340 => 02340 + last10
     if (sceneCode === 'airtime' || sceneCode === 'data') {
-      const digitsOnly = String(accountNumber).replace(/\D/g, '');
-      if (digitsOnly.length < 10) {
-        throw new Error('Invalid phone number');
-      }
-      const last10 = digitsOnly.slice(-10);
-      accountNumber = `02340${last10}`;
+      accountNumber = this.normalizeNgPhoneForPalmPay(accountNumber);
     }
 
     const isRewardFulfillment = Boolean(rewardContext);
@@ -354,14 +581,10 @@ export class BillPaymentService {
         )
       : data.amount;
 
-    // Calculate amount from user input unless the selected item is a fixed-price bundle.
-    const amount = this.resolveBillPaymentAmount(sceneCode, resolvedAmountInput, item);
-
-    // Calculate fee — reward redemptions are platform-funded with no user fee
+    const amount = this.resolvePalmPayAmount(sceneCode, resolvedAmountInput, item);
     const fee = isRewardFulfillment ? 0 : this.calculateFee(amount.toNumber(), data.currency);
     const totalAmount = amount.plus(fee);
 
-    // Check balance (skip for reward fulfillment — platform pays)
     if (!isRewardFulfillment) {
       const walletBalance = new Decimal(wallet.balance);
       if (walletBalance.lessThan(totalAmount)) {
@@ -369,7 +592,6 @@ export class BillPaymentService {
       }
     }
 
-    // Validate account number based on category
     if (sceneCode === 'betting') {
       const validation = await this.palmPayBillPaymentService.verifyRechargeAccount({
         sceneCode,
@@ -380,7 +602,6 @@ export class BillPaymentService {
       accountName = (validation as any)?.accountName || accountName;
     }
 
-    // Create pending transaction
     const reference = this.generateReference();
     const transaction = await prisma.transaction.create({
       data: {
@@ -459,6 +680,234 @@ export class BillPaymentService {
     };
   }
 
+  private async initiateFlutterwaveBillPayment(
+    userId: string | number,
+    data: {
+      categoryCode: string;
+      providerId: string | number;
+      currency: string;
+      amount: string;
+      accountNumber?: string;
+      accountType?: string;
+      planId?: string | number;
+      beneficiaryId?: number;
+      rewardClaimId?: number;
+    }
+  ) {
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(userIdNum) || userIdNum <= 0) {
+      throw new Error(`Invalid userId: ${userId}`);
+    }
+
+    if (!isFlutterwaveBillCategory(data.categoryCode)) {
+      throw createMaintenanceError();
+    }
+    if (data.currency !== 'NGN') {
+      throw new Error('Only NGN bill payments are currently supported');
+    }
+
+    let rewardContext: Awaited<ReturnType<RewardFulfillmentService['validatePendingClaim']>> | null = null;
+    if (data.rewardClaimId) {
+      rewardContext = await this.rewardFulfillmentService.validatePendingClaim(
+        userIdNum,
+        data.rewardClaimId
+      );
+      this.rewardFulfillmentService.assertCategoryMatchesReward(
+        rewardContext.reward,
+        data.categoryCode
+      );
+    }
+
+    const providerIdStr = String(data.providerId);
+    const { categoryCode, billerCode } = isFlutterwaveProviderId(providerIdStr)
+      ? decodeFlutterwaveProviderId(providerIdStr)
+      : { categoryCode: data.categoryCode as any, billerCode: providerIdStr };
+
+    if (categoryCode !== data.categoryCode) {
+      throw new Error('Provider does not match selected category');
+    }
+
+    const category = await prisma.billPaymentCategory.findUnique({
+      where: { code: categoryCode },
+    });
+    const categoryName = category?.name || categoryCode;
+    const encodedProviderId = encodeFlutterwaveProviderId(categoryCode, billerCode);
+
+    let billerName = billerCode;
+    let item: FlutterwaveBillItem;
+    try {
+      const billers = await this.flutterwaveBillPaymentService.getBillers(categoryCode, 'NG');
+      const biller = billers.find((entry: FlutterwaveBiller) => entry.billerCode === billerCode);
+      if (!biller) {
+        throw new Error('Selected biller is unavailable');
+      }
+      billerName = biller.name;
+
+      const items = await this.flutterwaveBillPaymentService.getBillItems(billerCode);
+      item = this.pickFlutterwaveItem(items, {
+        planId: data.planId,
+        accountType: data.accountType,
+        categoryCode,
+      });
+    } catch (error: any) {
+      throw createProviderUnavailableError(error.message || 'Bill payment service is unavailable');
+    }
+
+    const wallet = await this.walletService.getWalletByCurrency(userIdNum, data.currency);
+    if (!wallet) {
+      throw new Error(`Wallet for ${data.currency} not found`);
+    }
+
+    let beneficiary = null;
+    if (data.beneficiaryId) {
+      beneficiary = await prisma.beneficiary.findFirst({
+        where: {
+          id: data.beneficiaryId,
+          userId: userIdNum,
+          categoryId: category?.id,
+          isActive: true,
+        },
+        include: {
+          provider: true,
+        },
+      });
+
+      if (!beneficiary) {
+        throw new Error('Beneficiary not found');
+      }
+    }
+
+    let accountNumber = data.accountNumber;
+    let accountName = null;
+    let accountType = data.accountType;
+
+    if (beneficiary) {
+      accountNumber = beneficiary.accountNumber;
+      accountName = beneficiary.name;
+      accountType = beneficiary.accountType || accountType;
+    }
+
+    if (!accountNumber) {
+      throw new Error('Account number is required');
+    }
+
+    if (categoryCode === 'airtime' || categoryCode === 'data') {
+      accountNumber = this.normalizeNgPhoneForFlutterwave(accountNumber);
+    }
+
+    const isRewardFulfillment = Boolean(rewardContext);
+    const resolvedAmountInput = rewardContext
+      ? this.rewardFulfillmentService.resolveRewardAmount(
+          rewardContext.reward,
+          data.amount,
+          categoryCode
+        )
+      : data.amount;
+
+    const amount = this.resolveFlutterwaveAmount(categoryCode, resolvedAmountInput, item);
+    const fee = isRewardFulfillment ? 0 : this.calculateFee(amount.toNumber(), data.currency);
+    const totalAmount = amount.plus(fee);
+
+    if (!isRewardFulfillment) {
+      const walletBalance = new Decimal(wallet.balance);
+      if (walletBalance.lessThan(totalAmount)) {
+        throw new Error('Insufficient balance');
+      }
+    }
+
+    if (requiresFlutterwaveCustomerValidation(categoryCode)) {
+      try {
+        const validation = await this.flutterwaveBillPaymentService.validateCustomer(
+          item.itemCode,
+          accountNumber
+        );
+        accountName = validation.name || accountName;
+      } catch (error: any) {
+        throw createProviderUnavailableError(error.message || 'Customer validation failed');
+      }
+    }
+
+    const reference = this.generateReference();
+    const encodedItemId = encodeFlutterwaveItemId(item.itemCode);
+    const transaction = await prisma.transaction.create({
+      data: {
+        walletId: wallet.id,
+        type: 'bill_payment',
+        status: 'pending',
+        amount: amount.toNumber(),
+        currency: data.currency,
+        fee: fee,
+        reference,
+        description: `${categoryName} - ${billerName}`,
+        channel: categoryCode,
+        country: 'NG',
+        metadata: {
+          provider: 'flutterwave',
+          categoryCode,
+          categoryName,
+          providerId: encodedProviderId,
+          billerId: billerCode,
+          billerCode,
+          providerCode: billerCode,
+          providerName: billerName,
+          accountNumber,
+          accountName,
+          accountType,
+          planId: encodedItemId,
+          itemId: item.itemCode,
+          itemCode: item.itemCode,
+          planCode: item.itemCode,
+          planName: item.name,
+          planDataAmount: item.raw?.dataAmount || null,
+          beneficiaryId: beneficiary?.id || null,
+          ...(isRewardFulfillment && rewardContext
+            ? {
+                isRewardFulfillment: true,
+                rewardClaimId: rewardContext.claim.id,
+                rewardCode: rewardContext.claim.rewardCode,
+                rewardAmountNgn: amount.toNumber(),
+              }
+            : {}),
+        },
+      },
+    });
+
+    return {
+      transactionId: transaction.id,
+      reference: transaction.reference,
+      category: {
+        id: category?.id || 0,
+        code: categoryCode,
+        name: categoryName,
+      },
+      provider: {
+        id: encodedProviderId,
+        code: billerCode,
+        name: billerName,
+        logoUrl: null,
+      },
+      plan: {
+        id: encodedItemId,
+        code: item.itemCode,
+        name: item.name,
+        dataAmount: item.raw?.dataAmount || null,
+        validity: item.raw?.validity || null,
+      },
+      accountNumber,
+      accountName,
+      accountType,
+      amount: amount.toString(),
+      currency: data.currency,
+      fee: fee.toString(),
+      totalAmount: totalAmount.toString(),
+      wallet: {
+        id: wallet.id,
+        currency: wallet.currency,
+        balance: wallet.balance,
+      },
+    };
+  }
+
   /**
    * Confirm bill payment (completes pending transaction)
    */
@@ -478,7 +927,6 @@ export class BillPaymentService {
       throw new Error(`Invalid transactionId: ${transactionId}`);
     }
 
-    // Get transaction
     const transaction = await prisma.transaction.findUnique({
       where: { id: txIdNum },
       include: {
@@ -507,16 +955,27 @@ export class BillPaymentService {
       throw new Error(`Transaction is already ${transaction.status}`);
     }
 
-    // Verify configured security requirements
     await assertTransactionSecurity(transaction.wallet.user, { pin, emailOtp });
 
     const metadata = transaction.metadata as any;
+    if (metadata?.provider === 'flutterwave' || isFlutterwaveBillCategory(metadata?.categoryCode)) {
+      return this.confirmFlutterwaveBillPayment(userIdNum, txIdNum, transaction, metadata);
+    }
+
+    return this.confirmPalmPayBillPayment(userIdNum, txIdNum, transaction, metadata);
+  }
+
+  private async confirmPalmPayBillPayment(
+    userIdNum: number,
+    txIdNum: number,
+    transaction: any,
+    metadata: any
+  ) {
     const amount = new Decimal(transaction.amount);
     const fee = new Decimal(transaction.fee);
     const totalAmount = amount.plus(fee);
     const isRewardFulfillment = Boolean(metadata?.isRewardFulfillment && metadata?.rewardClaimId);
 
-    // Check balance (skip for reward fulfillment)
     if (!isRewardFulfillment) {
       const walletBalance = new Decimal(transaction.wallet.balance);
       if (walletBalance.lessThan(totalAmount)) {
@@ -524,7 +983,7 @@ export class BillPaymentService {
       }
     }
 
-    if (!isSupportedPalmPayScene(metadata?.categoryCode)) {
+    if (metadata?.categoryCode !== 'betting' || !isSupportedPalmPayScene(metadata?.categoryCode)) {
       throw createMaintenanceError();
     }
 
@@ -645,12 +1104,88 @@ export class BillPaymentService {
           metadata.rewardClaimId,
           txIdNum
         );
-      } else if (mappedStatus === 'failed') {
+      } else if (mappedStatus === 'failed' || mappedStatus === 'cancelled') {
         await this.rewardFulfillmentService.failRewardClaim(
           metadata.rewardClaimId,
           'Bill payment provider returned failed status'
         );
       }
+    }
+
+    // Immediate refund when PalmPay returns failed/cancelled after debit
+    if (
+      (mappedStatus === 'failed' || mappedStatus === 'cancelled') &&
+      !isRewardFulfillment
+    ) {
+      await prisma.$transaction(async (tx) => {
+        await tx.wallet.update({
+          where: { id: transaction.walletId },
+          data: {
+            balance: {
+              increment: totalAmount.toNumber(),
+            },
+          },
+        });
+        await tx.transaction.update({
+          where: { id: txIdNum },
+          data: {
+            status: mappedStatus,
+            metadata: {
+              ...metadata,
+              palmpayOrderId: palmPayOrderId,
+              palmpayOrderNo: palmPayOrder.orderNo,
+              palmpayStatus: palmPayOrder.orderStatus,
+              palmpayRequestId: palmPayOrder.requestId,
+              providerResponse: palmPayOrder,
+              walletDebited: true,
+              refunded: true,
+              refundReason: `PalmPay returned ${mappedStatus} status`,
+            },
+          },
+        });
+      });
+
+      this.notifyBillResult(
+        userIdNum,
+        amount,
+        transaction,
+        { reference: transaction.reference, status: mappedStatus },
+        metadata,
+        mappedStatus
+      );
+
+      return {
+        id: txIdNum,
+        reference: transaction.reference,
+        status: mappedStatus,
+        amount: amount.toString(),
+        currency: transaction.currency,
+        fee: fee.toString(),
+        totalAmount: totalAmount.toString(),
+        accountNumber: metadata?.accountNumber || null,
+        accountName: metadata?.accountName || null,
+        orderId: palmPayOrderId,
+        orderNo: palmPayOrder.orderNo,
+        category: {
+          code: metadata?.categoryCode || null,
+          name: metadata?.categoryName || null,
+        },
+        provider: {
+          id: metadata?.providerId || null,
+          code: metadata?.providerCode || null,
+          name: metadata?.providerName || null,
+        },
+        plan: metadata?.planId
+          ? {
+              id: metadata.planId,
+              code: metadata.planCode,
+              name: metadata.planName,
+              dataAmount: metadata.planDataAmount,
+            }
+          : null,
+        completedAt: null,
+        createdAt: debitedTransaction.createdAt,
+      };
     }
 
     const updatedTransaction = await prisma.transaction.update({
@@ -677,33 +1212,7 @@ export class BillPaymentService {
       },
     });
 
-    if (mappedStatus === 'completed') {
-      notifyBillPayment(userIdNum, {
-        amount: amount.toString(),
-        currency: transaction.currency,
-        reference: updatedTransaction.reference,
-        status: 'success',
-        categoryName: metadata?.categoryName,
-      });
-    } else if (mappedStatus === 'failed') {
-      notifyBillPayment(userIdNum, {
-        amount: amount.toString(),
-        currency: transaction.currency,
-        reference: updatedTransaction.reference,
-        status: 'error',
-        categoryName: metadata?.categoryName,
-        message: 'Your bill payment could not be completed.',
-      });
-    } else {
-      notifyBillPayment(userIdNum, {
-        amount: amount.toString(),
-        currency: transaction.currency,
-        reference: updatedTransaction.reference,
-        status: 'info',
-        categoryName: metadata?.categoryName,
-        message: 'Your bill payment is being processed.',
-      });
-    }
+    this.notifyBillResult(userIdNum, amount, transaction, updatedTransaction, metadata, mappedStatus);
 
     return {
       id: updatedTransaction.id,
@@ -726,15 +1235,393 @@ export class BillPaymentService {
         code: metadata?.providerCode || null,
         name: metadata?.providerName || null,
       },
-      plan: metadata?.planId ? {
-        id: metadata.planId,
-        code: metadata.planCode,
-        name: metadata.planName,
-        dataAmount: metadata.planDataAmount,
-      } : null,
+      plan: metadata?.planId
+        ? {
+            id: metadata.planId,
+            code: metadata.planCode,
+            name: metadata.planName,
+            dataAmount: metadata.planDataAmount,
+          }
+        : null,
       completedAt: updatedTransaction.completedAt,
       createdAt: debitedTransaction.createdAt,
     };
+  }
+
+  private async confirmFlutterwaveBillPayment(
+    userIdNum: number,
+    txIdNum: number,
+    transaction: any,
+    metadata: any
+  ) {
+    const amount = new Decimal(transaction.amount);
+    const fee = new Decimal(transaction.fee);
+    const totalAmount = amount.plus(fee);
+    const isRewardFulfillment = Boolean(metadata?.isRewardFulfillment && metadata?.rewardClaimId);
+
+    if (!isRewardFulfillment) {
+      const walletBalance = new Decimal(transaction.wallet.balance);
+      if (walletBalance.lessThan(totalAmount)) {
+        throw new Error('Insufficient balance');
+      }
+    }
+
+    if (!isFlutterwaveBillCategory(metadata?.categoryCode)) {
+      throw createMaintenanceError();
+    }
+
+    const flwReference = `flw_bill_${transaction.reference.toLowerCase()}`;
+    const billerCode = metadata.billerCode || metadata.billerId;
+    const itemCode = metadata.itemCode || metadata.itemId;
+
+    if (!billerCode || !itemCode) {
+      throw new Error('Missing Flutterwave biller or item details');
+    }
+
+    const debitedTransaction = isRewardFulfillment
+      ? await prisma.transaction.update({
+          where: { id: txIdNum },
+          data: {
+            status: 'processing',
+            metadata: {
+              ...metadata,
+              provider: 'flutterwave',
+              flwReference,
+              walletDebited: false,
+              rewardFulfillment: true,
+            },
+          },
+          include: {
+            wallet: {
+              include: {
+                currencyRef: true,
+              },
+            },
+          },
+        })
+      : await prisma.$transaction(async (tx) => {
+          await tx.wallet.update({
+            where: { id: transaction.walletId },
+            data: {
+              balance: {
+                decrement: totalAmount.toNumber(),
+              },
+            },
+          });
+
+          return tx.transaction.update({
+            where: { id: txIdNum },
+            data: {
+              status: 'processing',
+              metadata: {
+                ...metadata,
+                provider: 'flutterwave',
+                flwReference,
+                walletDebited: true,
+                walletDebitedAt: new Date().toISOString(),
+              },
+            },
+            include: {
+              wallet: {
+                include: {
+                  currencyRef: true,
+                },
+              },
+            },
+          });
+        });
+
+    let flwResult: any;
+    try {
+      flwResult = await this.flutterwaveBillPaymentService.createBillPayment({
+        billerCode,
+        itemCode,
+        country: 'NG',
+        customerId: metadata.accountNumber,
+        amount: amount.toNumber(),
+        reference: flwReference,
+        callbackUrl: this.getBillCallbackUrl(),
+      });
+    } catch (error: any) {
+      if (isRewardFulfillment && metadata?.rewardClaimId) {
+        await this.rewardFulfillmentService.failRewardClaim(
+          metadata.rewardClaimId,
+          error.message || 'Bill payment failed'
+        );
+        await prisma.transaction.update({
+          where: { id: txIdNum },
+          data: {
+            status: 'failed',
+            metadata: {
+              ...metadata,
+              provider: 'flutterwave',
+              flwReference,
+              providerError: error.providerResponse || error.message,
+            },
+          },
+        });
+      } else {
+        await prisma.$transaction(async (tx) => {
+          await tx.wallet.update({
+            where: { id: transaction.walletId },
+            data: {
+              balance: {
+                increment: totalAmount.toNumber(),
+              },
+            },
+          });
+          await tx.transaction.update({
+            where: { id: txIdNum },
+            data: {
+              status: 'failed',
+              metadata: {
+                ...metadata,
+                provider: 'flutterwave',
+                flwReference,
+                refunded: true,
+                refundReason: error.message || 'Bill payment failed',
+                providerError: error.providerResponse || error.message,
+              },
+            },
+          });
+        });
+      }
+      throw createProviderUnavailableError(error.message || 'Bill payment failed');
+    }
+
+    let mappedStatus = (flwResult.mappedStatus || 'pending') as MappedBillStatus;
+
+    // Always try a status poll once after create — FLW often returns pending first.
+    try {
+      const status = await this.flutterwaveBillPaymentService.getBillStatus(flwReference);
+      if (status.mappedStatus !== 'pending') {
+        mappedStatus = status.mappedStatus;
+      }
+      flwResult = { ...flwResult, statusPoll: status };
+    } catch {
+      // Keep create-response status; webhook/sync may finalize later
+    }
+
+    // Persist provider refs before finalize so webhooks/sync can find the tx.
+    await prisma.transaction.update({
+      where: { id: txIdNum },
+      data: {
+        metadata: {
+          ...metadata,
+          provider: 'flutterwave',
+          flwReference,
+          flwTxRef: flwResult.txRef,
+          flwProviderReference: flwResult.reference,
+          rechargeToken: flwResult.rechargeToken || null,
+          providerResponse: flwResult,
+          walletDebited: !isRewardFulfillment,
+        },
+      },
+    });
+
+    if (mappedStatus !== 'pending') {
+      await this.flutterwaveWebhookService.finalizeFlutterwaveBillPayment(
+        txIdNum,
+        mappedStatus,
+        {
+          source: 'confirm',
+          ...flwResult.raw,
+          tx_ref: flwResult.txRef,
+          reference: flwResult.reference,
+          recharge_token: flwResult.rechargeToken,
+          mappedStatus,
+        }
+      );
+    } else {
+      await prisma.transaction.update({
+        where: { id: txIdNum },
+        data: {
+          status: 'processing',
+          metadata: {
+            ...metadata,
+            provider: 'flutterwave',
+            flwReference,
+            flwTxRef: flwResult.txRef,
+            flwProviderReference: flwResult.reference,
+            rechargeToken: flwResult.rechargeToken || null,
+            providerResponse: flwResult,
+            walletDebited: !isRewardFulfillment,
+          },
+        },
+      });
+      this.notifyBillResult(
+        userIdNum,
+        amount,
+        transaction,
+        { reference: transaction.reference, status: 'processing' },
+        metadata,
+        'pending'
+      );
+    }
+
+    const updatedTransaction = await prisma.transaction.findUnique({
+      where: { id: txIdNum },
+      include: {
+        wallet: {
+          include: {
+            currencyRef: true,
+          },
+        },
+      },
+    });
+
+    if (!updatedTransaction) {
+      throw new Error('Transaction not found after confirm');
+    }
+
+    return {
+      id: updatedTransaction.id,
+      reference: updatedTransaction.reference,
+      status: updatedTransaction.status,
+      amount: amount.toString(),
+      currency: transaction.currency,
+      fee: fee.toString(),
+      totalAmount: totalAmount.toString(),
+      accountNumber: metadata?.accountNumber || null,
+      accountName: metadata?.accountName || null,
+      orderId: flwReference,
+      orderNo: flwResult.txRef || flwResult.reference,
+      rechargeToken:
+        (updatedTransaction.metadata as any)?.rechargeToken || flwResult.rechargeToken || null,
+      category: {
+        code: metadata?.categoryCode || null,
+        name: metadata?.categoryName || null,
+      },
+      provider: {
+        id: metadata?.providerId || null,
+        code: metadata?.providerCode || null,
+        name: metadata?.providerName || null,
+      },
+      plan: metadata?.planId
+        ? {
+            id: metadata.planId,
+            code: metadata.planCode,
+            name: metadata.planName,
+            dataAmount: metadata.planDataAmount,
+          }
+        : null,
+      completedAt: updatedTransaction.completedAt,
+      createdAt: debitedTransaction.createdAt,
+    };
+  }
+
+  /**
+   * Sync bill payment status from provider (Flutterwave poll / idempotent finalize).
+   */
+  async syncBillPaymentStatus(userId: string | number, transactionId: string | number) {
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const txIdNum = typeof transactionId === 'string' ? parseInt(transactionId, 10) : transactionId;
+
+    if (isNaN(userIdNum) || userIdNum <= 0) {
+      throw new Error(`Invalid userId: ${userId}`);
+    }
+    if (isNaN(txIdNum) || txIdNum <= 0) {
+      throw new Error(`Invalid transactionId: ${transactionId}`);
+    }
+
+    const transaction = await prisma.transaction.findUnique({
+      where: { id: txIdNum },
+      include: { wallet: true },
+    });
+
+    if (!transaction) {
+      throw new Error('Transaction not found');
+    }
+    if (transaction.wallet.userId !== userIdNum) {
+      throw new Error('Unauthorized access to transaction');
+    }
+    if (transaction.type !== 'bill_payment') {
+      throw new Error('Transaction is not a bill payment');
+    }
+
+    const metadata = (transaction.metadata as any) || {};
+
+    if (
+      (metadata.provider === 'flutterwave' || isFlutterwaveBillCategory(metadata.categoryCode)) &&
+      ['pending', 'processing'].includes(transaction.status)
+    ) {
+      await this.flutterwaveWebhookService.syncBillPaymentStatus(txIdNum);
+    }
+
+    const updated = await prisma.transaction.findUnique({
+      where: { id: txIdNum },
+      include: { wallet: true },
+    });
+
+    if (!updated) {
+      throw new Error('Transaction not found');
+    }
+
+    const meta = (updated.metadata as any) || {};
+    return {
+      id: updated.id,
+      reference: updated.reference,
+      status: updated.status,
+      amount: updated.amount.toString(),
+      currency: updated.currency,
+      fee: updated.fee?.toString?.() || String(updated.fee || 0),
+      accountNumber: meta.accountNumber || null,
+      accountName: meta.accountName || null,
+      rechargeToken: meta.rechargeToken || null,
+      category: {
+        code: meta.categoryCode || null,
+        name: meta.categoryName || null,
+      },
+      provider: {
+        id: meta.providerId || null,
+        code: meta.providerCode || null,
+        name: meta.providerName || null,
+        type: meta.provider || null,
+      },
+      completedAt: updated.completedAt,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+    };
+  }
+
+  private notifyBillResult(
+    userIdNum: number,
+    amount: Decimal,
+    transaction: any,
+    updatedTransaction: any,
+    metadata: any,
+    mappedStatus: string
+  ) {
+    if (mappedStatus === 'completed') {
+      notifyBillPayment(userIdNum, {
+        amount: amount.toString(),
+        currency: transaction.currency,
+        reference: updatedTransaction.reference,
+        status: 'success',
+        categoryName: metadata?.categoryName,
+      });
+    } else if (mappedStatus === 'failed' || mappedStatus === 'cancelled') {
+      notifyBillPayment(userIdNum, {
+        amount: amount.toString(),
+        currency: transaction.currency,
+        reference: updatedTransaction.reference,
+        status: 'error',
+        categoryName: metadata?.categoryName,
+        message:
+          mappedStatus === 'cancelled'
+            ? 'Your bill payment was cancelled.'
+            : 'Your bill payment could not be completed.',
+      });
+    } else {
+      notifyBillPayment(userIdNum, {
+        amount: amount.toString(),
+        currency: transaction.currency,
+        reference: updatedTransaction.reference,
+        status: 'info',
+        categoryName: metadata?.categoryName,
+        message: 'Your bill payment is being processed.',
+      });
+    }
   }
 
   /**
@@ -813,7 +1700,6 @@ export class BillPaymentService {
       throw new Error(`Invalid userId: ${userId}`);
     }
 
-    // Get category
     const category = await prisma.billPaymentCategory.findUnique({
       where: { code: data.categoryCode },
     });
@@ -822,7 +1708,6 @@ export class BillPaymentService {
       throw new Error('Category not found');
     }
 
-    // Get provider
     const provider = await prisma.billPaymentProvider.findUnique({
       where: { id: data.providerId },
     });
@@ -831,7 +1716,6 @@ export class BillPaymentService {
       throw new Error('Provider not found');
     }
 
-    // Check if beneficiary already exists
     const existing = await prisma.beneficiary.findFirst({
       where: {
         userId: userIdNum,
@@ -846,7 +1730,6 @@ export class BillPaymentService {
       throw new Error('Beneficiary already exists');
     }
 
-    // Create beneficiary
     const beneficiary = await prisma.beneficiary.create({
       data: {
         userId: userIdNum,
@@ -960,4 +1843,3 @@ export class BillPaymentService {
     };
   }
 }
-

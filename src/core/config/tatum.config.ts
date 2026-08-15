@@ -1,9 +1,15 @@
 /**
  * Tatum integration configuration.
  * Tatum is used when TATUM_API_KEY is set (unless USE_TATUM=false).
+ * When Busha is the live crypto provider, Tatum stays off unless USE_TATUM=true.
  */
 export function isTatumEnabled(): boolean {
   if (process.env.USE_TATUM === 'false') {
+    return false;
+  }
+  const bushaLive =
+    process.env.USE_BUSHA !== 'false' && Boolean(process.env.BUSHA_API_KEY?.trim());
+  if (bushaLive && process.env.USE_TATUM !== 'true') {
     return false;
   }
   return Boolean(process.env.TATUM_API_KEY?.trim());

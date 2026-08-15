@@ -1265,6 +1265,53 @@ export class TransactionHistoryService {
       throw new Error('Unauthorized access to transaction');
     }
 
+    // Refresh in-flight bill payments from Flutterwave when details are viewed
+    if (
+      transaction.type === 'bill_payment' &&
+      ['pending', 'processing'].includes(transaction.status)
+    ) {
+      const meta = (transaction.metadata as any) || {};
+      if (meta.provider === 'flutterwave' || String(meta.flwReference || '').startsWith('flw_bill_')) {
+        try {
+          const { FlutterwaveWebhookService } = await import(
+            '../../services/flutterwave/flutterwave.webhook.service.js'
+          );
+          await new FlutterwaveWebhookService().syncBillPaymentStatus(txIdNum);
+          const refreshed = await prisma.transaction.findUnique({
+            where: { id: txIdNum },
+            include: {
+              wallet: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      email: true,
+                      firstName: true,
+                      lastName: true,
+                    },
+                  },
+                  currencyRef: {
+                    include: {
+                      country: true,
+                    },
+                  },
+                },
+              },
+              bankAccount: true,
+              provider: true,
+              palmPayVirtualAccounts: true,
+            },
+          });
+          if (refreshed) {
+            Object.assign(transaction, refreshed);
+          }
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error('[TransactionHistory] Failed to sync Flutterwave bill status:', message);
+        }
+      }
+    }
+
     const amount = new Decimal(transaction.amount);
     const fee = new Decimal(transaction.fee);
     const metadata = transaction.metadata as any;
@@ -1430,6 +1477,8 @@ export class TransactionHistoryService {
       details.accountName = metadata?.accountName;
       details.billerType = metadata?.providerName || metadata?.categoryName;
       details.mobileNumber = metadata?.accountNumber;
+      details.rechargeToken = metadata?.rechargeToken || null;
+      details.providerType = metadata?.provider || null;
     }
 
     return details;

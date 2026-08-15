@@ -9,6 +9,7 @@ export { KYCModule } from './kyc/kyc.module.js';
 export { HomeModule } from './home/home.module.js';
 export { CountryModule } from './country/country.module.js';
 export { CryptoModule } from './crypto/crypto.module.js';
+export { BushaModule } from './busha/busha.module.js';
 export { DepositModule } from './deposit/deposit.module.js';
 export { ExchangeModule } from './exchange/exchange.module.js';
 export { ConversionModule } from './conversion/conversion.module.js';

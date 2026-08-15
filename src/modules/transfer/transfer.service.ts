@@ -8,6 +8,10 @@ import { PaymentSettingsService } from '../payment-settings/payment-settings.ser
 import { decryptPrivateKey } from '../../core/utils/encryption.js';
 import { PalmPayPayoutService } from '../../services/palmpay/palmpay.payout.service.js';
 import { mapPalmPayStatus } from '../../services/palmpay/palmpay.utils.js';
+import {
+  FlutterwavePayoutService,
+  isFlutterwaveMomoSupported,
+} from '../../services/flutterwave/index.js';
 import { logApplicationEvent } from '../../core/utils/application-log.service.js';
 import {
   notifyTransferReceived,
@@ -35,6 +39,7 @@ export class TransferService {
   private kycService: KYCService;
   private paymentSettingsService: PaymentSettingsService;
   private palmPayPayoutService: PalmPayPayoutService;
+  private flutterwavePayoutService: FlutterwavePayoutService;
   private unifiedStablecoinService = new UnifiedStablecoinService();
 
   constructor() {
@@ -42,6 +47,7 @@ export class TransferService {
     this.kycService = new KYCService();
     this.paymentSettingsService = new PaymentSettingsService();
     this.palmPayPayoutService = new PalmPayPayoutService();
+    this.flutterwavePayoutService = new FlutterwavePayoutService();
   }
 
   /**
@@ -241,6 +247,9 @@ export class TransferService {
    */
   private calculateTransferFee(amount: DecimalType, currency: string, channel: string): DecimalType {
     if (channel === 'bank_account' && currency === 'NGN') {
+      return new Decimal(0);
+    }
+    if (channel === 'mobile_money') {
       return new Decimal(0);
     }
 
@@ -493,14 +502,59 @@ export class TransferService {
         throw new Error('Bank and account number are required for bank account withdrawals.');
       }
     } else if (data.channel === 'mobile_money') {
-      throw new Error('Mobile money transfers are coming soon. Only Naira bank transfer is available now.');
+      const countryCode = data.countryCode.toUpperCase();
+      const currency = data.currency.toUpperCase();
+
+      if (countryCode === 'NG' || currency === 'NGN') {
+        throw new Error('Mobile money withdrawals are not available in Nigeria. Use bank transfer.');
+      }
+
+      if (!isFlutterwaveMomoSupported(countryCode, currency)) {
+        throw new Error('Mobile money withdrawals are currently unavailable for this country');
+      }
+
+      if (!data.providerId) {
+        throw new Error('Provider ID is required for mobile money transfers');
+      }
+      if (!data.phoneNumber || String(data.phoneNumber).replace(/\D/g, '').length < 9) {
+        throw new Error('A valid mobile money phone number is required');
+      }
+
+      const providerId =
+        typeof data.providerId === 'string' ? parseInt(data.providerId, 10) : Number(data.providerId);
+      if (isNaN(providerId) || providerId <= 0) {
+        throw new Error('Invalid provider ID');
+      }
+
+      const provider = await prisma.mobileMoneyProvider.findFirst({
+        where: {
+          id: providerId,
+          isActive: true,
+          countryCode,
+          currency,
+        },
+      });
+
+      if (!provider) {
+        throw new Error('Mobile money provider not found for this country/currency');
+      }
+
+      recipientInfo = {
+        phoneNumber: String(data.phoneNumber).trim(),
+        providerId: provider.id,
+        providerCode: provider.code,
+        providerName: provider.name,
+        countryCode,
+        currency,
+      };
     }
 
     // Generate unique reference
     const reference = this.generateReference();
 
-    // Determine transaction type: 'withdrawal' for bank_account, 'transfer' for others
-    const transactionType = data.channel === 'bank_account' ? 'withdrawal' : 'transfer';
+    // Bank and MoMo off-ramp are withdrawals; P2P remains transfer
+    const transactionType =
+      data.channel === 'bank_account' || data.channel === 'mobile_money' ? 'withdrawal' : 'transfer';
 
     // Create pending transaction
     const transaction = await prisma.transaction.create({
@@ -761,6 +815,101 @@ export class TransferService {
         provider: 'palmpay',
         orderId: palmPayOrderId,
         orderNo: payoutResponse.orderNo,
+        recipientInfo,
+        date: updatedTransaction.completedAt,
+        createdAt: updatedTransaction.createdAt,
+      };
+    }
+
+    if (transaction.type === 'withdrawal' && transaction.channel === 'mobile_money') {
+      const recipientInfo = metadata?.recipientInfo || {};
+      if (!recipientInfo.phoneNumber || !recipientInfo.providerCode) {
+        throw new Error('Mobile money provider and phone number are required for withdrawal');
+      }
+
+      const now = new Date();
+      const flwPayoutReference = `flw_payout_${transaction.reference.toLowerCase()}`;
+      let payoutResponse: any;
+
+      const user = transaction.wallet.user;
+      const beneficiaryName =
+        [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+        user.email ||
+        'RhinoxPay User';
+
+      try {
+        payoutResponse = await this.flutterwavePayoutService.initiateMobileMoneyTransfer({
+          reference: flwPayoutReference,
+          amount: Number(transaction.amount),
+          currency: transaction.currency,
+          countryCode: transaction.country || recipientInfo.countryCode,
+          providerCode: recipientInfo.providerCode,
+          phoneNumber: recipientInfo.phoneNumber,
+          beneficiaryName,
+          senderName: beneficiaryName,
+          senderCountry: transaction.country || recipientInfo.countryCode || 'KE',
+          senderMobile: user.phone || recipientInfo.phoneNumber,
+          narration: `RhinoxPay withdrawal ${transaction.reference}`,
+        });
+      } catch (error: any) {
+        await prisma.transaction.update({
+          where: { id: parsedTransactionId },
+          data: {
+            status: 'failed',
+            metadata: {
+              ...metadata,
+              provider: 'flutterwave',
+              integrationStatus: 'failed',
+              flwPayoutReference,
+              flwError: error.providerResponse || error.message,
+            },
+          },
+        });
+        throw new Error(error.message || 'Mobile money withdrawal processing failed');
+      }
+
+      const updatedTransaction = await prisma.$transaction(async (tx) => {
+        const updated = await tx.transaction.update({
+          where: { id: parsedTransactionId },
+          data: {
+            status: 'processing',
+            metadata: {
+              ...metadata,
+              provider: 'flutterwave',
+              integrationStatus: 'accepted',
+              flwPayoutReference,
+              flwTransferId: payoutResponse.id,
+              flwStatus: payoutResponse.status,
+              payoutResponse: payoutResponse.raw,
+              walletDebited: true,
+              walletDebitedAt: now.toISOString(),
+            },
+          },
+        });
+
+        await tx.wallet.update({
+          where: { id: transaction.walletId },
+          data: {
+            balance: {
+              decrement: totalDeduction.toNumber(),
+            },
+          },
+        });
+
+        return updated;
+      });
+
+      return {
+        id: updatedTransaction.id,
+        reference: updatedTransaction.reference,
+        amount: updatedTransaction.amount.toString(),
+        currency: updatedTransaction.currency,
+        fee: updatedTransaction.fee.toString(),
+        status: updatedTransaction.status,
+        channel: updatedTransaction.channel,
+        provider: 'flutterwave',
+        flwPayoutReference,
+        flwTransferId: payoutResponse.id,
         recipientInfo,
         date: updatedTransaction.completedAt,
         createdAt: updatedTransaction.createdAt,

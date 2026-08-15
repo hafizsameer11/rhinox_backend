@@ -5,11 +5,13 @@ import { UnifiedStablecoinService } from '../../services/crypto/unified-stableco
 import { CryptoWalletLinkService } from '../../services/tatum/crypto-wallet-link.service.js';
 import { DepositAddressService } from '../../services/tatum/deposit-address.service.js';
 import { VirtualAccountService } from '../../services/tatum/virtual-account.service.js';
+import { BushaAppService, isBushaEnabled } from '../../services/busha/index.js';
 
 /**
  * Crypto Service
  * Business logic for crypto operations.
- * Uses Tatum when TATUM_API_KEY is configured; otherwise local wallet generation (dev).
+ * Busha is the live custodian when BUSHA_API_KEY is set. Tatum code stays in the
+ * repo and is used only when Busha is off.
  */
 export class CryptoService {
   private readonly walletGenerator = new WalletGeneratorService();
@@ -17,6 +19,7 @@ export class CryptoService {
   private readonly depositAddressService = new DepositAddressService();
   private readonly linkService = new CryptoWalletLinkService();
   private readonly unifiedStablecoinService = new UnifiedStablecoinService();
+  private readonly bushaService = new BushaAppService();
 
   /**
    * Get user's virtual accounts (from database)
@@ -25,6 +28,10 @@ export class CryptoService {
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(userIdNum) || userIdNum <= 0) {
       throw new Error(`Invalid userId: ${userId}`);
+    }
+
+    if (isBushaEnabled()) {
+      return this.bushaService.mapVirtualAccounts(userIdNum);
     }
 
     const virtualAccounts = await prisma.virtualAccount.findMany({
@@ -88,6 +95,10 @@ export class CryptoService {
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(userIdNum) || userIdNum <= 0) {
       throw new Error(`Invalid userId: ${userId}`);
+    }
+
+    if (isBushaEnabled()) {
+      return this.bushaService.getDepositAddress(userIdNum, currency, blockchain);
     }
 
     const blockchainKey = blockchain.toLowerCase();
@@ -173,6 +184,11 @@ export class CryptoService {
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(userIdNum) || userIdNum <= 0) {
       throw new Error(`Invalid userId: ${userId}`);
+    }
+
+    if (isBushaEnabled()) {
+      console.log(`Skipping Tatum/local crypto init for user ${userIdNum}; Busha is the live provider`);
+      return [];
     }
 
     if (isTatumEnabled()) {
@@ -302,6 +318,9 @@ export class CryptoService {
     if (isNaN(userIdNum) || userIdNum <= 0) {
       throw new Error(`Invalid userId: ${userId}`);
     }
+    if (isBushaEnabled()) {
+      return this.bushaService.tryMapUnifiedBalances(userIdNum);
+    }
     return this.unifiedStablecoinService.getAllUnifiedBalances(userIdNum);
   }
 
@@ -309,6 +328,16 @@ export class CryptoService {
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     if (isNaN(userIdNum) || userIdNum <= 0) {
       throw new Error(`Invalid userId: ${userId}`);
+    }
+    if (isBushaEnabled()) {
+      const rows = await this.bushaService.tryMapUnifiedBalances(userIdNum);
+      return rows.find((row) => row.symbol.toUpperCase() === symbol.toUpperCase()) || {
+        symbol: symbol.toUpperCase(),
+        totalBalance: '0',
+        totalAvailable: '0',
+        isUnifiedStable: ['USDT', 'USDC'].includes(symbol.toUpperCase()),
+        networks: [],
+      };
     }
     return this.unifiedStablecoinService.getUnifiedBalance(userIdNum, symbol);
   }
