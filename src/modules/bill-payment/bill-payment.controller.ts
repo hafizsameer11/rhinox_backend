@@ -351,6 +351,8 @@ export class BillPaymentController {
         success: false,
         code: error.code,
         message: error.message || 'Failed to initiate payment',
+        ...(error.minimum !== undefined ? { minimum: error.minimum } : {}),
+        ...(error.maximum !== undefined ? { maximum: error.maximum } : {}),
       });
     }
   }

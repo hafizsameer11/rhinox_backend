@@ -162,6 +162,77 @@ export class BillPaymentService {
     return `02340${digitsOnly.slice(-10)}`;
   }
 
+  /** Trim + strip spaces (and normalize NG phones for airtime/data). */
+  private normalizeBillCustomerId(accountNumber: string, categoryCode?: string): string {
+    const trimmed = String(accountNumber || '').trim().replace(/\s+/g, '');
+    if (!trimmed) {
+      throw new Error('Account number is required');
+    }
+    if (categoryCode === 'airtime' || categoryCode === 'data') {
+      return this.normalizeNgPhoneForFlutterwave(trimmed);
+    }
+    return trimmed;
+  }
+
+  private createAmountLimitError(
+    message: string,
+    minimum?: number | null,
+    maximum?: number | null
+  ) {
+    const error = new Error(message) as Error & {
+      statusCode?: number;
+      code?: string;
+      minimum?: number | null;
+      maximum?: number | null;
+    };
+    error.statusCode = 400;
+    error.code = 'BILL_AMOUNT_OUT_OF_RANGE';
+    if (minimum !== undefined) error.minimum = minimum;
+    if (maximum !== undefined) error.maximum = maximum;
+    return error;
+  }
+
+  private isTransientFlutterwaveCustomerError(message?: string): boolean {
+    const text = String(message || '').toLowerCase();
+    return (
+      text.includes('invalid customer') ||
+      text.includes('invalid custoemr') || // Flutterwave typo
+      text.includes('unable to validate') ||
+      text.includes('customer id')
+    );
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private assertAmountWithinLimits(
+    amount: Decimal,
+    minimum?: number | null,
+    maximum?: number | null
+  ) {
+    if (minimum !== undefined && minimum !== null && !Number.isNaN(Number(minimum))) {
+      const min = new Decimal(minimum);
+      if (amount.lessThan(min)) {
+        throw this.createAmountLimitError(
+          `Amount must not be less than ${min.toString()}`,
+          min.toNumber(),
+          maximum ?? null
+        );
+      }
+    }
+    if (maximum !== undefined && maximum !== null && !Number.isNaN(Number(maximum))) {
+      const max = new Decimal(maximum);
+      if (amount.greaterThan(max)) {
+        throw this.createAmountLimitError(
+          `Amount must not be greater than ${max.toString()}`,
+          minimum ?? null,
+          max.toNumber()
+        );
+      }
+    }
+  }
+
   private pickFlutterwaveItem(
     items: FlutterwaveBillItem[],
     opts: { planId?: string | number; accountType?: string; categoryCode: string }
@@ -352,6 +423,8 @@ export class BillPaymentService {
       throw new Error('Provider is not an electricity biller');
     }
 
+    const normalizedMeter = this.normalizeBillCustomerId(meterNumber, categoryCode);
+
     try {
       const items = await this.flutterwaveBillPaymentService.getBillItems(billerCode);
       const item = this.pickFlutterwaveItem(items, {
@@ -360,14 +433,25 @@ export class BillPaymentService {
       });
       const validation = await this.flutterwaveBillPaymentService.validateCustomer(
         item.itemCode,
-        meterNumber
+        normalizedMeter
       );
+
+      const minimum =
+        validation.minimum !== undefined && validation.minimum !== null
+          ? Number(validation.minimum)
+          : null;
+      const maximum =
+        validation.maximum !== undefined && validation.maximum !== null
+          ? Number(validation.maximum)
+          : null;
 
       return {
         isValid: true,
-        meterNumber,
+        meterNumber: normalizedMeter,
         accountType,
-        accountName: validation.name || null,
+        accountName: validation.name?.trim() || null,
+        minimum,
+        maximum,
         provider: {
           id: providerIdStr,
           code: billerCode,
@@ -380,6 +464,7 @@ export class BillPaymentService {
         verification: validation,
       };
     } catch (error: any) {
+      if (error.statusCode && error.code) throw error;
       throw createProviderUnavailableError(error.message || 'Meter validation failed');
     }
   }
@@ -396,10 +481,11 @@ export class BillPaymentService {
 
     if (isFlutterwaveProviderId(providerIdStr)) {
       const { categoryCode, billerCode } = decodeFlutterwaveProviderId(providerIdStr);
+      const normalizedAccount = this.normalizeBillCustomerId(accountNumber, categoryCode);
       if (!requiresFlutterwaveCustomerValidation(categoryCode)) {
         return {
           isValid: true,
-          accountNumber,
+          accountNumber: normalizedAccount,
           provider: { id: providerIdStr, code: billerCode },
         };
       }
@@ -408,13 +494,21 @@ export class BillPaymentService {
       const item = this.pickFlutterwaveItem(items, { categoryCode });
       const validation = await this.flutterwaveBillPaymentService.validateCustomer(
         item.itemCode,
-        accountNumber
+        normalizedAccount
       );
 
       return {
         isValid: true,
-        accountNumber,
-        accountName: validation.name || null,
+        accountNumber: normalizedAccount,
+        accountName: validation.name?.trim() || null,
+        minimum:
+          validation.minimum !== undefined && validation.minimum !== null
+            ? Number(validation.minimum)
+            : null,
+        maximum:
+          validation.maximum !== undefined && validation.maximum !== null
+            ? Number(validation.maximum)
+            : null,
         provider: {
           id: providerIdStr,
           code: billerCode,
@@ -797,9 +891,7 @@ export class BillPaymentService {
       throw new Error('Account number is required');
     }
 
-    if (categoryCode === 'airtime' || categoryCode === 'data') {
-      accountNumber = this.normalizeNgPhoneForFlutterwave(accountNumber);
-    }
+    accountNumber = this.normalizeBillCustomerId(accountNumber, categoryCode);
 
     const isRewardFulfillment = Boolean(rewardContext);
     const resolvedAmountInput = rewardContext
@@ -821,14 +913,27 @@ export class BillPaymentService {
       }
     }
 
+    let amountMinimum: number | null = null;
+    let amountMaximum: number | null = null;
+
     if (requiresFlutterwaveCustomerValidation(categoryCode)) {
       try {
         const validation = await this.flutterwaveBillPaymentService.validateCustomer(
           item.itemCode,
           accountNumber
         );
-        accountName = validation.name || accountName;
+        accountName = validation.name?.trim() || accountName;
+        amountMinimum =
+          validation.minimum !== undefined && validation.minimum !== null
+            ? Number(validation.minimum)
+            : null;
+        amountMaximum =
+          validation.maximum !== undefined && validation.maximum !== null
+            ? Number(validation.maximum)
+            : null;
+        this.assertAmountWithinLimits(amount, amountMinimum, amountMaximum);
       } catch (error: any) {
+        if (error.statusCode && error.code) throw error;
         throw createProviderUnavailableError(error.message || 'Customer validation failed');
       }
     }
@@ -866,6 +971,8 @@ export class BillPaymentService {
           planName: item.name,
           planDataAmount: item.raw?.dataAmount || null,
           beneficiaryId: beneficiary?.id || null,
+          amountMinimum,
+          amountMaximum,
           ...(isRewardFulfillment && rewardContext
             ? {
                 isRewardFulfillment: true,
@@ -890,7 +997,10 @@ export class BillPaymentService {
         id: encodedProviderId,
         code: billerCode,
         name: billerName,
-        logoUrl: null,
+        logoUrl: resolveFlutterwaveBillerLogo({
+          billerCode,
+          name: billerName,
+        }),
       },
       plan: {
         id: encodedItemId,
@@ -906,6 +1016,8 @@ export class BillPaymentService {
       currency: data.currency,
       fee: fee.toString(),
       totalAmount: totalAmount.toString(),
+      minimum: amountMinimum,
+      maximum: amountMaximum,
       wallet: {
         id: wallet.id,
         currency: wallet.currency,
@@ -1279,9 +1391,52 @@ export class BillPaymentService {
     const flwReference = `flw_bill_${transaction.reference.toLowerCase()}`;
     const billerCode = metadata.billerCode || metadata.billerId;
     const itemCode = metadata.itemCode || metadata.itemId;
+    const categoryCode = metadata.categoryCode;
+    const customerId = this.normalizeBillCustomerId(
+      String(metadata.accountNumber || ''),
+      categoryCode
+    );
 
     if (!billerCode || !itemCode) {
       throw new Error('Missing Flutterwave biller or item details');
+    }
+
+    // Soft re-validate once before pay for categories that need a customer id.
+    if (requiresFlutterwaveCustomerValidation(categoryCode)) {
+      try {
+        const validation = await this.flutterwaveBillPaymentService.validateCustomer(
+          itemCode,
+          customerId
+        );
+        metadata = {
+          ...metadata,
+          accountNumber: customerId,
+          accountName: validation.name?.trim() || metadata.accountName,
+          amountMinimum:
+            validation.minimum !== undefined && validation.minimum !== null
+              ? Number(validation.minimum)
+              : metadata.amountMinimum ?? null,
+          amountMaximum:
+            validation.maximum !== undefined && validation.maximum !== null
+              ? Number(validation.maximum)
+              : metadata.amountMaximum ?? null,
+        };
+        this.assertAmountWithinLimits(
+          amount,
+          metadata.amountMinimum,
+          metadata.amountMaximum
+        );
+      } catch (error: any) {
+        if (error.statusCode && error.code === 'BILL_AMOUNT_OUT_OF_RANGE') throw error;
+        // Don't hard-fail confirm on a flaky validate; payment retry below still helps.
+        console.warn(
+          '[Flutterwave] pre-pay validateCustomer warning:',
+          error?.message || error
+        );
+        metadata = { ...metadata, accountNumber: customerId };
+      }
+    } else {
+      metadata = { ...metadata, accountNumber: customerId };
     }
 
     const debitedTransaction = isRewardFulfillment
@@ -1339,15 +1494,41 @@ export class BillPaymentService {
 
     let flwResult: any;
     try {
-      flwResult = await this.flutterwaveBillPaymentService.createBillPayment({
+      const payPayload = {
         billerCode,
         itemCode,
         country: 'NG',
-        customerId: metadata.accountNumber,
+        customerId,
         amount: amount.toNumber(),
         reference: flwReference,
         callbackUrl: this.getBillCallbackUrl(),
-      });
+      };
+
+      try {
+        flwResult = await this.flutterwaveBillPaymentService.createBillPayment(payPayload);
+      } catch (firstError: any) {
+        const firstMessage = firstError?.message || '';
+        if (!this.isTransientFlutterwaveCustomerError(firstMessage)) {
+          throw firstError;
+        }
+
+        console.warn(
+          '[Flutterwave] createBillPayment customer validation flake, retrying once:',
+          firstMessage
+        );
+        await this.sleep(1500);
+
+        // Re-validate once more before retry (best-effort).
+        if (requiresFlutterwaveCustomerValidation(categoryCode)) {
+          try {
+            await this.flutterwaveBillPaymentService.validateCustomer(itemCode, customerId);
+          } catch {
+            // Continue to retry payment anyway.
+          }
+        }
+
+        flwResult = await this.flutterwaveBillPaymentService.createBillPayment(payPayload);
+      }
     } catch (error: any) {
       if (isRewardFulfillment && metadata?.rewardClaimId) {
         await this.rewardFulfillmentService.failRewardClaim(
