@@ -27,6 +27,7 @@ import {
   isFlutterwaveProviderId,
   requiresFlutterwaveCustomerValidation,
 } from '../../services/flutterwave/flutterwave.bill-map.js';
+import { resolveFlutterwaveBillerLogo } from '../../services/flutterwave/flutterwave.bill-logos.js';
 import { notifyBillPayment } from '../../core/utils/notification.events.js';
 import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
 import { RewardFulfillmentService } from '../rewards/reward-fulfillment.service.js';
@@ -258,7 +259,12 @@ export class BillPaymentService {
         code: biller.billerCode,
         billerId: biller.billerCode,
         name: biller.name,
-        logoUrl: biller.logo || null,
+        logoUrl: resolveFlutterwaveBillerLogo({
+          logo: biller.logo,
+          billerCode: biller.billerCode,
+          name: biller.name,
+          shortName: biller.shortName,
+        }),
         countryCode: 'NG',
         currency: 'NGN',
         provider: 'flutterwave',

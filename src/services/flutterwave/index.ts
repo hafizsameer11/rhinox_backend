@@ -22,6 +22,7 @@ export {
   decodeFlutterwaveItemId,
   requiresFlutterwaveCustomerValidation,
 } from './flutterwave.bill-map.js';
+export { resolveFlutterwaveBillerLogo } from './flutterwave.bill-logos.js';
 export {
   getFlutterwaveChargeType,
   getFlutterwaveChargeNetwork,
