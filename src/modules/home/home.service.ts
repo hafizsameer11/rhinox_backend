@@ -1,12 +1,15 @@
 import { Decimal } from 'decimal.js';
 import prisma from '../../core/config/database.js';
 import { ensureRhinoxPayId } from '../../core/utils/rhinox-pay-id.service.js';
+import { BushaAppService, isBushaEnabled } from '../../services/busha/index.js';
 
 /**
  * Home Service
  * Business logic for user home/dashboard
  */
 export class HomeService {
+  private readonly bushaService = new BushaAppService();
+
   /**
    * Get user home data (wallets, balances, etc.)
    */
@@ -69,32 +72,6 @@ export class HomeService {
       };
     });
 
-    // Get all crypto virtual accounts
-    const virtualAccounts = await prisma.virtualAccount.findMany({
-      where: {
-        userId: userIdNum,
-        active: true,
-      },
-      include: {
-        walletCurrency: {
-          select: {
-            id: true,
-            blockchain: true,
-            currency: true,
-            symbol: true,
-            name: true,
-            price: true, // Price in USDT
-            icon: true,
-            isToken: true,
-          },
-        },
-      },
-      orderBy: [
-        { blockchain: 'asc' },
-        { currency: 'asc' },
-      ],
-    });
-
     // Get USDT to NGN exchange rate
     const usdtToNgnRate = await prisma.exchangeRate.findUnique({
       where: {
@@ -105,42 +82,70 @@ export class HomeService {
       },
     });
 
-    // Format crypto balances and convert to USDT
+    // Crypto balances: Busha when live (never serve legacy Tatum virtual_account ledger)
     let totalCryptoInUSDT = new Decimal(0);
-    const cryptoWallets = virtualAccounts.map((va: any) => {
-      const balance = new Decimal(va.accountBalance || '0');
-      const availableBalance = new Decimal(va.availableBalance || '0');
-      const lockedBalance = balance.minus(availableBalance);
+    let cryptoWallets: Array<Record<string, unknown>> = [];
 
-      // Get price in USDT from walletCurrency
-      const priceInUSDT = va.walletCurrency?.price 
-        ? new Decimal(va.walletCurrency.price.toString())
-        : new Decimal(0);
+    if (isBushaEnabled()) {
+      cryptoWallets = await this.bushaService.tryMapBalancesForWallet(userIdNum);
+      for (const row of cryptoWallets) {
+        totalCryptoInUSDT = totalCryptoInUSDT.plus(new Decimal(String(row.balanceInUSDT || '0')));
+      }
+    } else {
+      const virtualAccounts = await prisma.virtualAccount.findMany({
+        where: {
+          userId: userIdNum,
+          active: true,
+        },
+        include: {
+          walletCurrency: {
+            select: {
+              id: true,
+              blockchain: true,
+              currency: true,
+              symbol: true,
+              name: true,
+              price: true,
+              icon: true,
+              isToken: true,
+            },
+          },
+        },
+        orderBy: [
+          { blockchain: 'asc' },
+          { currency: 'asc' },
+        ],
+      });
 
-      // Convert balance to USDT
-      const balanceInUSDT = balance.times(priceInUSDT);
+      cryptoWallets = virtualAccounts.map((va: any) => {
+        const balance = new Decimal(va.accountBalance || '0');
+        const availableBalance = new Decimal(va.availableBalance || '0');
+        const lockedBalance = balance.minus(availableBalance);
+        const priceInUSDT = va.walletCurrency?.price
+          ? new Decimal(va.walletCurrency.price.toString())
+          : new Decimal(0);
+        const balanceInUSDT = balance.times(priceInUSDT);
+        totalCryptoInUSDT = totalCryptoInUSDT.plus(balanceInUSDT);
 
-      // Add to total
-      totalCryptoInUSDT = totalCryptoInUSDT.plus(balanceInUSDT);
-
-      return {
-        id: va.id,
-        currency: va.currency,
-        blockchain: va.blockchain,
-        currencyName: va.walletCurrency?.name || va.currency,
-        symbol: va.walletCurrency?.symbol || va.currency,
-        type: 'crypto' as const,
-        balance: balance.toString(),
-        lockedBalance: lockedBalance.toString(),
-        availableBalance: availableBalance.toString(),
-        balanceInUSDT: balanceInUSDT.toString(),
-        priceInUSDT: priceInUSDT.toString(),
-        icon: va.walletCurrency?.icon,
-        isToken: va.walletCurrency?.isToken || false,
-        active: va.active,
-        frozen: va.frozen,
-      };
-    });
+        return {
+          id: va.id,
+          currency: va.currency,
+          blockchain: va.blockchain,
+          currencyName: va.walletCurrency?.name || va.currency,
+          symbol: va.walletCurrency?.symbol || va.currency,
+          type: 'crypto' as const,
+          balance: balance.toString(),
+          lockedBalance: lockedBalance.toString(),
+          availableBalance: availableBalance.toString(),
+          balanceInUSDT: balanceInUSDT.toString(),
+          priceInUSDT: priceInUSDT.toString(),
+          icon: va.walletCurrency?.icon,
+          isToken: va.walletCurrency?.isToken || false,
+          active: va.active,
+          frozen: va.frozen,
+        };
+      });
+    }
 
     // Convert total crypto to NGN if rate exists
     const totalCryptoInNGN = usdtToNgnRate
@@ -343,45 +348,70 @@ export class HomeService {
     // ============================================
     // CRYPTO SECTION
     // ============================================
-    // Get all crypto virtual accounts
-    const cryptoVirtualAccounts = await prisma.virtualAccount.findMany({
-      where: {
-        userId: userIdNum,
-        active: true,
-      },
-      include: {
-        walletCurrency: {
-          select: {
-            id: true,
-            blockchain: true,
-            currency: true,
-            symbol: true,
-            name: true,
-            price: true, // Price in USDT
-            icon: true,
+    // Busha when live — never return legacy Tatum virtual_account ledger balances
+    let totalCryptoInUSDT = new Decimal(0);
+    let cryptoBalances: Array<{
+      currency: string;
+      blockchain: string;
+      balance: string;
+      balanceInUSDT: string;
+      priceInUSDT: string;
+    }> = [];
+    let cryptoCurrencyList: string[] = [];
+
+    if (isBushaEnabled()) {
+      const bushaRows = await this.bushaService.tryMapBalancesForWallet(userIdNum);
+      cryptoBalances = bushaRows.map((row) => {
+        const balanceInUSDT = String(row.balanceInUSDT || '0');
+        totalCryptoInUSDT = totalCryptoInUSDT.plus(new Decimal(balanceInUSDT));
+        return {
+          currency: row.currency,
+          blockchain: row.blockchain,
+          balance: String(row.balance || '0'),
+          balanceInUSDT,
+          priceInUSDT: String(row.priceInUSDT || '0'),
+        };
+      });
+      cryptoCurrencyList = cryptoBalances.map((cb) => cb.currency);
+    } else {
+      const cryptoVirtualAccounts = await prisma.virtualAccount.findMany({
+        where: {
+          userId: userIdNum,
+          active: true,
+        },
+        include: {
+          walletCurrency: {
+            select: {
+              id: true,
+              blockchain: true,
+              currency: true,
+              symbol: true,
+              name: true,
+              price: true,
+              icon: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    // Calculate total crypto balance in USDT
-    let totalCryptoInUSDT = new Decimal(0);
-    const cryptoBalances = cryptoVirtualAccounts.map((va: any) => {
-      const balance = new Decimal(va.accountBalance || '0');
-      const priceInUSDT = va.walletCurrency?.price 
-        ? new Decimal(va.walletCurrency.price.toString())
-        : new Decimal(0);
-      const balanceInUSDT = balance.times(priceInUSDT);
-      totalCryptoInUSDT = totalCryptoInUSDT.plus(balanceInUSDT);
-      
-      return {
-        currency: va.currency,
-        blockchain: va.blockchain,
-        balance: balance.toString(),
-        balanceInUSDT: balanceInUSDT.toString(),
-        priceInUSDT: priceInUSDT.toString(),
-      };
-    });
+      cryptoBalances = cryptoVirtualAccounts.map((va: any) => {
+        const balance = new Decimal(va.accountBalance || '0');
+        const priceInUSDT = va.walletCurrency?.price
+          ? new Decimal(va.walletCurrency.price.toString())
+          : new Decimal(0);
+        const balanceInUSDT = balance.times(priceInUSDT);
+        totalCryptoInUSDT = totalCryptoInUSDT.plus(balanceInUSDT);
+
+        return {
+          currency: va.currency,
+          blockchain: va.blockchain,
+          balance: balance.toString(),
+          balanceInUSDT: balanceInUSDT.toString(),
+          priceInUSDT: priceInUSDT.toString(),
+        };
+      });
+      cryptoCurrencyList = cryptoVirtualAccounts.map((va: { currency: string }) => va.currency);
+    }
 
     // Get recent crypto transactions
     // Crypto transactions are stored in Transaction table with wallets that have type: 'crypto'
@@ -393,8 +423,6 @@ export class HomeService {
       },
       select: { id: true },
     });
-
-    const cryptoCurrencyList = cryptoVirtualAccounts.map((va: { currency: string }) => va.currency);
 
     const recentCryptoTransactions = await prisma.transaction.findMany({
       where: {
@@ -466,7 +494,7 @@ export class HomeService {
       },
       crypto: {
         totalBalanceInUSDT: totalCryptoInUSDT.toString(),
-        walletsCount: cryptoVirtualAccounts.length,
+        walletsCount: cryptoBalances.length,
         recentTransactions: formattedCryptoTransactions,
         transactionsCount: formattedCryptoTransactions.length,
         balances: cryptoBalances,

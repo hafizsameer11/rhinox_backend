@@ -44,5 +44,5 @@ export const getPalmPayConfig = (): PalmPayConfig => ({
   environment: process.env.PALMPAY_ENVIRONMENT?.trim() || 'sandbox',
   baseUrl: getPalmPayBaseUrl(),
   webhookUrl: getRequiredEnv('PALMPAY_WEBHOOK_URL'),
-  frontendUrl: process.env.FRONTEND_URL?.trim() || 'https://rhinoxpay.hmstech.org',
+  frontendUrl: process.env.FRONTEND_URL?.trim() || 'https://backend.rhinoxpay.com',
 });
