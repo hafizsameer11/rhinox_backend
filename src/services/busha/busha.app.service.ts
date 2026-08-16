@@ -512,7 +512,13 @@ export class BushaAppService {
 
       byCode.set(cryptoCode, {
         code: cryptoCode,
-        name: pair?.base_name || pair?.name || existing?.name || cryptoCode,
+        // Prefer ticker for UI; Busha often sends base_name "Tether" which confused the app icon mapper
+        name:
+          cryptoCode === 'USDT'
+            ? 'Tether USD'
+            : cryptoCode === 'USDC'
+              ? 'USD Coin'
+              : pair?.base_name || pair?.counter_name || pair?.name || existing?.name || cryptoCode,
         pairId: String(pair?.id || `${cryptoCode}NGN`),
         buySupported: existing?.buySupported || buySupported,
         sellSupported: existing?.sellSupported || sellSupported,
@@ -677,12 +683,30 @@ export class BushaAppService {
       const available = item.available?.amount || item.available || '0';
       const total = item.total?.amount || item.total || available;
       const chain = fromBushaNetwork(currency === 'USDT' ? 'TRX' : currency);
+      const DISPLAY_NAMES: Record<string, string> = {
+        USDT: 'Tether USD',
+        USDC: 'USD Coin',
+        BTC: 'Bitcoin',
+        ETH: 'Ethereum',
+        TRX: 'TRON',
+        SOL: 'Solana',
+        BNB: 'BNB',
+        LTC: 'Litecoin',
+        XRP: 'XRP',
+        TON: 'TON',
+      };
+      const rawName = String(item.name || '').trim();
+      // Busha often returns "Tether" — keep ticker-friendly display names
+      const currencyName =
+        DISPLAY_NAMES[currency] ||
+        (rawName && !/^tether$/i.test(rawName) ? rawName : currency);
+
       return {
         id: item.id || index,
         type: 'crypto' as const,
         currency,
         blockchain: chain.blockchain,
-        currencyName: item.name || currency,
+        currencyName,
         symbol: currency,
         balance: String(total),
         lockedBalance: '0',
@@ -743,10 +767,14 @@ export class BushaAppService {
     amountNgn: number,
     bushaProfileId: string
   ) {
+    const exactAmount = this.exactNgn(amountNgn);
+    if (exactAmount < 100) {
+      throw ApiError.badRequest('PalmPay sell VA amount must be at least NGN 100');
+    }
     const palmpayOrderId = `busha_sell_${randomUUID().replace(/-/g, '').slice(0, 20)}`.slice(0, 32);
     const va = await this.palmPayDeposit.createVirtualAccountOrder({
       orderId: palmpayOrderId,
-      amount: amountNgn,
+      amount: exactAmount,
       userId,
     });
     const palmpayOrderNo = (va as any).orderNo || null;
@@ -775,7 +803,7 @@ export class BushaAppService {
       palmpayOrderId,
       palmpayOrderNo,
       recipientId: recipient.id as string,
-      vaAmount: amountNgn,
+      vaAmount: exactAmount,
       va,
       recipient,
     };
@@ -797,10 +825,15 @@ export class BushaAppService {
     };
   }
 
-  private ceilNgn(value: any): number {
+  /** PalmPay amounts are kobo-precise; never ceil — that causes MC100022 mismatches. */
+  private exactNgn(value: any): number {
     const n = Number(value);
     if (!Number.isFinite(n) || n <= 0) return 0;
-    return Math.ceil(n);
+    return Math.round(n * 100) / 100;
+  }
+
+  private ngnAmountsMatch(a: number, b: number): boolean {
+    return Math.round(a * 100) === Math.round(b * 100);
   }
 
   private extractQuoteFees(quote: any) {
@@ -837,13 +870,14 @@ export class BushaAppService {
     }
     await prisma.bushaCustomer.update({
       where: { id: customerId },
-      data: { providerData: base },
+      data: { providerData: base as any },
     });
   }
 
   /**
-   * Reusable NGN bank recipient for sell *preview* quotes.
-   * Execute still creates a fresh PalmPay VA; fees for bank_transfer are the same shape.
+   * Reusable NGN bank recipient for sell *preview* quotes only.
+   * Never creates a PalmPay createorder / temp VA (those stay Processing forever).
+   * Execute still creates a fresh amount-locked PalmPay VA for the real payout.
    */
   private async ensureSellPreviewRecipient(
     userId: number,
@@ -853,12 +887,16 @@ export class BushaAppService {
     const cached = this.readSellQuoteRecipientId(customer.providerData);
     if (cached) return cached;
 
-    if (
-      platform.sellPayoutMode === 'dashboard_bank' &&
-      platform.payoutBankCode &&
-      platform.payoutAccountNumber &&
-      platform.payoutAccountName
-    ) {
+    const persist = async (recipientId: string) => {
+      await this.persistSellQuoteRecipientId(customer.id, recipientId, customer.providerData);
+      return recipientId;
+    };
+
+    // Prefer configured settlement / dashboard bank (no PalmPay VA needed).
+    if (platform.payoutBankCode && platform.payoutAccountNumber && platform.payoutAccountName) {
+      if (platform.payoutRecipientId) {
+        return persist(platform.payoutRecipientId);
+      }
       const recipient = await this.client.post(
         '/v1/recipients',
         {
@@ -872,27 +910,64 @@ export class BushaAppService {
         },
         customer.bushaProfileId
       );
-      await this.persistSellQuoteRecipientId(customer.id, recipient.id, customer.providerData);
-      return recipient.id as string;
+      return persist(recipient.id as string);
     }
 
-    // palmpay_temp: one min VA only to register a bank recipient for accurate fee quotes
-    const destination = await this.createPalmPaySellDestination(
-      userId,
-      100,
-      customer.bushaProfileId
+    // Reuse any existing Busha NGN bank recipient (prefer permanent settlement accounts).
+    try {
+      const listed = await this.client.get('/v1/recipients', customer.bushaProfileId);
+      const rows = Array.isArray(listed) ? listed : (listed as any)?.data || [];
+      const ngnBanks = (rows as any[]).filter(
+        (r) => r && r.active !== false && (r.type === 'ngn_bank' || r.currency === 'NGN')
+      );
+      const permanent = ngnBanks.find(
+        (r) =>
+          typeof r.account_name === 'string' &&
+          !/\(Pay NGN /i.test(r.account_name) &&
+          r.account_number
+      );
+      const pick = permanent || ngnBanks[0];
+      if (pick?.id) return persist(String(pick.id));
+    } catch (err) {
+      console.warn('[Busha sell preview] list recipients failed', (err as any)?.message || err);
+    }
+
+    // Last resort: register recipient from last sell trade metadata (still no PalmPay createorder).
+    const lastSell = await prisma.bushaTradeLog.findFirst({
+      where: { userId, side: 'sell' },
+      orderBy: { id: 'desc' },
+    });
+    const payOut = (lastSell?.providerResponse as any)?.quote?.pay_out
+      || (lastSell?.providerResponse as any)?.transfer?.pay_out;
+    const details = payOut?.recipient_details;
+    if (payOut?.recipient_id) {
+      return persist(String(payOut.recipient_id));
+    }
+    if (details?.account_number && details?.bank_code) {
+      const recipient = await this.client.post(
+        '/v1/recipients',
+        {
+          currency: 'NGN',
+          country_code: 'NG',
+          type: 'ngn_bank',
+          bank_code: details.bank_code,
+          bank_name: details.bank_name || 'PALMPAY',
+          account_number: details.account_number,
+          account_name: String(details.account_name || 'RHINOX').replace(/\(Pay NGN .*\)/i, '').trim(),
+        },
+        customer.bushaProfileId
+      );
+      return persist(recipient.id as string);
+    }
+
+    throw ApiError.serviceUnavailable(
+      'Sell preview recipient is not configured. Set Busha payout bank details or complete one sell setup first.'
     );
-    await this.persistSellQuoteRecipientId(
-      customer.id,
-      destination.recipientId,
-      customer.providerData
-    );
-    return destination.recipientId;
   }
 
   /**
-   * Align PalmPay VA amount to Busha bank_transfer quote.target_amount.
-   * PalmPay VAs are amount-locked; mismatch causes MC100022 / cancel.
+   * Align PalmPay VA amount to Busha bank_transfer quote.target_amount (exact kobo).
+   * PalmPay VAs are amount-locked; ceil/floor mismatch causes MC100022 / cancel.
    */
   private async quoteSellAlignedToPalmPay(
     userId: number,
@@ -918,11 +993,11 @@ export class BushaAppService {
     );
 
     for (let attempt = 0; attempt < 2; attempt++) {
-      const exactNgn = this.ceilNgn(quote?.target_amount);
+      const exactNgn = this.exactNgn(quote?.target_amount);
       if (exactNgn < 100) {
         throw ApiError.badRequest('Sell payout amount from quote is below NGN 100');
       }
-      if (exactNgn === destination.vaAmount) {
+      if (this.ngnAmountsMatch(exactNgn, destination.vaAmount)) {
         return { quote, destination };
       }
 
@@ -941,8 +1016,8 @@ export class BushaAppService {
       );
     }
 
-    const finalExact = this.ceilNgn(quote?.target_amount);
-    if (finalExact !== destination.vaAmount) {
+    const finalExact = this.exactNgn(quote?.target_amount);
+    if (!this.ngnAmountsMatch(finalExact, destination.vaAmount)) {
       throw ApiError.badRequest(
         `Could not align PalmPay VA (${destination.vaAmount}) with Busha payout (${finalExact})`
       );
@@ -1196,8 +1271,8 @@ export class BushaAppService {
       feeMeta = this.extractQuoteFees(quote);
     } else {
       payoutMode = 'palmpay_temp';
-      // 1) provisional VA from balance estimate → 2) bank_transfer quote → 3) recreate VA if needed
-      const provisionalAmount = this.ceilNgn(estimatedNgn);
+      // 1) provisional VA from estimate → 2) bank_transfer quote → 3) recreate VA at exact target_amount
+      const provisionalAmount = this.exactNgn(estimatedNgn);
       const aligned = await this.quoteSellAlignedToPalmPay(
         userId,
         customer.bushaProfileId,
@@ -1213,17 +1288,17 @@ export class BushaAppService {
       vaAmount = aligned.destination.vaAmount;
       feeMeta = this.extractQuoteFees(quote);
 
-      const quoteTarget = this.ceilNgn(quote?.target_amount);
-      if (quoteTarget !== vaAmount) {
+      const quoteTarget = this.exactNgn(quote?.target_amount);
+      if (!this.ngnAmountsMatch(quoteTarget, vaAmount!)) {
         throw ApiError.badRequest(
           `PalmPay VA amount ${vaAmount} does not match Busha payout ${quoteTarget}`
         );
       }
 
-      // Only create transfer after VA amount === quote.target_amount
+      // Only create transfer after VA amount === quote.target_amount (exact kobo)
       transfer = await this.createTransferFromQuote(customer.bushaProfileId, quote.id);
-      const paid = this.ceilNgn(transfer?.target_amount || quote?.target_amount);
-      if (paid !== vaAmount) {
+      const paid = this.exactNgn(transfer?.target_amount || quote?.target_amount);
+      if (!this.ngnAmountsMatch(paid, vaAmount!)) {
         // Should be rare once quote is aligned; log for ops — do not leave user hanging mid-flight
         console.error('[Busha sell] post-transfer amount mismatch', {
           paid,
