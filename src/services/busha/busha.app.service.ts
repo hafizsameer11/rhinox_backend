@@ -148,7 +148,7 @@ export class BushaAppService {
         bushaStatus: 'missing',
         bushaProfileId: null,
         kycApplicationStatus: null,
-        kycError: error?.message || 'Unable to load Busha status',
+        kycError: error?.message || 'Unable to load crypto status',
         needsKyc: isBushaEnabled(),
         canTrade: false,
         countryCode: 'NG',
