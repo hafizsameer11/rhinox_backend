@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { type IModule } from '../../core/types/module.types.js';
 import { adminAuthMiddleware } from '../../core/middleware/admin-auth.middleware.js';
 import { requirePermission } from '../../core/middleware/require-permission.middleware.js';
+import { uploadSingle } from '../../core/middleware/upload.middleware.js';
 import { KYCController } from './kyc.controller.js';
 import { KYCService } from './kyc.service.js';
 
@@ -18,23 +19,28 @@ export class KYCModule implements IModule {
   private service: KYCService;
 
   constructor() {
-    // Initialize dependencies
     this.service = new KYCService();
     this.controller = new KYCController(this.service);
 
-    // Setup routes
     this.router = Router();
     this.setupRoutes();
   }
 
   private setupRoutes(): void {
-    // KYC routes (all require authentication)
     this.router.post('/submit', this.controller.submitKYC.bind(this.controller));
     this.router.get('/status', this.controller.getKYCStatus.bind(this.controller));
-    this.router.post('/face-verification', this.controller.submitFaceVerification.bind(this.controller));
-    this.router.post('/upload-id', this.controller.uploadIDDocument.bind(this.controller));
-    
-    // Admin routes (legacy — protected with admin auth + kyc.write)
+    // Multipart selfie (field: selfie) and/or JSON imageUrl
+    this.router.post(
+      '/face-verification',
+      uploadSingle('selfie'),
+      this.controller.submitFaceVerification.bind(this.controller)
+    );
+    this.router.post(
+      '/upload-id',
+      uploadSingle('document'),
+      this.controller.uploadIDDocument.bind(this.controller)
+    );
+
     this.router.post(
       '/admin/approve',
       adminAuthMiddleware,
@@ -49,4 +55,3 @@ export class KYCModule implements IModule {
     );
   }
 }
-

@@ -60,6 +60,7 @@ function mapIdType(idType?: string | null): 'national-id' | 'passport' | 'driver
   const type = String(idType || '').toLowerCase();
   if (type.includes('passport')) return 'passport';
   if (type.includes('driver')) return 'drivers-license';
+  // nin / national_id / voters_card → national-id for Busha
   return 'national-id';
 }
 
@@ -224,12 +225,18 @@ export class BushaAppService {
       const phone = formatBushaPhone(user.phone, countryId);
       const selfie = toBase64File(kyc.faceVerificationImageUrl);
       const idImage = toBase64File(kyc.idDocumentUrl);
-      const idKind = mapIdType(kyc.idType);
+      // Nigeria Busha KYC expects national-id (NIN). idNumber holds the NIN from Rhinox KYC.
+      const idKind = countryId === 'NG' ? 'national-id' : mapIdType(kyc.idType);
+      const idNumber = String(kyc.idNumber || '').trim();
+
+      if (!idNumber) {
+        throw new Error('NIN / ID number is required for Busha KYC');
+      }
 
       const identifyingInformation: any[] = [
         {
           type: idKind === 'passport' ? 'passport' : idKind === 'drivers-license' ? 'drivers-license' : 'national-id',
-          number: kyc.idNumber,
+          number: idNumber,
           country: countryId,
           ...(idImage && idKind !== 'national-id' ? { image_front: idImage } : {}),
         },
@@ -279,7 +286,7 @@ export class BushaAppService {
             phone,
             countryId,
             birthDate,
-            nin: kyc.idNumber,
+            nin: idNumber,
             status: profile.status || 'inactive',
             providerData: profile,
           },

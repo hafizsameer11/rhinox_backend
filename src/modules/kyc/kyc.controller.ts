@@ -112,6 +112,7 @@ export class KYCController {
         dateOfBirth,
         idType,
         idNumber,
+        nin,
         idDocumentUrl,
         countryId,
       } = req.body;
@@ -130,13 +131,15 @@ export class KYCController {
         });
       }
 
+      const resolvedIdNumber = String(nin || idNumber || '').replace(/\s+/g, '').trim();
+
       const result = await this.service.submitKYC(userId.toString(), {
         ...(firstName && { firstName }),
         ...(lastName && { lastName }),
         ...(middleName && { middleName }),
         ...(dateOfBirth && { dateOfBirth: new Date(dateOfBirth) }),
         ...(idType && { idType }),
-        ...(idNumber && { idNumber }),
+        ...(resolvedIdNumber && { idNumber: resolvedIdNumber }),
         ...(idDocumentUrl && { idDocumentUrl }),
         ...(countryId && { countryId }),
       });
@@ -284,7 +287,8 @@ export class KYCController {
   async submitFaceVerification(req: Request, res: Response) {
     try {
       const userId = (req as any).userId || (req as any).user?.id;
-      const { imageUrl, isSuccessful } = req.body;
+      const uploadedFile = (req as any).file as Express.Multer.File | undefined;
+      const { imageUrl: bodyImageUrl, isSuccessful } = req.body;
 
       if (!userId) {
         return res.status(401).json({
@@ -293,22 +297,31 @@ export class KYCController {
         });
       }
 
+      const imageUrl = uploadedFile
+        ? `/uploads/${uploadedFile.filename}`
+        : bodyImageUrl;
+
       if (!imageUrl) {
         return res.status(400).json({
           success: false,
-          message: 'Face verification image is required',
+          message: 'Face verification selfie image is required',
         });
       }
 
       const result = await this.service.submitFaceVerification(
         userId,
         imageUrl,
-        isSuccessful === true || isSuccessful === 'true'
+        isSuccessful === true ||
+          isSuccessful === 'true' ||
+          (Boolean(uploadedFile) && (isSuccessful === undefined || isSuccessful === ''))
       );
 
       return res.json({
         success: true,
-        data: result,
+        data: {
+          ...result,
+          imageUrl,
+        },
       });
     } catch (error: any) {
       return res.status(400).json({
@@ -385,7 +398,8 @@ export class KYCController {
   async uploadIDDocument(req: Request, res: Response) {
     try {
       const userId = (req as any).userId || (req as any).user?.id;
-      const { documentUrl, idType, idNumber } = req.body;
+      const uploadedFile = (req as any).file as Express.Multer.File | undefined;
+      const { documentUrl: bodyDocumentUrl, idType, idNumber } = req.body;
 
       if (!userId) {
         return res.status(401).json({
@@ -394,10 +408,14 @@ export class KYCController {
         });
       }
 
+      const documentUrl = uploadedFile
+        ? `/uploads/${uploadedFile.filename}`
+        : bodyDocumentUrl;
+
       if (!documentUrl || !idType || !idNumber) {
         return res.status(400).json({
           success: false,
-          message: 'Document URL, ID type, and ID number are required',
+          message: 'Document, ID type, and ID number are required',
         });
       }
 
@@ -405,7 +423,10 @@ export class KYCController {
 
       return res.json({
         success: true,
-        data: result,
+        data: {
+          ...result,
+          documentUrl,
+        },
       });
     } catch (error: any) {
       return res.status(400).json({
