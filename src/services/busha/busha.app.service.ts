@@ -107,13 +107,21 @@ export class BushaAppService {
         }),
       ]);
 
-      // Live-check Busha when local customer is not active yet (approval may land on their side first)
+      // Live-check Busha, but never block the app on a slow provider call
       if (enabled && customer?.bushaProfileId && customer.status !== 'active') {
-        customer = await this.syncCustomerFromProvider(customer);
-        latestKycApp = await prisma.bushaKycApplication.findFirst({
-          where: { userId },
-          orderBy: { createdAt: 'desc' },
-        });
+        const synced = await this.withTimeout(this.syncCustomerFromProvider(customer), 3500);
+        if (synced) {
+          customer = synced;
+          latestKycApp = await prisma.bushaKycApplication.findFirst({
+            where: { userId },
+            orderBy: { createdAt: 'desc' },
+          });
+        } else {
+          // Continue with local DB; refresh in background for the next poll
+          this.syncCustomerFromProvider(customer).catch((error) => {
+            console.warn('[Busha] background customer sync failed:', error?.message || error);
+          });
+        }
       }
 
       const rhinoxKycReady = Boolean(
@@ -162,6 +170,20 @@ export class BushaAppService {
         canTrade: false,
         countryCode: 'NG',
       };
+    }
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -446,22 +468,25 @@ export class BushaAppService {
     if (!customer?.bushaProfileId) {
       throw ApiError.badRequest('Activate your crypto wallet first');
     }
+
+    // Prefer a quick sync, but never hang the pairs picker on provider latency
     if (customer.status !== 'active') {
-      await this.syncCustomerFromProvider(customer);
-      const refreshed = await prisma.bushaCustomer.findUnique({ where: { userId } });
-      if (refreshed?.status !== 'active') {
+      const synced = await this.withTimeout(this.syncCustomerFromProvider(customer), 3500);
+      const latest = synced || (await prisma.bushaCustomer.findUnique({ where: { userId } }));
+      if (latest?.status !== 'active') {
         throw ApiError.badRequest('Crypto KYC is still under review. Trading unlocks after approval.');
       }
     }
 
     let pairs: any[] = [];
     try {
-      const remote = await this.client.get<any>(
-        '/v1/pairs',
-        customer.bushaProfileId,
-        { currency: 'NGN' }
+      const remote = await this.withTimeout(
+        this.client.get<any>('/v1/pairs', customer.bushaProfileId, { currency: 'NGN' }),
+        8000
       );
-      pairs = Array.isArray(remote) ? remote : Array.isArray(remote?.data) ? remote.data : [];
+      if (remote) {
+        pairs = Array.isArray(remote) ? remote : Array.isArray((remote as any)?.data) ? (remote as any).data : [];
+      }
     } catch (error: any) {
       console.warn('[Busha] list pairs failed:', error?.message || error);
       pairs = [];
