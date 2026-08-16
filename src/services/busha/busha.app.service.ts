@@ -805,11 +805,89 @@ export class BushaAppService {
 
   private extractQuoteFees(quote: any) {
     const fees = Array.isArray(quote?.fees) ? quote.fees : [];
-    const feeTotal = fees.reduce(
-      (sum: number, fee: any) => sum + Number(fee?.amount?.amount ?? fee?.amount ?? 0),
-      0
-    );
+    const feeTotal = fees.reduce((sum: number, fee: any) => {
+      const raw = fee?.amount?.amount ?? fee?.amount ?? fee?.converted_amount?.amount ?? 0;
+      const n = Number(raw);
+      return sum + (Number.isFinite(n) ? n : 0);
+    }, 0);
     return { fees, feeTotal };
+  }
+
+  private readSellQuoteRecipientId(providerData: unknown): string | null {
+    if (!providerData || typeof providerData !== 'object' || Array.isArray(providerData)) {
+      return null;
+    }
+    const id = (providerData as Record<string, unknown>).sellQuoteRecipientId;
+    return typeof id === 'string' && id.length > 0 ? id : null;
+  }
+
+  private async persistSellQuoteRecipientId(
+    customerId: number,
+    recipientId: string | null,
+    providerData: unknown
+  ) {
+    const base =
+      providerData && typeof providerData === 'object' && !Array.isArray(providerData)
+        ? { ...(providerData as Record<string, unknown>) }
+        : {};
+    if (recipientId) {
+      base.sellQuoteRecipientId = recipientId;
+    } else {
+      delete base.sellQuoteRecipientId;
+    }
+    await prisma.bushaCustomer.update({
+      where: { id: customerId },
+      data: { providerData: base },
+    });
+  }
+
+  /**
+   * Reusable NGN bank recipient for sell *preview* quotes.
+   * Execute still creates a fresh PalmPay VA; fees for bank_transfer are the same shape.
+   */
+  private async ensureSellPreviewRecipient(
+    userId: number,
+    customer: { id: number; bushaProfileId: string; providerData: unknown },
+    platform: Awaited<ReturnType<typeof getOrCreateConfig>>
+  ): Promise<string> {
+    const cached = this.readSellQuoteRecipientId(customer.providerData);
+    if (cached) return cached;
+
+    if (
+      platform.sellPayoutMode === 'dashboard_bank' &&
+      platform.payoutBankCode &&
+      platform.payoutAccountNumber &&
+      platform.payoutAccountName
+    ) {
+      const recipient = await this.client.post(
+        '/v1/recipients',
+        {
+          currency: 'NGN',
+          country_code: 'NG',
+          type: 'ngn_bank',
+          bank_code: platform.payoutBankCode,
+          bank_name: platform.payoutAccountName,
+          account_number: platform.payoutAccountNumber,
+          account_name: platform.payoutAccountName,
+        },
+        customer.bushaProfileId
+      );
+      await this.persistSellQuoteRecipientId(customer.id, recipient.id, customer.providerData);
+      return recipient.id as string;
+    }
+
+    // palmpay_temp: one min VA only to register a bank recipient for accurate fee quotes
+    const destination = await this.createPalmPaySellDestination(
+      userId,
+      100,
+      customer.bushaProfileId
+    );
+    await this.persistSellQuoteRecipientId(
+      customer.id,
+      destination.recipientId,
+      customer.providerData
+    );
+    return destination.recipientId;
   }
 
   /**
@@ -1015,36 +1093,52 @@ export class BushaAppService {
   }
 
   async previewSell(userId: number, sourceCurrency: string, sourceAmount: string) {
+    const platform = await this.assertPlatformActive();
     const customer = await this.assertCustomerTradeReady(userId);
-    // Balance→balance preview is an estimate only (fees differ from bank_transfer payout).
-    const quote = await this.client.post(
-      '/v1/quotes',
-      {
-        source_currency: toBushaCurrency(sourceCurrency),
-        target_currency: 'NGN',
-        source_amount: String(sourceAmount),
-        pay_in: { type: 'balance' },
-        pay_out: { type: 'balance' },
-      },
-      customer.bushaProfileId
-    );
+    // Must use bank_transfer (same as execute). Balance→balance quotes omit payout fees (feeTotal=0).
+    let recipientId = await this.ensureSellPreviewRecipient(userId, customer, platform);
+    let quote: any;
+    try {
+      quote = await this.createQuote(
+        customer.bushaProfileId,
+        this.buildSellBankTransferQuoteBody(sourceCurrency, sourceAmount, recipientId)
+      );
+    } catch (firstError) {
+      // Stale cached recipient — clear and retry once with a fresh destination
+      console.warn(
+        '[Busha sell preview] bank_transfer quote failed; recreating preview recipient',
+        (firstError as any)?.message || firstError
+      );
+      await this.persistSellQuoteRecipientId(customer.id, null, customer.providerData);
+      const refreshed = await prisma.bushaCustomer.findUnique({ where: { id: customer.id } });
+      recipientId = await this.ensureSellPreviewRecipient(
+        userId,
+        refreshed || { ...customer, providerData: null },
+        platform
+      );
+      quote = await this.createQuote(
+        customer.bushaProfileId,
+        this.buildSellBankTransferQuoteBody(sourceCurrency, sourceAmount, recipientId)
+      );
+    }
     const { fees, feeTotal } = this.extractQuoteFees(quote);
     const netNgn = Number(quote?.target_amount || 0);
     return {
       ...quote,
       isEstimate: true,
+      payoutType: 'bank_transfer',
       youSell: String(sourceAmount),
       youSellCurrency: toBushaCurrency(sourceCurrency),
       netNgn: quote?.target_amount ?? null,
       feeTotal,
       fees,
-      /** What user should expect to receive after fees (target_amount is already net to bank). */
+      /** Net NGN after bank_transfer fees (matches execute payout target). */
       youReceiveNgn: quote?.target_amount ?? null,
-      /** Gross before fees when fees are separate — for display only */
+      /** Gross before fees when fees are listed separately */
       grossNgnEstimate:
         Number.isFinite(netNgn) && feeTotal > 0 ? String(Number((netNgn + feeTotal).toFixed(2))) : null,
       note:
-        'Estimated NGN you receive (net). Fees are charged separately and shown below. Final amount is confirmed on execute.',
+        'Estimated NGN you receive after bank payout fees. Final amount is confirmed when the sell executes.',
     };
   }
 
@@ -1446,7 +1540,7 @@ export class BushaAppService {
         providerResponse: {
           ...((trade.providerResponse as object) || {}),
           palmpayStatusPoll: order,
-        },
+        } as any,
       },
     });
 
@@ -1485,7 +1579,6 @@ export class BushaAppService {
     const waitingCustomers = await prisma.bushaCustomer.findMany({
       where: {
         status: { not: 'active' },
-        bushaProfileId: { not: null },
       },
       take: 20,
       orderBy: { updatedAt: 'asc' },
