@@ -472,6 +472,12 @@ export class HomeService {
       take: cryptoLimit,
     });
 
+    const tradeByFiatTxId = new Map(
+      bushaTrades
+        .filter((t) => t.fiatTransactionId != null)
+        .map((t) => [t.fiatTransactionId as number, t])
+    );
+
     // Format crypto transactions
     const formattedCryptoTransactions = recentCryptoTransactions.map((tx: any) => {
       const amount = new Decimal(tx.amount);
@@ -492,10 +498,19 @@ export class HomeService {
         }
       }
 
+      const linkedTrade = tradeByFiatTxId.get(tx.id);
+      let status = tx.status;
+      if (linkedTrade) {
+        if (['completed', 'wallet_credited'].includes(linkedTrade.status)) status = 'completed';
+        else if (['busha_failed', 'palmpay_failed', 'buy_reversed'].includes(linkedTrade.status)) {
+          status = 'failed';
+        }
+      }
+
       return {
         id: tx.id,
         type: tx.type,
-        status: tx.status,
+        status,
         amount: amount.toString(),
         currency: tx.currency,
         currencySymbol: tx.wallet.currencyRef?.symbol || tx.currency,
@@ -508,7 +523,19 @@ export class HomeService {
         createdAt: tx.createdAt,
         completedAt: tx.completedAt,
         walletType: 'crypto',
-        metadata: tx.metadata,
+        metadata: {
+          ...((tx.metadata as object) || {}),
+          ...(linkedTrade
+            ? {
+                bushaTradeId: linkedTrade.id,
+                sourceAmount: linkedTrade.sourceAmount,
+                targetAmount: linkedTrade.targetAmount,
+                sourceCurrency: linkedTrade.sourceCurrency,
+                targetCurrency: linkedTrade.targetCurrency,
+                side: linkedTrade.side,
+              }
+            : {}),
+        },
       };
     });
 

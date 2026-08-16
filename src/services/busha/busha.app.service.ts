@@ -19,7 +19,14 @@ import {
   shouldPreferStableNetworkDefaults,
 } from './busha.networks.js';
 
-const SUCCESS_STATUSES = new Set(['completed', 'funds_converted', 'funds_delivered']);
+const SUCCESS_STATUSES = new Set([
+  'completed',
+  'funds_converted',
+  'funds_delivered',
+  'done',
+  'success',
+  'successful',
+]);
 const FAIL_STATUSES = new Set(['failed', 'cancelled', 'funds_not_delivered', 'funds_refunded']);
 const OPEN_TRADE_STATUSES = ['quoted', 'settling', 'awaiting_busha', 'awaiting_crypto_deposit', 'awaiting_palmpay'];
 
@@ -1645,7 +1652,20 @@ export class BushaAppService {
     const code = toBushaCurrency(currency);
     const remote = await this.client.get<any>(`/v1/currencies/${code}`, customer.bushaProfileId);
     const networks = Array.isArray(remote?.supported_networks) ? remote.supported_networks : [];
-    let mapped = networks.map((n: any) => {
+    type NetworkLimitRow = {
+      id: string;
+      bushaNetwork: string;
+      name: string;
+      blockchain: string;
+      blockchainName: string;
+      withdrawal: boolean;
+      deposit: boolean;
+      minWithdrawalAmount: string | null;
+      maxWithdrawalAmount: string | null;
+      withdrawalFee: string | null;
+      minDepositAmount: string | null;
+    };
+    let mapped: NetworkLimitRow[] = networks.map((n: any): NetworkLimitRow => {
       const bushaNetwork = toBushaNetwork(String(n?.network || n?.id || n?.name || ''), code);
       const chain = fromBushaNetwork(bushaNetwork);
       return {
@@ -1678,8 +1698,8 @@ export class BushaAppService {
     }
 
     if (shouldPreferStableNetworkDefaults(code, mapped)) {
-      const byNet = new Map(mapped.map((n) => [n.bushaNetwork, n]));
-      mapped = getBushaNetworksForCurrency(code).map((bushaNetwork) => {
+      const byNet = new Map(mapped.map((n) => [n.bushaNetwork, n] as const));
+      mapped = getBushaNetworksForCurrency(code).map((bushaNetwork): NetworkLimitRow => {
         const existing = byNet.get(bushaNetwork);
         const chain = fromBushaNetwork(bushaNetwork);
         return {
@@ -1871,11 +1891,21 @@ export class BushaAppService {
       if (trade.side === 'sell') {
         await this.creditSell(trade.id, remote.target_amount || trade.targetAmount);
       } else if (trade.side === 'buy' && trade.fiatTransactionId) {
+        const settledTarget =
+          remote.target_amount != null && remote.target_amount !== ''
+            ? String(remote.target_amount)
+            : trade.targetAmount;
         await prisma.transaction.update({
           where: { id: trade.fiatTransactionId },
           data: { status: 'completed', completedAt: new Date() },
         });
-        await prisma.bushaTradeLog.update({ where: { id: trade.id }, data: { status: 'completed' } });
+        await prisma.bushaTradeLog.update({
+          where: { id: trade.id },
+          data: {
+            status: 'completed',
+            ...(settledTarget ? { targetAmount: settledTarget } : {}),
+          },
+        });
       } else {
         await prisma.bushaTradeLog.update({ where: { id: trade.id }, data: { status: 'completed' } });
       }

@@ -442,6 +442,65 @@ export class TransactionHistoryService {
     const fiatTransactions = transactions.filter((tx: any) => !this.isCryptoHistoryTx(tx));
     const cryptoFromLedger = transactions.filter((tx: any) => this.isCryptoHistoryTx(tx));
 
+    // Resolve buy/sell status from Busha trade log (ledger often stays pending until settle)
+    const cryptoLedgerIds = cryptoFromLedger
+      .filter((tx: any) => tx.type === 'crypto_buy' || tx.type === 'crypto_sell' || tx.channel === 'busha')
+      .map((tx: any) => tx.id);
+    const buySellTrades =
+      cryptoLedgerIds.length > 0
+        ? await prisma.bushaTradeLog.findMany({
+            where: {
+              userId: userIdNum,
+              fiatTransactionId: { in: cryptoLedgerIds },
+            },
+          })
+        : [];
+    const tradeStatusByFiatTxId = new Map<number, string>();
+    for (const trade of buySellTrades) {
+      if (!trade.fiatTransactionId) continue;
+      if (['completed', 'wallet_credited'].includes(trade.status)) {
+        tradeStatusByFiatTxId.set(trade.fiatTransactionId, 'completed');
+      } else if (['busha_failed', 'palmpay_failed', 'buy_reversed'].includes(trade.status)) {
+        tradeStatusByFiatTxId.set(trade.fiatTransactionId, 'failed');
+      } else if (trade.status && !tradeStatusByFiatTxId.has(trade.fiatTransactionId)) {
+        tradeStatusByFiatTxId.set(trade.fiatTransactionId, trade.status);
+      }
+    }
+
+    // Persist obvious mismatches so list + wallet stay consistent
+    for (const [fiatTxId, status] of tradeStatusByFiatTxId) {
+      const tx = cryptoFromLedger.find((t: any) => t.id === fiatTxId);
+      if (!tx) continue;
+      if (status === 'completed' && tx.status === 'pending') {
+        try {
+          await prisma.transaction.update({
+            where: { id: fiatTxId },
+            data: { status: 'completed', completedAt: tx.completedAt || new Date() },
+          });
+          tx.status = 'completed';
+        } catch {
+          tx.status = 'completed';
+        }
+      } else if (status === 'failed' && tx.status === 'pending') {
+        try {
+          await prisma.transaction.update({
+            where: { id: fiatTxId },
+            data: { status: 'failed' },
+          });
+          tx.status = 'failed';
+        } catch {
+          tx.status = 'failed';
+        }
+      } else if (status && tx.status === 'pending' && status !== 'pending') {
+        // Surface trade status on the list item even if we don't rewrite DB
+        tx.status = ['awaiting_busha', 'awaiting_palmpay', 'awaiting_crypto_deposit', 'settling', 'quoted'].includes(
+          status
+        )
+          ? 'pending'
+          : status;
+      }
+    }
+
     // Busha crypto send/recv often have no Transaction row — include trade log
     const bushaTrades = await prisma.bushaTradeLog.findMany({
       where: {
@@ -1582,7 +1641,7 @@ export class TransactionHistoryService {
       transaction.type === 'crypto_sell' ||
       transaction.channel === 'busha'
     ) {
-      const trade = await prisma.bushaTradeLog.findFirst({
+      let trade = await prisma.bushaTradeLog.findFirst({
         where: {
           userId: userIdNum,
           OR: [
@@ -1595,9 +1654,56 @@ export class TransactionHistoryService {
         orderBy: { createdAt: 'desc' },
       });
 
+      // Refresh in-flight buy/sell from Busha when details are opened
+      if (
+        trade &&
+        ['quoted', 'settling', 'awaiting_busha', 'awaiting_crypto_deposit', 'awaiting_palmpay'].includes(
+          trade.status
+        )
+      ) {
+        try {
+          const { BushaAppService } = await import('../../services/busha/busha.app.service.js');
+          await new BushaAppService().settleTrade(trade.id);
+          const refreshedTrade = await prisma.bushaTradeLog.findUnique({ where: { id: trade.id } });
+          if (refreshedTrade) trade = refreshedTrade;
+          const refreshedTx = await prisma.transaction.findUnique({ where: { id: transaction.id } });
+          if (refreshedTx) {
+            Object.assign(transaction, refreshedTx);
+            details.status = refreshedTx.status;
+            details.completedAt = refreshedTx.completedAt;
+            details.amount = new Decimal(refreshedTx.amount).abs().toString();
+          }
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error('[TransactionHistory] Failed to settle Busha trade:', message);
+        }
+      }
+
+      // If trade already finished but fiat tx still pending, sync ledger status for display
+      if (
+        trade &&
+        ['completed', 'wallet_credited'].includes(trade.status) &&
+        transaction.status === 'pending' &&
+        trade.fiatTransactionId === transaction.id
+      ) {
+        try {
+          await prisma.transaction.update({
+            where: { id: transaction.id },
+            data: { status: 'completed', completedAt: transaction.completedAt || new Date() },
+          });
+          details.status = 'completed';
+          details.completedAt = details.completedAt || new Date();
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error('[TransactionHistory] Failed to sync Busha tx status:', message);
+          details.status = 'completed';
+        }
+      }
+
       if (trade) {
         const providerResponse = (trade.providerResponse as any) || {};
         const quote = providerResponse.quote || {};
+        const remote = providerResponse.remote || {};
         const fees = providerResponse.fees || quote.fees || metadata?.fees || [];
         const feeTotal =
           providerResponse.feeTotal ??
@@ -1609,8 +1715,20 @@ export class TransactionHistoryService {
               )
             : null);
 
-        const src = Number(trade.sourceAmount);
-        const tgt = Number(trade.targetAmount);
+        const sourceAmount =
+          trade.sourceAmount ||
+          remote.source_amount ||
+          quote.source_amount ||
+          amount.abs().toString();
+        const targetAmount =
+          trade.targetAmount ||
+          remote.target_amount ||
+          quote.target_amount ||
+          metadata?.targetAmount ||
+          null;
+
+        const src = Number(sourceAmount);
+        const tgt = Number(targetAmount);
         let rate: string | null = null;
         if (Number.isFinite(src) && Number.isFinite(tgt) && src > 0 && tgt > 0) {
           rate =
@@ -1620,6 +1738,11 @@ export class TransactionHistoryService {
                 ? (tgt / src).toFixed(2)
                 : null;
         }
+
+        const resolvedStatus =
+          ['completed', 'wallet_credited'].includes(trade.status) || details.status === 'completed'
+            ? 'completed'
+            : trade.status;
 
         details.cryptoReceipt = {
           kind:
@@ -1633,14 +1756,16 @@ export class TransactionHistoryService {
           provider: 'Busha',
           sourceCurrency: trade.sourceCurrency,
           targetCurrency: trade.targetCurrency,
-          sourceAmount: trade.sourceAmount,
-          targetAmount: trade.targetAmount,
+          sourceAmount: String(sourceAmount),
+          targetAmount: targetAmount != null ? String(targetAmount) : null,
           network: trade.network,
           destinationAddress: trade.destinationAddress,
           bushaTradeId: trade.id,
           bushaTransferId: trade.bushaTransferId,
           bushaQuoteId: trade.bushaQuoteId,
-          bushaStatus: trade.bushaStatus || trade.status,
+          bushaStatus: trade.bushaStatus,
+          tradeStatus: trade.status,
+          status: resolvedStatus,
           fees,
           feeTotal: feeTotal != null && feeTotal !== '' ? String(feeTotal) : null,
           rate,
@@ -1663,6 +1788,7 @@ export class TransactionHistoryService {
           fees: metadata.fees || [],
           feeTotal: metadata.feeTotal != null ? String(metadata.feeTotal) : null,
           rate: null,
+          status: details.status,
           bushaTransferId: transaction.reference,
         };
       }
