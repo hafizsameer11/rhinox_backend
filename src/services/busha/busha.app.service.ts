@@ -885,7 +885,16 @@ export class BushaAppService {
       },
       customer.bushaProfileId
     );
-    return quote;
+    const { fees, feeTotal } = this.extractQuoteFees(quote);
+    return {
+      ...quote,
+      isEstimate: true,
+      youPayNgn: quote?.source_amount ?? sourceAmount,
+      youReceive: quote?.target_amount ?? null,
+      feeTotal,
+      fees,
+      note: 'Estimated crypto you receive. Fees (if any) are shown separately.',
+    };
   }
 
   async executeBuy(userId: number, sourceAmount: string, targetCurrency: string) {
@@ -1020,14 +1029,22 @@ export class BushaAppService {
       customer.bushaProfileId
     );
     const { fees, feeTotal } = this.extractQuoteFees(quote);
+    const netNgn = Number(quote?.target_amount || 0);
     return {
       ...quote,
       isEstimate: true,
+      youSell: String(sourceAmount),
+      youSellCurrency: toBushaCurrency(sourceCurrency),
       netNgn: quote?.target_amount ?? null,
       feeTotal,
       fees,
+      /** What user should expect to receive after fees (target_amount is already net to bank). */
+      youReceiveNgn: quote?.target_amount ?? null,
+      /** Gross before fees when fees are separate — for display only */
+      grossNgnEstimate:
+        Number.isFinite(netNgn) && feeTotal > 0 ? String(Number((netNgn + feeTotal).toFixed(2))) : null,
       note:
-        'Estimated NGN before bank payout fees. Final amount is confirmed on execute from the bank_transfer quote.',
+        'Estimated NGN you receive (net). Fees are charged separately and shown below. Final amount is confirmed on execute.',
     };
   }
 
