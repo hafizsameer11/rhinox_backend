@@ -16,6 +16,7 @@ import {
   toBushaNetwork,
   getBushaNetworksForCurrency,
   BUSHA_DEPOSIT_CATALOG_FALLBACK,
+  shouldPreferStableNetworkDefaults,
 } from './busha.networks.js';
 
 const SUCCESS_STATUSES = new Set(['completed', 'funds_converted', 'funds_delivered']);
@@ -514,20 +515,26 @@ export class BushaAppService {
               n?.deposit !== false && String(n?.status || 'active').toLowerCase() !== 'disabled'
           )
           .map((n: any) => {
-            const rawNet = String(n?.network || n?.id || '').toUpperCase();
-            // Normalize ERC20/TRC20/BEP20-style ids to Busha network codes
-            const bushaNetwork = toBushaNetwork(rawNet || String(n?.id || ''), code);
+            // Prefer Busha `network` code (ETH/TRX), then id (ethereum / USDT-TRC20), then name
+            const rawNet = String(n?.network || n?.id || n?.name || '');
+            const bushaNetwork = toBushaNetwork(rawNet, code);
             const chain = fromBushaNetwork(bushaNetwork);
             return {
               bushaNetwork,
               id: String(n?.id || chain.blockchain),
               blockchain: chain.blockchain,
-              blockchainName: n?.name || chain.blockchainName,
+              blockchainName: chain.blockchainName,
               minDepositAmount:
                 n?.min_deposit_amount != null && n.min_deposit_amount !== ''
                   ? String(n.min_deposit_amount)
                   : null,
             };
+          })
+          // Drop unknown / empty mappings; never keep Polygon for USDT
+          .filter((n: any) => {
+            if (!n.bushaNetwork) return false;
+            if (code === 'USDT' && n.bushaNetwork === 'MATIC') return false;
+            return true;
           });
 
         const fallbackNets = getBushaNetworksForCurrency(code).map((bushaNetwork) => {
@@ -541,7 +548,13 @@ export class BushaAppService {
           };
         });
 
-        const networks = depositNetworks.length > 0 ? depositNetworks : fallbackNets;
+        // Stables: if Busha payload is incomplete or maps to Polygon-only, use known deposit nets
+        const networks =
+          depositNetworks.length > 0 && !shouldPreferStableNetworkDefaults(code, depositNetworks)
+            ? depositNetworks
+            : fallbackNets.length > 0
+              ? fallbackNets
+              : depositNetworks;
         if (!networks.length) return null;
 
         return {
@@ -1632,38 +1645,65 @@ export class BushaAppService {
     const code = toBushaCurrency(currency);
     const remote = await this.client.get<any>(`/v1/currencies/${code}`, customer.bushaProfileId);
     const networks = Array.isArray(remote?.supported_networks) ? remote.supported_networks : [];
+    let mapped = networks.map((n: any) => {
+      const bushaNetwork = toBushaNetwork(String(n?.network || n?.id || n?.name || ''), code);
+      const chain = fromBushaNetwork(bushaNetwork);
+      return {
+        id: String(n?.id || chain.blockchain),
+        bushaNetwork,
+        name: chain.blockchainName,
+        blockchain: chain.blockchain,
+        blockchainName: chain.blockchainName,
+        withdrawal: n?.withdrawal !== false,
+        deposit: n?.deposit !== false,
+        minWithdrawalAmount:
+          n?.min_withdrawal_amount != null && n.min_withdrawal_amount !== ''
+            ? String(n.min_withdrawal_amount)
+            : null,
+        maxWithdrawalAmount:
+          n?.max_withdrawal_amount != null && n.max_withdrawal_amount !== ''
+            ? String(n.max_withdrawal_amount)
+            : null,
+        withdrawalFee:
+          n?.withdrawal_fee != null && n.withdrawal_fee !== '' ? String(n.withdrawal_fee) : null,
+        minDepositAmount:
+          n?.min_deposit_amount != null && n.min_deposit_amount !== ''
+            ? String(n.min_deposit_amount)
+            : null,
+      };
+    });
+
+    if (code === 'USDT') {
+      mapped = mapped.filter((n) => n.bushaNetwork !== 'MATIC');
+    }
+
+    if (shouldPreferStableNetworkDefaults(code, mapped)) {
+      const byNet = new Map(mapped.map((n) => [n.bushaNetwork, n]));
+      mapped = getBushaNetworksForCurrency(code).map((bushaNetwork) => {
+        const existing = byNet.get(bushaNetwork);
+        const chain = fromBushaNetwork(bushaNetwork);
+        return {
+          id: existing?.id || chain.blockchain,
+          bushaNetwork,
+          name: chain.blockchainName,
+          blockchain: chain.blockchain,
+          blockchainName: chain.blockchainName,
+          withdrawal: existing?.withdrawal ?? true,
+          deposit: existing?.deposit ?? true,
+          minWithdrawalAmount: existing?.minWithdrawalAmount ?? null,
+          maxWithdrawalAmount: existing?.maxWithdrawalAmount ?? null,
+          withdrawalFee: existing?.withdrawalFee ?? null,
+          minDepositAmount: existing?.minDepositAmount ?? null,
+        };
+      });
+    }
+
     return {
       currency: code,
       name: remote?.display_name || remote?.name || code,
       withdrawalEnabled: remote?.withdrawal !== false,
       defaultNetwork: remote?.default_network || null,
-      networks: networks.map((n: any) => {
-        const bushaNetwork = String(n?.network || toBushaNetwork(String(n?.id || ''), code)).toUpperCase();
-        const chain = fromBushaNetwork(bushaNetwork);
-        return {
-          id: String(n?.id || chain.blockchain),
-          bushaNetwork,
-          name: n?.name || chain.blockchainName,
-          blockchain: chain.blockchain,
-          blockchainName: chain.blockchainName,
-          withdrawal: n?.withdrawal !== false,
-          deposit: n?.deposit !== false,
-          minWithdrawalAmount:
-            n?.min_withdrawal_amount != null && n.min_withdrawal_amount !== ''
-              ? String(n.min_withdrawal_amount)
-              : null,
-          maxWithdrawalAmount:
-            n?.max_withdrawal_amount != null && n.max_withdrawal_amount !== ''
-              ? String(n.max_withdrawal_amount)
-              : null,
-          withdrawalFee:
-            n?.withdrawal_fee != null && n.withdrawal_fee !== '' ? String(n.withdrawal_fee) : null,
-          minDepositAmount:
-            n?.min_deposit_amount != null && n.min_deposit_amount !== ''
-              ? String(n.min_deposit_amount)
-              : null,
-        };
-      }),
+      networks: mapped,
     };
   }
 
