@@ -94,7 +94,7 @@ export class BushaAppService {
     try {
       const platform = await getOrCreateConfig();
       const enabled = isBushaEnabled() && platform.isActive;
-      const [user, kyc, customer, latestKycApp] = await Promise.all([
+      let [user, kyc, customer, latestKycApp] = await Promise.all([
         prisma.user.findUnique({
           where: { id: userId },
           include: { country: true },
@@ -106,6 +106,15 @@ export class BushaAppService {
           orderBy: { createdAt: 'desc' },
         }),
       ]);
+
+      // Live-check Busha when local customer is not active yet (approval may land on their side first)
+      if (enabled && customer?.bushaProfileId && customer.status !== 'active') {
+        customer = await this.syncCustomerFromProvider(customer);
+        latestKycApp = await prisma.bushaKycApplication.findFirst({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
 
       const rhinoxKycReady = Boolean(
         kyc?.status === 'verified' &&
@@ -153,6 +162,71 @@ export class BushaAppService {
         canTrade: false,
         countryCode: 'NG',
       };
+    }
+  }
+
+  /**
+   * Pull latest customer status from Busha and mirror it into our DB.
+   */
+  async syncCustomerFromProvider(customer: {
+    id: number;
+    bushaProfileId: string;
+    status: string;
+  }) {
+    try {
+      const remote = await this.client.get<any>(`/v1/customers/${customer.bushaProfileId}`);
+      const nextStatus = String(remote?.status || customer.status || 'inactive').toLowerCase();
+
+      const updated = await prisma.bushaCustomer.update({
+        where: { id: customer.id },
+        data: {
+          status: nextStatus,
+          providerData: remote,
+        },
+      });
+
+      if (nextStatus === 'active') {
+        await prisma.bushaKycApplication.updateMany({
+          where: {
+            OR: [{ bushaCustomerId: customer.id }, { userId: updated.userId }],
+            status: { not: 'active' },
+          },
+          data: { status: 'active', errorMessage: null, bushaCustomerId: customer.id },
+        });
+      } else if (nextStatus === 'rejected') {
+        await prisma.bushaKycApplication.updateMany({
+          where: {
+            OR: [{ bushaCustomerId: customer.id }, { userId: updated.userId }],
+            status: { in: ['pending', 'processing', 'submitted', 'in_review'] },
+          },
+          data: { status: 'rejected', bushaCustomerId: customer.id },
+        });
+      } else if (['in_review', 'pending', 'inactive', 'submitted'].includes(nextStatus)) {
+        await prisma.bushaKycApplication.updateMany({
+          where: {
+            OR: [{ bushaCustomerId: customer.id }, { userId: updated.userId }],
+            status: { in: ['pending', 'processing', 'submitted', 'in_review'] },
+          },
+          data: {
+            status: nextStatus === 'inactive' ? 'submitted' : nextStatus === 'pending' ? 'submitted' : nextStatus,
+            bushaCustomerId: customer.id,
+          },
+        });
+      }
+
+      if (nextStatus !== customer.status) {
+        console.log(
+          `[Busha] synced customer ${customer.bushaProfileId}: ${customer.status} → ${nextStatus}`
+        );
+      }
+
+      return updated;
+    } catch (error: any) {
+      console.warn(
+        `[Busha] sync customer ${customer.bushaProfileId} failed:`,
+        error?.message || error
+      );
+      return prisma.bushaCustomer.findUnique({ where: { id: customer.id } });
     }
   }
 
@@ -346,10 +420,13 @@ export class BushaAppService {
 
   async assertCustomerTradeReady(userId: number) {
     await this.assertPlatformActive();
-    const customer = await prisma.bushaCustomer.findUnique({ where: { userId } });
+    let customer = await prisma.bushaCustomer.findUnique({ where: { userId } });
     if (!customer) throw ApiError.badRequest('Activate your crypto wallet first');
+    if (customer.status !== 'active' && customer.bushaProfileId) {
+      customer = (await this.syncCustomerFromProvider(customer)) || customer;
+    }
     if (customer.status !== 'active') {
-      throw ApiError.badRequest(`Busha KYC is ${customer.status}. Trading is available after approval.`);
+      throw ApiError.badRequest(`Crypto KYC is ${customer.status}. Trading is available after approval.`);
     }
     return customer;
   }
@@ -979,6 +1056,23 @@ export class BushaAppService {
         await this.processKycApplication(app.id);
       } catch (error) {
         console.error('[Busha KYC poller]', app.id, error);
+      }
+    }
+
+    // Also re-check customers still waiting on Busha approval
+    const waitingCustomers = await prisma.bushaCustomer.findMany({
+      where: {
+        status: { not: 'active' },
+        bushaProfileId: { not: null },
+      },
+      take: 20,
+      orderBy: { updatedAt: 'asc' },
+    });
+    for (const customer of waitingCustomers) {
+      try {
+        await this.syncCustomerFromProvider(customer);
+      } catch (error) {
+        console.error('[Busha customer sync]', customer.id, error);
       }
     }
   }
