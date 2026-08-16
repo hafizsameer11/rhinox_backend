@@ -1576,6 +1576,98 @@ export class TransactionHistoryService {
       details.providerType = metadata?.provider || null;
     }
 
+    // Attach Busha trade details for crypto buy/sell/send receipts
+    if (
+      transaction.type === 'crypto_buy' ||
+      transaction.type === 'crypto_sell' ||
+      transaction.channel === 'busha'
+    ) {
+      const trade = await prisma.bushaTradeLog.findFirst({
+        where: {
+          userId: userIdNum,
+          OR: [
+            { fiatTransactionId: transaction.id },
+            ...(transaction.reference
+              ? [{ bushaTransferId: String(transaction.reference) }]
+              : []),
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (trade) {
+        const providerResponse = (trade.providerResponse as any) || {};
+        const quote = providerResponse.quote || {};
+        const fees = providerResponse.fees || quote.fees || metadata?.fees || [];
+        const feeTotal =
+          providerResponse.feeTotal ??
+          metadata?.feeTotal ??
+          (Array.isArray(fees)
+            ? fees.reduce(
+                (s: number, f: any) => s + Number(f?.amount?.amount ?? f?.amount ?? 0),
+                0
+              )
+            : null);
+
+        const src = Number(trade.sourceAmount);
+        const tgt = Number(trade.targetAmount);
+        let rate: string | null = null;
+        if (Number.isFinite(src) && Number.isFinite(tgt) && src > 0 && tgt > 0) {
+          rate =
+            trade.side === 'buy'
+              ? (src / tgt).toFixed(2)
+              : trade.side === 'sell'
+                ? (tgt / src).toFixed(2)
+                : null;
+        }
+
+        details.cryptoReceipt = {
+          kind:
+            trade.side === 'buy'
+              ? 'buy'
+              : trade.side === 'sell'
+                ? 'sell'
+                : trade.side === 'cryptoSend'
+                  ? 'withdraw'
+                  : 'deposit',
+          provider: 'Busha',
+          sourceCurrency: trade.sourceCurrency,
+          targetCurrency: trade.targetCurrency,
+          sourceAmount: trade.sourceAmount,
+          targetAmount: trade.targetAmount,
+          network: trade.network,
+          destinationAddress: trade.destinationAddress,
+          bushaTradeId: trade.id,
+          bushaTransferId: trade.bushaTransferId,
+          bushaQuoteId: trade.bushaQuoteId,
+          bushaStatus: trade.bushaStatus || trade.status,
+          fees,
+          feeTotal: feeTotal != null && feeTotal !== '' ? String(feeTotal) : null,
+          rate,
+        };
+      } else if (metadata) {
+        details.cryptoReceipt = {
+          kind:
+            transaction.type === 'crypto_buy'
+              ? 'buy'
+              : transaction.type === 'crypto_sell'
+                ? 'sell'
+                : 'deposit',
+          provider: 'Busha',
+          sourceCurrency: transaction.currency,
+          targetCurrency: metadata.targetCurrency || null,
+          sourceAmount: amount.abs().toString(),
+          targetAmount: metadata.netNgn || metadata.targetAmount || null,
+          network: metadata.network || null,
+          destinationAddress: metadata.destinationAddress || null,
+          fees: metadata.fees || [],
+          feeTotal: metadata.feeTotal != null ? String(metadata.feeTotal) : null,
+          rate: null,
+          bushaTransferId: transaction.reference,
+        };
+      }
+    }
+
     return details;
   }
 
