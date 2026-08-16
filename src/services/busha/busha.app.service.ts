@@ -437,6 +437,128 @@ export class BushaAppService {
     return (balances || []).filter((item) => item?.type === 'crypto' || isCryptoCurrency(item?.currency));
   }
 
+  /**
+   * List crypto assets available for NGN buy/sell from Busha pairs.
+   */
+  async listTradeAssets(userId: number) {
+    await this.assertPlatformActive();
+    const customer = await prisma.bushaCustomer.findUnique({ where: { userId } });
+    if (!customer?.bushaProfileId) {
+      throw ApiError.badRequest('Activate your crypto wallet first');
+    }
+    if (customer.status !== 'active') {
+      await this.syncCustomerFromProvider(customer);
+      const refreshed = await prisma.bushaCustomer.findUnique({ where: { userId } });
+      if (refreshed?.status !== 'active') {
+        throw ApiError.badRequest('Crypto KYC is still under review. Trading unlocks after approval.');
+      }
+    }
+
+    let pairs: any[] = [];
+    try {
+      const remote = await this.client.get<any>(
+        '/v1/pairs',
+        customer.bushaProfileId,
+        { currency: 'NGN' }
+      );
+      pairs = Array.isArray(remote) ? remote : Array.isArray(remote?.data) ? remote.data : [];
+    } catch (error: any) {
+      console.warn('[Busha] list pairs failed:', error?.message || error);
+      pairs = [];
+    }
+
+    const byCode = new Map<
+      string,
+      {
+        code: string;
+        name: string;
+        pairId: string;
+        buySupported: boolean;
+        sellSupported: boolean;
+        buyPrice: string | null;
+        sellPrice: string | null;
+        minBuyAmount: string | null;
+        minSellAmount: string | null;
+        maxBuyAmount: string | null;
+        maxSellAmount: string | null;
+      }
+    >();
+
+    for (const pair of pairs) {
+      const base = String(pair?.base || '').toUpperCase();
+      const counter = String(pair?.counter || '').toUpperCase();
+      if (!base || !counter) continue;
+
+      let cryptoCode = '';
+      if (counter === 'NGN' && isCryptoCurrency(base)) cryptoCode = base;
+      else if (base === 'NGN' && isCryptoCurrency(counter)) cryptoCode = counter;
+      else continue;
+
+      const existing = byCode.get(cryptoCode);
+      const buySupported = Boolean(pair?.is_buy_supported ?? pair?.buy_supported ?? true);
+      const sellSupported = Boolean(pair?.is_sell_supported ?? pair?.sell_supported ?? true);
+      const buyPrice =
+        pair?.buy_price?.amount != null
+          ? String(pair.buy_price.amount)
+          : pair?.buy_price != null
+            ? String(pair.buy_price)
+            : existing?.buyPrice || null;
+      const sellPrice =
+        pair?.sell_price?.amount != null
+          ? String(pair.sell_price.amount)
+          : pair?.sell_price != null
+            ? String(pair.sell_price)
+            : existing?.sellPrice || null;
+
+      byCode.set(cryptoCode, {
+        code: cryptoCode,
+        name: pair?.base_name || pair?.name || existing?.name || cryptoCode,
+        pairId: String(pair?.id || `${cryptoCode}NGN`),
+        buySupported: existing?.buySupported || buySupported,
+        sellSupported: existing?.sellSupported || sellSupported,
+        buyPrice,
+        sellPrice,
+        minBuyAmount:
+          pair?.min_buy_amount?.amount != null
+            ? String(pair.min_buy_amount.amount)
+            : existing?.minBuyAmount || null,
+        minSellAmount:
+          pair?.min_sell_amount?.amount != null
+            ? String(pair.min_sell_amount.amount)
+            : existing?.minSellAmount || null,
+        maxBuyAmount:
+          pair?.max_buy_amount?.amount != null
+            ? String(pair.max_buy_amount.amount)
+            : existing?.maxBuyAmount || null,
+        maxSellAmount:
+          pair?.max_sell_amount?.amount != null
+            ? String(pair.max_sell_amount.amount)
+            : existing?.maxSellAmount || null,
+      });
+    }
+
+    // Fallback so the app still has a usable picker if pairs are empty
+    if (byCode.size === 0) {
+      for (const code of ['USDT', 'USDC', 'BTC', 'ETH', 'TRX', 'SOL', 'LTC', 'TON', 'XRP', 'BNB']) {
+        byCode.set(code, {
+          code,
+          name: code,
+          pairId: `${code}NGN`,
+          buySupported: true,
+          sellSupported: true,
+          buyPrice: null,
+          sellPrice: null,
+          minBuyAmount: null,
+          minSellAmount: null,
+          maxBuyAmount: null,
+          maxSellAmount: null,
+        });
+      }
+    }
+
+    return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code));
+  }
+
   async getDepositAddress(userId: number, currency: string, blockchain: string) {
     const customer = await this.assertCustomerTradeReady(userId);
     const bushaCurrency = toBushaCurrency(currency);

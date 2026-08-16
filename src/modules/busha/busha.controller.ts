@@ -63,6 +63,15 @@ export class BushaController {
     }
   }
 
+  async pairs(req: Request, res: Response) {
+    try {
+      const data = await this.service.listTradeAssets(userIdFrom(req));
+      return res.json({ success: true, data });
+    } catch (error) {
+      return sendError(res, error);
+    }
+  }
+
   async depositAddress(req: Request, res: Response) {
     try {
       const { currency, blockchain } = req.params;

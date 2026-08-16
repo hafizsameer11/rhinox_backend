@@ -14,6 +14,7 @@ export class BushaModule implements IModule {
     this.router.get('/kyc/status', this.controller.status.bind(this.controller));
     this.router.post('/kyc/start', this.controller.startKyc.bind(this.controller));
     this.router.get('/wallet', this.controller.wallet.bind(this.controller));
+    this.router.get('/pairs', this.controller.pairs.bind(this.controller));
     this.router.get('/deposit-address/:currency/:blockchain', this.controller.depositAddress.bind(this.controller));
     this.router.post('/buy/preview', this.controller.previewBuy.bind(this.controller));
     this.router.post('/buy', this.controller.buy.bind(this.controller));
