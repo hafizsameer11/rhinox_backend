@@ -107,21 +107,13 @@ export class BushaAppService {
         }),
       ]);
 
-      // Live-check Busha, but never block the app on a slow provider call
+      // Live-check Busha when local customer is not active yet (approval may land on their side first)
       if (enabled && customer?.bushaProfileId && customer.status !== 'active') {
-        const synced = await this.withTimeout(this.syncCustomerFromProvider(customer), 3500);
-        if (synced) {
-          customer = synced;
-          latestKycApp = await prisma.bushaKycApplication.findFirst({
-            where: { userId },
-            orderBy: { createdAt: 'desc' },
-          });
-        } else {
-          // Continue with local DB; refresh in background for the next poll
-          this.syncCustomerFromProvider(customer).catch((error) => {
-            console.warn('[Busha] background customer sync failed:', error?.message || error);
-          });
-        }
+        customer = await this.syncCustomerFromProvider(customer);
+        latestKycApp = await prisma.bushaKycApplication.findFirst({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+        });
       }
 
       const rhinoxKycReady = Boolean(
@@ -170,20 +162,6 @@ export class BushaAppService {
         canTrade: false,
         countryCode: 'NG',
       };
-    }
-  }
-
-  private async withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        promise,
-        new Promise<null>((resolve) => {
-          timer = setTimeout(() => resolve(null), ms);
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -468,25 +446,22 @@ export class BushaAppService {
     if (!customer?.bushaProfileId) {
       throw ApiError.badRequest('Activate your crypto wallet first');
     }
-
-    // Prefer a quick sync, but never hang the pairs picker on provider latency
     if (customer.status !== 'active') {
-      const synced = await this.withTimeout(this.syncCustomerFromProvider(customer), 3500);
-      const latest = synced || (await prisma.bushaCustomer.findUnique({ where: { userId } }));
-      if (latest?.status !== 'active') {
+      await this.syncCustomerFromProvider(customer);
+      const refreshed = await prisma.bushaCustomer.findUnique({ where: { userId } });
+      if (refreshed?.status !== 'active') {
         throw ApiError.badRequest('Crypto KYC is still under review. Trading unlocks after approval.');
       }
     }
 
     let pairs: any[] = [];
     try {
-      const remote = await this.withTimeout(
-        this.client.get<any>('/v1/pairs', customer.bushaProfileId, { currency: 'NGN' }),
-        8000
+      const remote = await this.client.get<any>(
+        '/v1/pairs',
+        customer.bushaProfileId,
+        { currency: 'NGN' }
       );
-      if (remote) {
-        pairs = Array.isArray(remote) ? remote : Array.isArray((remote as any)?.data) ? (remote as any).data : [];
-      }
+      pairs = Array.isArray(remote) ? remote : Array.isArray(remote?.data) ? remote.data : [];
     } catch (error: any) {
       console.warn('[Busha] list pairs failed:', error?.message || error);
       pairs = [];
@@ -754,6 +729,149 @@ export class BushaAppService {
     return { quote, transfer };
   }
 
+  private async createQuote(profileId: string, quoteBody: Record<string, any>) {
+    return this.client.post('/v1/quotes', quoteBody, profileId);
+  }
+
+  private async createTransferFromQuote(profileId: string, quoteId: string) {
+    return this.client.post('/v1/transfers', { quote_id: quoteId }, profileId);
+  }
+
+  /** Create a PalmPay amount-locked VA + Busha NGN bank recipient for sells. */
+  private async createPalmPaySellDestination(
+    userId: number,
+    amountNgn: number,
+    bushaProfileId: string
+  ) {
+    const palmpayOrderId = `busha_sell_${randomUUID().replace(/-/g, '').slice(0, 20)}`.slice(0, 32);
+    const va = await this.palmPayDeposit.createVirtualAccountOrder({
+      orderId: palmpayOrderId,
+      amount: amountNgn,
+      userId,
+    });
+    const palmpayOrderNo = (va as any).orderNo || null;
+    const accountNumber =
+      (va as any).payerVirtualAccNo || (va as any).virtualAccNo || (va as any).accountNumber;
+    const accountName = (va as any).payerAccountName || (va as any).accountName || 'PalmPay';
+    const bankName = (va as any).payerBankName || (va as any).bankName || 'PalmPay';
+    if (!accountNumber) {
+      throw ApiError.internal('PalmPay did not return a virtual account number');
+    }
+    const bankCode = resolveBushaBankCodeFromPalmpay((va as any).bankCode, bankName);
+    const recipient = await this.client.post(
+      '/v1/recipients',
+      {
+        currency: 'NGN',
+        country_code: 'NG',
+        type: 'ngn_bank',
+        bank_name: bankName,
+        bank_code: bankCode,
+        account_number: accountNumber,
+        account_name: accountName,
+      },
+      bushaProfileId
+    );
+    return {
+      palmpayOrderId,
+      palmpayOrderNo,
+      recipientId: recipient.id as string,
+      vaAmount: amountNgn,
+      va,
+      recipient,
+    };
+  }
+
+  private buildSellBankTransferQuoteBody(
+    sourceCurrency: string,
+    sourceAmount: string,
+    recipientId: string,
+    network?: string
+  ) {
+    return {
+      source_currency: toBushaCurrency(sourceCurrency),
+      target_currency: 'NGN',
+      source_amount: String(sourceAmount),
+      pay_in: { type: 'balance' },
+      pay_out: { type: 'bank_transfer', recipient_id: recipientId },
+      ...(network ? { network: toBushaNetwork(network, sourceCurrency) } : {}),
+    };
+  }
+
+  private ceilNgn(value: any): number {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.ceil(n);
+  }
+
+  private extractQuoteFees(quote: any) {
+    const fees = Array.isArray(quote?.fees) ? quote.fees : [];
+    const feeTotal = fees.reduce(
+      (sum: number, fee: any) => sum + Number(fee?.amount?.amount ?? fee?.amount ?? 0),
+      0
+    );
+    return { fees, feeTotal };
+  }
+
+  /**
+   * Align PalmPay VA amount to Busha bank_transfer quote.target_amount.
+   * PalmPay VAs are amount-locked; mismatch causes MC100022 / cancel.
+   */
+  private async quoteSellAlignedToPalmPay(
+    userId: number,
+    bushaProfileId: string,
+    sourceCurrency: string,
+    sourceAmount: string,
+    provisionalAmount: number,
+    network?: string
+  ) {
+    let destination = await this.createPalmPaySellDestination(
+      userId,
+      provisionalAmount,
+      bushaProfileId
+    );
+    let quote = await this.createQuote(
+      bushaProfileId,
+      this.buildSellBankTransferQuoteBody(
+        sourceCurrency,
+        sourceAmount,
+        destination.recipientId,
+        network
+      )
+    );
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const exactNgn = this.ceilNgn(quote?.target_amount);
+      if (exactNgn < 100) {
+        throw ApiError.badRequest('Sell payout amount from quote is below NGN 100');
+      }
+      if (exactNgn === destination.vaAmount) {
+        return { quote, destination };
+      }
+
+      console.warn(
+        `[Busha sell] VA amount ${destination.vaAmount} != quote target ${exactNgn}; recreating VA`
+      );
+      destination = await this.createPalmPaySellDestination(userId, exactNgn, bushaProfileId);
+      quote = await this.createQuote(
+        bushaProfileId,
+        this.buildSellBankTransferQuoteBody(
+          sourceCurrency,
+          sourceAmount,
+          destination.recipientId,
+          network
+        )
+      );
+    }
+
+    const finalExact = this.ceilNgn(quote?.target_amount);
+    if (finalExact !== destination.vaAmount) {
+      throw ApiError.badRequest(
+        `Could not align PalmPay VA (${destination.vaAmount}) with Busha payout (${finalExact})`
+      );
+    }
+    return { quote, destination };
+  }
+
   async previewBuy(userId: number, sourceAmount: string, targetCurrency: string) {
     const customer = await this.assertCustomerTradeReady(userId);
     const quote = await this.client.post(
@@ -889,7 +1007,8 @@ export class BushaAppService {
 
   async previewSell(userId: number, sourceCurrency: string, sourceAmount: string) {
     const customer = await this.assertCustomerTradeReady(userId);
-    return this.client.post(
+    // Balance→balance preview is an estimate only (fees differ from bank_transfer payout).
+    const quote = await this.client.post(
       '/v1/quotes',
       {
         source_currency: toBushaCurrency(sourceCurrency),
@@ -900,13 +1019,23 @@ export class BushaAppService {
       },
       customer.bushaProfileId
     );
+    const { fees, feeTotal } = this.extractQuoteFees(quote);
+    return {
+      ...quote,
+      isEstimate: true,
+      netNgn: quote?.target_amount ?? null,
+      feeTotal,
+      fees,
+      note:
+        'Estimated NGN before bank payout fees. Final amount is confirmed on execute from the bank_transfer quote.',
+    };
   }
 
   async executeSell(userId: number, sourceCurrency: string, sourceAmount: string, network?: string) {
     const platform = await this.assertPlatformActive();
     const customer = await this.assertCustomerTradeReady(userId);
     const preview = await this.previewSell(userId, sourceCurrency, sourceAmount);
-    const estimatedNgn = Number(preview.target_amount || 0);
+    const estimatedNgn = Number(preview.target_amount || preview.netNgn || 0);
     if (estimatedNgn < 100) {
       throw ApiError.badRequest('Sell amount is below the NGN 100 minimum');
     }
@@ -915,6 +1044,10 @@ export class BushaAppService {
     let payoutMode = platform.sellPayoutMode;
     let palmpayOrderId: string | null = null;
     let palmpayOrderNo: string | null = null;
+    let quote: any;
+    let transfer: any;
+    let vaAmount: number | null = null;
+    let feeMeta: { fees: any[]; feeTotal: number } = { fees: [], feeTotal: 0 };
 
     if (platform.sellPayoutMode === 'dashboard_bank') {
       if (!platform.payoutBankCode || !platform.payoutAccountNumber || !platform.payoutAccountName) {
@@ -940,61 +1073,81 @@ export class BushaAppService {
           data: { payoutRecipientId: recipient.id },
         });
       }
+      ({ quote, transfer } = await this.createQuoteAndTransfer(
+        customer.bushaProfileId,
+        this.buildSellBankTransferQuoteBody(
+          sourceCurrency,
+          sourceAmount,
+          recipientId!,
+          network
+        )
+      ));
+      feeMeta = this.extractQuoteFees(quote);
     } else {
       payoutMode = 'palmpay_temp';
-      palmpayOrderId = `busha_sell_${randomUUID().replace(/-/g, '').slice(0, 20)}`.slice(0, 32);
-      const va = await this.palmPayDeposit.createVirtualAccountOrder({
-        orderId: palmpayOrderId,
-        amount: Math.ceil(estimatedNgn),
+      // 1) provisional VA from balance estimate → 2) bank_transfer quote → 3) recreate VA if needed
+      const provisionalAmount = this.ceilNgn(estimatedNgn);
+      const aligned = await this.quoteSellAlignedToPalmPay(
         userId,
-      });
-      palmpayOrderNo = (va as any).orderNo || null;
-      const accountNumber =
-        (va as any).payerVirtualAccNo || (va as any).virtualAccNo || (va as any).accountNumber;
-      const accountName = (va as any).payerAccountName || (va as any).accountName || 'PalmPay';
-      const bankName = (va as any).payerBankName || (va as any).bankName || 'PalmPay';
-      const bankCode = resolveBushaBankCodeFromPalmpay((va as any).bankCode, bankName);
-      const recipient = await this.client.post(
-        '/v1/recipients',
-        {
-          currency: 'NGN',
-          country_code: 'NG',
-          type: 'ngn_bank',
-          bank_name: bankName,
-          bank_code: bankCode,
-          account_number: accountNumber,
-          account_name: accountName,
-        },
-        customer.bushaProfileId
+        customer.bushaProfileId,
+        sourceCurrency,
+        sourceAmount,
+        provisionalAmount,
+        network
       );
-      recipientId = recipient.id;
-    }
+      quote = aligned.quote;
+      recipientId = aligned.destination.recipientId;
+      palmpayOrderId = aligned.destination.palmpayOrderId;
+      palmpayOrderNo = aligned.destination.palmpayOrderNo;
+      vaAmount = aligned.destination.vaAmount;
+      feeMeta = this.extractQuoteFees(quote);
 
-    const { quote, transfer } = await this.createQuoteAndTransfer(customer.bushaProfileId, {
-      source_currency: toBushaCurrency(sourceCurrency),
-      target_currency: 'NGN',
-      source_amount: String(sourceAmount),
-      pay_in: { type: 'balance' },
-      pay_out: { type: 'bank_transfer', recipient_id: recipientId },
-      ...(network ? { network: toBushaNetwork(network, sourceCurrency) } : {}),
-    });
+      const quoteTarget = this.ceilNgn(quote?.target_amount);
+      if (quoteTarget !== vaAmount) {
+        throw ApiError.badRequest(
+          `PalmPay VA amount ${vaAmount} does not match Busha payout ${quoteTarget}`
+        );
+      }
+
+      // Only create transfer after VA amount === quote.target_amount
+      transfer = await this.createTransferFromQuote(customer.bushaProfileId, quote.id);
+      const paid = this.ceilNgn(transfer?.target_amount || quote?.target_amount);
+      if (paid !== vaAmount) {
+        // Should be rare once quote is aligned; log for ops — do not leave user hanging mid-flight
+        console.error('[Busha sell] post-transfer amount mismatch', {
+          paid,
+          vaAmount,
+          transferId: transfer?.id,
+          palmpayOrderId,
+        });
+      }
+    }
 
     const ngnWallet = await prisma.wallet.findUnique({
       where: { userId_currency: { userId, currency: 'NGN' } },
     });
     if (!ngnWallet) throw ApiError.badRequest('NGN wallet not found');
 
+    const creditAmount = Number(transfer.target_amount || quote.target_amount || estimatedNgn);
     const fiatTx = await prisma.transaction.create({
       data: {
         walletId: ngnWallet.id,
         type: 'crypto_sell',
         status: 'pending',
-        amount: Number(transfer.target_amount || estimatedNgn),
+        amount: creditAmount,
         currency: 'NGN',
         reference: `busha_sell_tx_${randomUUID().slice(0, 12)}`,
         description: `Sell ${toBushaCurrency(sourceCurrency)}`,
         channel: 'busha',
-        metadata: { provider: 'busha', transferId: transfer.id },
+        metadata: {
+          provider: 'busha',
+          transferId: transfer.id,
+          palmpayOrderId,
+          vaAmount,
+          fees: feeMeta.fees,
+          feeTotal: feeMeta.feeTotal,
+          netNgn: transfer.target_amount || quote.target_amount,
+        },
       },
     });
 
@@ -1016,7 +1169,14 @@ export class BushaAppService {
         palmpayOrderNo,
         payoutMode,
         fiatTransactionId: fiatTx.id,
-        providerResponse: { quote, transfer },
+        providerResponse: {
+          quote,
+          transfer,
+          preview,
+          vaAmount,
+          fees: feeMeta.fees,
+          feeTotal: feeMeta.feeTotal,
+        },
       },
     });
   }
@@ -1172,7 +1332,56 @@ export class BushaAppService {
       if (trade.side === 'buy') {
         await this.reverseBuy(trade.id, `Busha status ${remoteStatus}`);
       } else {
-        await prisma.bushaTradeLog.update({ where: { id: trade.id }, data: { status: 'busha_failed' } });
+        await this.markSellFailed(trade.id, remoteStatus);
+      }
+    }
+  }
+
+  /**
+   * Close sell trade + pending crypto_sell tx without crediting Rhinox.
+   * Funds may remain on the Busha customer NGN balance after cancel.
+   */
+  async failSellTrade(tradeId: number, remoteStatus: string) {
+    return this.markSellFailed(tradeId, remoteStatus);
+  }
+
+  private async markSellFailed(tradeId: number, remoteStatus: string) {
+    const trade = await prisma.bushaTradeLog.findUnique({ where: { id: tradeId } });
+    if (!trade) return;
+    if (['wallet_credited', 'completed'].includes(trade.status)) return;
+
+    await prisma.bushaTradeLog.update({
+      where: { id: tradeId },
+      data: {
+        status: 'busha_failed',
+        bushaStatus: remoteStatus,
+        providerResponse: {
+          ...((trade.providerResponse as object) || {}),
+          failure: {
+            at: new Date().toISOString(),
+            bushaStatus: remoteStatus,
+            note: 'NGN may remain on Busha customer balance; do not double-credit Rhinox',
+          },
+        },
+      },
+    });
+
+    if (trade.fiatTransactionId) {
+      const tx = await prisma.transaction.findUnique({ where: { id: trade.fiatTransactionId } });
+      if (tx && !['completed', 'failed', 'cancelled'].includes(tx.status)) {
+        await prisma.transaction.update({
+          where: { id: tx.id },
+          data: {
+            status: 'failed',
+            metadata: {
+              ...((tx.metadata as object) || {}),
+              provider: 'busha',
+              bushaStatus: remoteStatus,
+              failureReason: `Busha transfer ${remoteStatus}`,
+              fundsNote: 'NGN may remain on Busha balance; not credited to Rhinox wallet',
+            },
+          },
+        });
       }
     }
   }
@@ -1188,6 +1397,55 @@ export class BushaAppService {
         await this.settleTrade(trade.id);
       } catch (error) {
         console.error('[Busha settlement] trade', trade.id, error);
+      }
+
+      // Reconcile PalmPay VA status for sells when webhooks are missing
+      if (
+        trade.side === 'sell' &&
+        trade.payoutMode === 'palmpay_temp' &&
+        trade.palmpayOrderId &&
+        !['wallet_credited', 'completed', 'busha_failed', 'palmpay_failed'].includes(trade.status)
+      ) {
+        try {
+          await this.syncSellPalmPayStatus(trade.id, trade.palmpayOrderId);
+        } catch (error) {
+          console.error('[Busha settlement] PalmPay sync', trade.id, error);
+        }
+      }
+    }
+  }
+
+  async syncSellPalmPayStatus(tradeId: number, palmpayOrderId: string) {
+    const order = await this.palmPayDeposit.queryOrderStatus(palmpayOrderId);
+    const mapped = mapPalmPayStatus((order as any).orderStatus);
+    const trade = await prisma.bushaTradeLog.findUnique({ where: { id: tradeId } });
+    if (!trade) return;
+
+    await prisma.bushaTradeLog.update({
+      where: { id: tradeId },
+      data: {
+        palmpayStatus: mapped,
+        palmpayOrderNo: (order as any).orderNo || trade.palmpayOrderNo,
+        providerResponse: {
+          ...((trade.providerResponse as object) || {}),
+          palmpayStatusPoll: order,
+        },
+      },
+    });
+
+    if (mapped === 'completed') {
+      await this.settleTrade(tradeId);
+    } else if (mapped === 'failed' || mapped === 'cancelled') {
+      await prisma.bushaTradeLog.update({
+        where: { id: tradeId },
+        data: { palmpayStatus: mapped },
+      });
+      const bushaStatus = String(trade.bushaStatus || '').toLowerCase();
+      if (
+        FAIL_STATUSES.has(bushaStatus) ||
+        trade.status === 'busha_failed'
+      ) {
+        await this.markSellFailed(tradeId, bushaStatus || mapped);
       }
     }
   }

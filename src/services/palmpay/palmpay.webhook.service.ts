@@ -41,6 +41,10 @@ export class PalmPayWebhookService {
         await this.processDepositWebhook(payload);
       } else if (payload.orderId?.startsWith('payout_')) {
         await this.processPayoutWebhook(payload);
+      } else if (payload.orderId?.startsWith('busha_sell_')) {
+        await this.processBushaSellWebhook(payload);
+      } else if (payload.orderId?.startsWith('busha_buy_')) {
+        await this.processBushaBuyWebhook(payload);
       } else if (payload.outOrderNo?.startsWith('bill_')) {
         await this.processBillPaymentWebhook(payload);
       }
@@ -216,6 +220,80 @@ export class PalmPayWebhookService {
           ? `Withdrawal failed: ${payload.errorMsg}`
           : 'Your withdrawal could not be completed.',
       });
+    }
+  }
+
+  private async processBushaSellWebhook(payload: PalmPayWebhookPayload) {
+    const orderId = payload.orderId!;
+    const trade = await prisma.bushaTradeLog.findFirst({
+      where: { palmpayOrderId: orderId, side: 'sell' },
+    });
+    if (!trade) {
+      console.warn('[PalmPay webhook] No busha sell trade for', orderId);
+      return;
+    }
+
+    const mapped = mapPalmPayStatus(payload.orderStatus);
+    await prisma.bushaTradeLog.update({
+      where: { id: trade.id },
+      data: {
+        palmpayStatus: mapped,
+        palmpayOrderNo: payload.orderNo || trade.palmpayOrderNo,
+        providerResponse: {
+          ...((trade.providerResponse as object) || {}),
+          palmpayWebhook: payload,
+        },
+      },
+    });
+
+    const { BushaAppService } = await import('../busha/busha.app.service.js');
+    const busha = new BushaAppService();
+
+    if (mapped === 'completed') {
+      await busha.settleTrade(trade.id);
+      return;
+    }
+
+    if (mapped === 'failed' || mapped === 'cancelled') {
+      if (['wallet_credited', 'completed'].includes(trade.status)) return;
+      const bushaStatus = String(trade.bushaStatus || '').toLowerCase();
+      const bushaTerminal =
+        ['cancelled', 'failed', 'funds_not_delivered', 'funds_refunded'].includes(bushaStatus) ||
+        trade.status === 'busha_failed';
+      if (bushaTerminal) {
+        await busha.failSellTrade(trade.id, bushaStatus || mapped);
+      }
+      // Otherwise keep trade open — Busha cancel/fail poller will close the crypto_sell tx
+    }
+  }
+
+  private async processBushaBuyWebhook(payload: PalmPayWebhookPayload) {
+    const orderId = payload.orderId!;
+    const trade = await prisma.bushaTradeLog.findFirst({
+      where: { palmpayOrderId: orderId, side: 'buy' },
+    });
+    if (!trade) {
+      console.warn('[PalmPay webhook] No busha buy trade for', orderId);
+      return;
+    }
+
+    const mapped = mapPalmPayStatus(payload.orderStatus);
+    await prisma.bushaTradeLog.update({
+      where: { id: trade.id },
+      data: {
+        palmpayStatus: mapped,
+        palmpayOrderNo: payload.orderNo || trade.palmpayOrderNo,
+        providerResponse: {
+          ...((trade.providerResponse as object) || {}),
+          palmpayWebhook: payload,
+        },
+      },
+    });
+
+    const { BushaAppService } = await import('../busha/busha.app.service.js');
+    const busha = new BushaAppService();
+    if (mapped === 'completed' || mapped === 'failed' || mapped === 'cancelled') {
+      await busha.settleTrade(trade.id);
     }
   }
 
