@@ -9,7 +9,14 @@ import { mapPalmPayStatus } from '../palmpay/palmpay.utils.js';
 import { resolveBushaBankCodeFromPalmpay, resolvePalmpayBankCode } from './busha.bank.mapper.js';
 import { BushaClient, BushaProviderError } from './busha.client.js';
 import { getBushaConfig, isBushaEnabled } from './busha.config.js';
-import { fromBushaNetwork, isCryptoCurrency, toBushaCurrency, toBushaNetwork, getBushaNetworksForCurrency } from './busha.networks.js';
+import {
+  fromBushaNetwork,
+  isCryptoCurrency,
+  toBushaCurrency,
+  toBushaNetwork,
+  getBushaNetworksForCurrency,
+  BUSHA_DEPOSIT_CATALOG_FALLBACK,
+} from './busha.networks.js';
 
 const SUCCESS_STATUSES = new Set(['completed', 'funds_converted', 'funds_delivered']);
 const FAIL_STATUSES = new Set(['failed', 'cancelled', 'funds_not_delivered', 'funds_refunded']);
@@ -437,6 +444,127 @@ export class BushaAppService {
     return (balances || []).filter((item) => item?.type === 'crypto' || isCryptoCurrency(item?.currency));
   }
 
+  private currencyDisplayName(code: string, rawName?: string | null) {
+    const DISPLAY_NAMES: Record<string, string> = {
+      USDT: 'Tether USD',
+      USDC: 'USD Coin',
+      BTC: 'Bitcoin',
+      ETH: 'Ethereum',
+      TRX: 'TRON',
+      SOL: 'Solana',
+      BNB: 'BNB',
+      LTC: 'Litecoin',
+      XRP: 'XRP',
+      TON: 'TON',
+      XLM: 'Stellar',
+      SHIB: 'SHIBA INU',
+    };
+    const raw = String(rawName || '').trim();
+    return DISPLAY_NAMES[code] || (raw && !/^tether$/i.test(raw) ? raw : code);
+  }
+
+  /**
+   * Full Busha crypto/stablecoin catalog (deposit-supported), not only funded balances.
+   */
+  private mapCatalogFallback() {
+    return BUSHA_DEPOSIT_CATALOG_FALLBACK.map((item) => ({
+      code: item.code,
+      name: this.currencyDisplayName(item.code, item.name),
+      networks: item.networks.map((bushaNetwork) => {
+        const chain = fromBushaNetwork(bushaNetwork);
+        return {
+          bushaNetwork,
+          id: chain.blockchain,
+          blockchain: chain.blockchain,
+          blockchainName: chain.blockchainName,
+          minDepositAmount: null as string | null,
+        };
+      }),
+    }));
+  }
+
+  async listBushaCryptoCatalog(profileId?: string) {
+    let remote: any;
+    try {
+      remote = await this.client.get<any>('/v1/currencies', profileId);
+    } catch (error: any) {
+      console.warn('[Busha] list currencies failed:', error?.message || error);
+      return this.mapCatalogFallback();
+    }
+    const list = Array.isArray(remote)
+      ? remote
+      : Array.isArray(remote?.data)
+        ? remote.data
+        : Array.isArray(remote?.currencies)
+          ? remote.currencies
+          : [];
+
+    const mapped = list
+      .map((item: any) => {
+        const code = toBushaCurrency(String(item?.code || item?.currency || ''));
+        if (!code || !isCryptoCurrency(code)) return null;
+        const type = String(item?.type || '').toLowerCase();
+        if (type === 'fiat') return null;
+        if (item?.deposit === false) return null;
+
+        const supported = Array.isArray(item?.supported_networks) ? item.supported_networks : [];
+        const depositNetworks = supported
+          .filter(
+            (n: any) =>
+              n?.deposit !== false && String(n?.status || 'active').toLowerCase() !== 'disabled'
+          )
+          .map((n: any) => {
+            const rawNet = String(n?.network || n?.id || '').toUpperCase();
+            // Normalize ERC20/TRC20/BEP20-style ids to Busha network codes
+            const bushaNetwork = toBushaNetwork(rawNet || String(n?.id || ''), code);
+            const chain = fromBushaNetwork(bushaNetwork);
+            return {
+              bushaNetwork,
+              id: String(n?.id || chain.blockchain),
+              blockchain: chain.blockchain,
+              blockchainName: n?.name || chain.blockchainName,
+              minDepositAmount:
+                n?.min_deposit_amount != null && n.min_deposit_amount !== ''
+                  ? String(n.min_deposit_amount)
+                  : null,
+            };
+          });
+
+        const fallbackNets = getBushaNetworksForCurrency(code).map((bushaNetwork) => {
+          const chain = fromBushaNetwork(bushaNetwork);
+          return {
+            bushaNetwork,
+            id: chain.blockchain,
+            blockchain: chain.blockchain,
+            blockchainName: chain.blockchainName,
+            minDepositAmount: null as string | null,
+          };
+        });
+
+        const networks = depositNetworks.length > 0 ? depositNetworks : fallbackNets;
+        if (!networks.length) return null;
+
+        return {
+          code,
+          name: this.currencyDisplayName(code, item?.display_name || item?.name),
+          networks,
+        };
+      })
+      .filter(Boolean) as Array<{
+      code: string;
+      name: string;
+      networks: Array<{
+        bushaNetwork: string;
+        id: string;
+        blockchain: string;
+        blockchainName: string;
+        minDepositAmount: string | null;
+      }>;
+    }>;
+
+    return mapped.length > 0 ? mapped : this.mapCatalogFallback();
+  }
+
   /**
    * List crypto assets available for NGN buy/sell from Busha pairs.
    */
@@ -577,9 +705,21 @@ export class BushaAppService {
         network,
       });
     } catch {
+      // Busha receive quote requires an amount; use network min deposit when known
+      let quoteAmount = bushaCurrency === 'BTC' ? '0.0001' : bushaCurrency === 'ETH' ? '0.001' : '1';
+      try {
+        const limits = await this.getWithdrawLimits(userId, bushaCurrency);
+        const net = this.matchCurrencyNetwork(limits.networks as any[], blockchain, bushaCurrency);
+        const minDep = Number((net as any)?.minDepositAmount);
+        if (Number.isFinite(minDep) && minDep > 0) {
+          quoteAmount = String(minDep);
+        }
+      } catch {
+        /* keep default */
+      }
       const receive = await this.createReceive(userId, {
         currency: bushaCurrency,
-        amount: bushaCurrency === 'BTC' ? '0.0001' : '1',
+        amount: quoteAmount,
         network,
       });
       return {
@@ -677,36 +817,47 @@ export class BushaAppService {
   }
 
   async mapBalancesForWallet(userId: number) {
-    const balances = await this.listBalances(userId);
-    return balances.map((item, index) => {
+    const customer = await this.assertCustomerTradeReady(userId);
+    const [balances, catalog] = await Promise.all([
+      this.listBalances(userId),
+      this.listBushaCryptoCatalog(customer.bushaProfileId),
+    ]);
+
+    const balanceByCode = new Map<string, any>();
+    for (const item of balances) {
       const currency = toBushaCurrency(item.currency);
       const available = item.available?.amount || item.available || '0';
       const total = item.total?.amount || item.total || available;
-      const chain = fromBushaNetwork(currency === 'USDT' ? 'TRX' : currency);
-      const DISPLAY_NAMES: Record<string, string> = {
-        USDT: 'Tether USD',
-        USDC: 'USD Coin',
-        BTC: 'Bitcoin',
-        ETH: 'Ethereum',
-        TRX: 'TRON',
-        SOL: 'Solana',
-        BNB: 'BNB',
-        LTC: 'Litecoin',
-        XRP: 'XRP',
-        TON: 'TON',
-      };
-      const rawName = String(item.name || '').trim();
-      // Busha often returns "Tether" — keep ticker-friendly display names
-      const currencyName =
-        DISPLAY_NAMES[currency] ||
-        (rawName && !/^tether$/i.test(rawName) ? rawName : currency);
+      balanceByCode.set(currency, {
+        available: String(available),
+        total: String(total),
+        name: item.name,
+        id: item.id,
+      });
+    }
 
+    const ordered =
+      catalog.length > 0
+        ? [
+            ...catalog.map((c) => c.code),
+            ...Array.from(balanceByCode.keys()).filter((c) => !catalog.some((x) => x.code === c)),
+          ]
+        : Array.from(balanceByCode.keys());
+
+    return ordered.map((currency, index) => {
+      const bal = balanceByCode.get(currency);
+      const meta = catalog.find((c) => c.code === currency);
+      const chain = fromBushaNetwork(
+        meta?.networks?.[0]?.bushaNetwork || (currency === 'USDT' ? 'TRX' : currency)
+      );
+      const total = bal?.total || '0';
+      const available = bal?.available || '0';
       return {
-        id: item.id || index,
+        id: bal?.id || index,
         type: 'crypto' as const,
         currency,
         blockchain: chain.blockchain,
-        currencyName,
+        currencyName: meta?.name || this.currencyDisplayName(currency, bal?.name),
         symbol: currency,
         balance: String(total),
         lockedBalance: '0',
@@ -718,66 +869,87 @@ export class BushaAppService {
         active: true,
         frozen: false,
         provider: 'busha',
+        depositNetworks: meta?.networks || [],
       };
     });
   }
 
   async mapUnifiedBalances(userId: number) {
+    // mapBalancesForWallet already merges Busha catalog + funded balances
     const rows = await this.mapBalancesForWallet(userId);
+    const catalogByCode = new Map(
+      rows
+        .filter((r) => Array.isArray((r as any).depositNetworks))
+        .map((r) => [
+          r.symbol,
+          {
+            code: r.symbol,
+            name: r.currencyName,
+            networks: (r as any).depositNetworks as Array<{
+              bushaNetwork: string;
+              id: string;
+              blockchain: string;
+              blockchainName: string;
+              minDepositAmount: string | null;
+            }>,
+          },
+        ])
+    );
+
     const grouped = new Map<string, typeof rows>();
     for (const row of rows) {
       const list = grouped.get(row.symbol) || [];
       list.push(row);
       grouped.set(row.symbol, list);
     }
-    return Array.from(grouped.entries()).map(([symbol, networks]) => {
-      const totalBalance = networks
-        .reduce((sum, item) => sum + Number(item.balance || 0), 0)
-        .toString();
-      const totalAvailable = networks
-        .reduce((sum, item) => sum + Number(item.availableBalance || 0), 0)
-        .toString();
-      const isUnifiedStable = symbol === 'USDT' || symbol === 'USDC';
 
-      // Busha holds one USDT/USDC balance, but deposits/withdrawals need TRX / ETH / BSC, etc.
-      const bushaNetworks = getBushaNetworksForCurrency(symbol);
-      const networkRows =
-        isUnifiedStable || bushaNetworks.length > 1
-          ? bushaNetworks.map((bushaNet) => {
-              const chain = fromBushaNetwork(bushaNet);
-              return {
-                virtualAccountId: 0,
-                currency: symbol,
-                blockchain: chain.blockchain,
-                blockchainName: chain.blockchainName,
-                balance: totalBalance,
-                available: totalAvailable,
-                depositAddress: null,
-                bushaNetwork: bushaNet,
-              };
-            })
-          : networks.map((item) => {
-              const chain = fromBushaNetwork(toBushaNetwork(item.blockchain, item.currency));
-              return {
-                virtualAccountId: 0,
-                currency: item.currency,
-                blockchain: chain.blockchain,
-                blockchainName: chain.blockchainName,
-                balance: item.balance,
-                available: item.availableBalance,
-                depositAddress: null,
-                bushaNetwork: toBushaNetwork(item.blockchain, item.currency),
-              };
-            });
+    return Array.from(grouped.entries())
+      .map(([symbol, networks]) => {
+        const totalBalance = networks
+          .reduce((sum, item) => sum + Number(item.balance || 0), 0)
+          .toString();
+        const totalAvailable = networks
+          .reduce((sum, item) => sum + Number(item.availableBalance || 0), 0)
+          .toString();
+        const isUnifiedStable = symbol === 'USDT' || symbol === 'USDC';
+        const catalogNets = catalogByCode.get(symbol)?.networks;
+        const bushaNetworks =
+          catalogNets && catalogNets.length > 0
+            ? catalogNets.map((n) => n.bushaNetwork)
+            : getBushaNetworksForCurrency(symbol);
 
-      return {
-        symbol,
-        totalBalance,
-        totalAvailable,
-        isUnifiedStable,
-        networks: networkRows,
-      };
-    });
+        const networkRows = bushaNetworks.map((bushaNet) => {
+          const chain = fromBushaNetwork(bushaNet);
+          const catalogNet = catalogNets?.find((n) => n.bushaNetwork === bushaNet);
+          return {
+            virtualAccountId: 0,
+            currency: symbol,
+            blockchain: chain.blockchain,
+            blockchainName: catalogNet?.blockchainName || chain.blockchainName,
+            balance: totalBalance,
+            available: totalAvailable,
+            depositAddress: null,
+            bushaNetwork: bushaNet,
+            minDepositAmount: catalogNet?.minDepositAmount || null,
+          };
+        });
+
+        return {
+          symbol,
+          name: catalogByCode.get(symbol)?.name || this.currencyDisplayName(symbol),
+          totalBalance,
+          totalAvailable,
+          isUnifiedStable,
+          networks: networkRows,
+        };
+      })
+      .sort((a, b) => {
+        const av = Number(a.totalAvailable);
+        const bv = Number(b.totalAvailable);
+        if (av > 0 && bv <= 0) return -1;
+        if (bv > 0 && av <= 0) return 1;
+        return a.symbol.localeCompare(b.symbol);
+      });
   }
 
   private async createQuoteAndTransfer(profileId: string, quoteBody: Record<string, any>) {
