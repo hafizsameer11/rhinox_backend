@@ -20,18 +20,27 @@ const CHAIN_TO_BUSHA: Record<string, string> = {
   xrp: 'XRP',
   ripple: 'XRP',
   ton: 'TON',
+  xlms: 'XLM',
+  xlm: 'XLM',
 };
 
 const BUSHA_TO_CHAIN: Record<string, { blockchain: string; blockchainName: string }> = {
   BTC: { blockchain: 'bitcoin', blockchainName: 'Bitcoin' },
-  ETH: { blockchain: 'ethereum', blockchainName: 'Ethereum' },
-  TRX: { blockchain: 'tron', blockchainName: 'TRON' },
-  BSC: { blockchain: 'bsc', blockchainName: 'BNB Smart Chain' },
+  ETH: { blockchain: 'ethereum', blockchainName: 'Ethereum (ERC20)' },
+  TRX: { blockchain: 'tron', blockchainName: 'TRON (TRC20)' },
+  BSC: { blockchain: 'bsc', blockchainName: 'BNB Smart Chain (BEP20)' },
   SOL: { blockchain: 'solana', blockchainName: 'Solana' },
   MATIC: { blockchain: 'polygon', blockchainName: 'Polygon' },
   LTC: { blockchain: 'litecoin', blockchainName: 'Litecoin' },
   XRP: { blockchain: 'xrp', blockchainName: 'XRP' },
   TON: { blockchain: 'ton', blockchainName: 'TON' },
+  XLM: { blockchain: 'xlm', blockchainName: 'Stellar' },
+};
+
+/** Busha-supported networks for multi-chain stables (Busha currency docs). */
+export const BUSHA_STABLE_NETWORKS: Record<string, string[]> = {
+  USDT: ['TRX', 'ETH', 'BSC'],
+  USDC: ['ETH', 'TRX', 'XLM'],
 };
 
 export function toBushaCurrency(currency: string): string {
@@ -58,4 +67,11 @@ export function fromBushaNetwork(network: string): { blockchain: string; blockch
 export function isCryptoCurrency(code: string): boolean {
   const upper = toBushaCurrency(code);
   return !['NGN', 'KES', 'GHS', 'USD', 'UGX', 'TZS', 'ZAR'].includes(upper);
+}
+
+export function getBushaNetworksForCurrency(currency: string): string[] {
+  const code = toBushaCurrency(currency);
+  if (BUSHA_STABLE_NETWORKS[code]) return [...BUSHA_STABLE_NETWORKS[code]];
+  const native = fromBushaNetwork(code);
+  return [toBushaNetwork(native.blockchain, code)];
 }

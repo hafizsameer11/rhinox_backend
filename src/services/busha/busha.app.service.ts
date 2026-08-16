@@ -9,7 +9,7 @@ import { mapPalmPayStatus } from '../palmpay/palmpay.utils.js';
 import { resolveBushaBankCodeFromPalmpay, resolvePalmpayBankCode } from './busha.bank.mapper.js';
 import { BushaClient, BushaProviderError } from './busha.client.js';
 import { getBushaConfig, isBushaEnabled } from './busha.config.js';
-import { fromBushaNetwork, isCryptoCurrency, toBushaCurrency, toBushaNetwork } from './busha.networks.js';
+import { fromBushaNetwork, isCryptoCurrency, toBushaCurrency, toBushaNetwork, getBushaNetworksForCurrency } from './busha.networks.js';
 
 const SUCCESS_STATUSES = new Set(['completed', 'funds_converted', 'funds_delivered']);
 const FAIL_STATUSES = new Set(['failed', 'cancelled', 'funds_not_delivered', 'funds_refunded']);
@@ -730,21 +730,54 @@ export class BushaAppService {
       list.push(row);
       grouped.set(row.symbol, list);
     }
-    return Array.from(grouped.entries()).map(([symbol, networks]) => ({
-      symbol,
-      totalBalance: networks.reduce((sum, item) => sum + Number(item.balance || 0), 0).toString(),
-      totalAvailable: networks.reduce((sum, item) => sum + Number(item.availableBalance || 0), 0).toString(),
-      isUnifiedStable: symbol === 'USDT' || symbol === 'USDC',
-      networks: networks.map((item) => ({
-        virtualAccountId: 0,
-        currency: item.currency,
-        blockchain: item.blockchain,
-        blockchainName: item.currencyName,
-        balance: item.balance,
-        available: item.availableBalance,
-        depositAddress: null,
-      })),
-    }));
+    return Array.from(grouped.entries()).map(([symbol, networks]) => {
+      const totalBalance = networks
+        .reduce((sum, item) => sum + Number(item.balance || 0), 0)
+        .toString();
+      const totalAvailable = networks
+        .reduce((sum, item) => sum + Number(item.availableBalance || 0), 0)
+        .toString();
+      const isUnifiedStable = symbol === 'USDT' || symbol === 'USDC';
+
+      // Busha holds one USDT/USDC balance, but deposits/withdrawals need TRX / ETH / BSC, etc.
+      const bushaNetworks = getBushaNetworksForCurrency(symbol);
+      const networkRows =
+        isUnifiedStable || bushaNetworks.length > 1
+          ? bushaNetworks.map((bushaNet) => {
+              const chain = fromBushaNetwork(bushaNet);
+              return {
+                virtualAccountId: 0,
+                currency: symbol,
+                blockchain: chain.blockchain,
+                blockchainName: chain.blockchainName,
+                balance: totalBalance,
+                available: totalAvailable,
+                depositAddress: null,
+                bushaNetwork: bushaNet,
+              };
+            })
+          : networks.map((item) => {
+              const chain = fromBushaNetwork(toBushaNetwork(item.blockchain, item.currency));
+              return {
+                virtualAccountId: 0,
+                currency: item.currency,
+                blockchain: chain.blockchain,
+                blockchainName: chain.blockchainName,
+                balance: item.balance,
+                available: item.availableBalance,
+                depositAddress: null,
+                bushaNetwork: toBushaNetwork(item.blockchain, item.currency),
+              };
+            });
+
+      return {
+        symbol,
+        totalBalance,
+        totalAvailable,
+        isUnifiedStable,
+        networks: networkRows,
+      };
+    });
   }
 
   private async createQuoteAndTransfer(profileId: string, quoteBody: Record<string, any>) {
