@@ -90,44 +90,69 @@ export class BushaAppService {
   }
 
   async getStatus(userId: number) {
-    const platform = await getOrCreateConfig();
-    const enabled = isBushaEnabled() && platform.isActive;
-    const [user, kyc, customer, latestKycApp] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        include: { country: true },
-      }),
-      prisma.kYC.findUnique({ where: { userId } }),
-      prisma.bushaCustomer.findUnique({ where: { userId } }),
-      prisma.bushaKycApplication.findFirst({
-        where: { userId },
-        orderBy: { createdAt: 'desc' },
-      }),
-    ]);
+    try {
+      const platform = await getOrCreateConfig();
+      const enabled = isBushaEnabled() && platform.isActive;
+      const [user, kyc, customer, latestKycApp] = await Promise.all([
+        prisma.user.findUnique({
+          where: { id: userId },
+          include: { country: true },
+        }),
+        prisma.kYC.findUnique({ where: { userId } }),
+        prisma.bushaCustomer.findUnique({ where: { userId } }),
+        prisma.bushaKycApplication.findFirst({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+        }),
+      ]);
 
-    const rhinoxKycReady = Boolean(
-      kyc?.status === 'verified' &&
-        kyc.firstName &&
-        kyc.lastName &&
-        kyc.dateOfBirth &&
-        kyc.idNumber
-    );
-    const canTrade = enabled && customer?.status === 'active';
+      const rhinoxKycReady = Boolean(
+        kyc?.status === 'verified' &&
+          kyc.firstName &&
+          kyc.lastName &&
+          kyc.dateOfBirth &&
+          kyc.idNumber
+      );
+      const canTrade = enabled && customer?.status === 'active';
 
-    return {
-      isActive: enabled,
-      provider: 'busha',
-      environment: isBushaEnabled() ? getBushaConfig().environment : null,
-      rhinoxKycReady,
-      rhinoxKycStatus: kyc?.status || 'not_started',
-      bushaStatus: customer?.status || 'missing',
-      bushaProfileId: customer?.bushaProfileId || null,
-      kycApplicationStatus: latestKycApp?.status || null,
-      kycError: latestKycApp?.errorMessage || null,
-      needsKyc: enabled && !canTrade,
-      canTrade,
-      countryCode: user?.country?.code || 'NG',
-    };
+      return {
+        isActive: enabled,
+        provider: 'busha',
+        environment: isBushaEnabled() ? getBushaConfig().environment : null,
+        rhinoxKycReady,
+        rhinoxKycStatus: kyc?.status || 'not_started',
+        bushaStatus: customer?.status || 'missing',
+        bushaProfileId: customer?.bushaProfileId || null,
+        kycApplicationStatus: latestKycApp?.status || null,
+        kycError: latestKycApp?.errorMessage || null,
+        needsKyc: enabled && !canTrade,
+        canTrade,
+        countryCode: user?.country?.code || 'NG',
+      };
+    } catch (error: any) {
+      // Never 500 the wallet crypto tab — return a safe "needs activation" payload.
+      console.error('[Busha] getStatus failed:', error?.message || error);
+      let environment: string | null = null;
+      try {
+        if (isBushaEnabled()) environment = getBushaConfig().environment;
+      } catch {
+        environment = null;
+      }
+      return {
+        isActive: isBushaEnabled(),
+        provider: 'busha',
+        environment,
+        rhinoxKycReady: false,
+        rhinoxKycStatus: 'unknown',
+        bushaStatus: 'missing',
+        bushaProfileId: null,
+        kycApplicationStatus: null,
+        kycError: error?.message || 'Unable to load Busha status',
+        needsKyc: isBushaEnabled(),
+        canTrade: false,
+        countryCode: 'NG',
+      };
+    }
   }
 
   async startKyc(userId: number) {
