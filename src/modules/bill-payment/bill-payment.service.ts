@@ -1590,7 +1590,16 @@ export class BillPaymentService {
       if (status.mappedStatus !== 'pending') {
         mappedStatus = status.mappedStatus;
       }
-      flwResult = { ...flwResult, statusPoll: status };
+      const polledToken =
+        (status as any)?.raw?.data?.recharge_token ||
+        (status as any)?.extra?.recharge_token ||
+        (typeof (status as any)?.extra === 'object' && (status as any)?.extra?.token) ||
+        null;
+      flwResult = {
+        ...flwResult,
+        statusPoll: status,
+        rechargeToken: flwResult.rechargeToken || polledToken || null,
+      };
     } catch {
       // Keep create-response status; webhook/sync may finalize later
     }

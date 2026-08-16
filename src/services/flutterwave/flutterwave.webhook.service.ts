@@ -575,7 +575,11 @@ export class FlutterwaveWebhookService {
             rechargeToken:
               providerPayload?.recharge_token ||
               providerPayload?.data?.recharge_token ||
-              providerPayload?.extra ||
+              (typeof providerPayload?.extra === 'string'
+                ? providerPayload.extra
+                : providerPayload?.extra?.recharge_token ||
+                  providerPayload?.extra?.token ||
+                  null) ||
               lockedMeta.rechargeToken ||
               null,
             refunded: didRefund,
