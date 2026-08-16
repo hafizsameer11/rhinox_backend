@@ -72,6 +72,15 @@ export class BushaController {
     }
   }
 
+  async currencyLimits(req: Request, res: Response) {
+    try {
+      const data = await this.service.getWithdrawLimits(userIdFrom(req), String(req.params.code || ''));
+      return res.json({ success: true, data });
+    } catch (error) {
+      return sendError(res, error);
+    }
+  }
+
   async depositAddress(req: Request, res: Response) {
     try {
       const { currency, blockchain } = req.params;

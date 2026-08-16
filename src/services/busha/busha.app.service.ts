@@ -1434,10 +1434,119 @@ export class BushaAppService {
     });
   }
 
+  private matchCurrencyNetwork(networks: any[], networkInput: string, currency: string) {
+    const bushaNet = toBushaNetwork(networkInput, currency).toUpperCase();
+    const inputKey = String(networkInput || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    return (networks || []).find((n: any) => {
+      const id = String(n?.id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const name = String(n?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const net = String(n?.network || '').toUpperCase();
+      return (
+        net === bushaNet ||
+        id === inputKey ||
+        name.includes(inputKey) ||
+        toBushaNetwork(String(n?.id || n?.network || ''), currency).toUpperCase() === bushaNet
+      );
+    });
+  }
+
+  /**
+   * Busha GET /v1/currencies/{code} includes per-network min/max withdrawal amounts.
+   */
+  async getWithdrawLimits(userId: number, currency: string) {
+    const customer = await this.assertCustomerTradeReady(userId);
+    const code = toBushaCurrency(currency);
+    const remote = await this.client.get<any>(`/v1/currencies/${code}`, customer.bushaProfileId);
+    const networks = Array.isArray(remote?.supported_networks) ? remote.supported_networks : [];
+    return {
+      currency: code,
+      name: remote?.display_name || remote?.name || code,
+      withdrawalEnabled: remote?.withdrawal !== false,
+      defaultNetwork: remote?.default_network || null,
+      networks: networks.map((n: any) => {
+        const bushaNetwork = String(n?.network || toBushaNetwork(String(n?.id || ''), code)).toUpperCase();
+        const chain = fromBushaNetwork(bushaNetwork);
+        return {
+          id: String(n?.id || chain.blockchain),
+          bushaNetwork,
+          name: n?.name || chain.blockchainName,
+          blockchain: chain.blockchain,
+          blockchainName: chain.blockchainName,
+          withdrawal: n?.withdrawal !== false,
+          deposit: n?.deposit !== false,
+          minWithdrawalAmount:
+            n?.min_withdrawal_amount != null && n.min_withdrawal_amount !== ''
+              ? String(n.min_withdrawal_amount)
+              : null,
+          maxWithdrawalAmount:
+            n?.max_withdrawal_amount != null && n.max_withdrawal_amount !== ''
+              ? String(n.max_withdrawal_amount)
+              : null,
+          withdrawalFee:
+            n?.withdrawal_fee != null && n.withdrawal_fee !== '' ? String(n.withdrawal_fee) : null,
+          minDepositAmount:
+            n?.min_deposit_amount != null && n.min_deposit_amount !== ''
+              ? String(n.min_deposit_amount)
+              : null,
+        };
+      }),
+    };
+  }
+
+  private async assertWithdrawAmountWithinLimits(
+    userId: number,
+    currency: string,
+    network: string,
+    amount: string
+  ) {
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      throw ApiError.badRequest('Enter a valid withdraw amount');
+    }
+    let limits: Awaited<ReturnType<BushaAppService['getWithdrawLimits']>>;
+    try {
+      limits = await this.getWithdrawLimits(userId, currency);
+    } catch (error) {
+      console.warn(
+        '[Busha] withdraw limits unavailable; skipping min check',
+        error instanceof Error ? error.message : error
+      );
+      return null;
+    }
+    if (!limits.withdrawalEnabled) {
+      throw ApiError.badRequest(`${toBushaCurrency(currency)} withdrawals are not available`);
+    }
+    const net = this.matchCurrencyNetwork(limits.networks as any[], network, currency);
+    if (net && net.withdrawal === false) {
+      throw ApiError.badRequest(`Withdrawals are disabled on this network for ${limits.currency}`);
+    }
+    const min = Number(net?.minWithdrawalAmount);
+    if (Number.isFinite(min) && min > 0 && amt < min) {
+      throw ApiError.badRequest(
+        `Minimum withdraw is ${min} ${limits.currency} on ${net?.name || 'this network'}`
+      );
+    }
+    const max = Number(net?.maxWithdrawalAmount);
+    if (Number.isFinite(max) && max > 0 && amt > max) {
+      throw ApiError.badRequest(
+        `Maximum withdraw is ${max} ${limits.currency} on ${net?.name || 'this network'}`
+      );
+    }
+    return net || null;
+  }
+
   async previewSend(userId: number, input: { currency: string; amount: string; destinationAddress: string; network: string }) {
     const customer = await this.assertCustomerTradeReady(userId);
     const currency = toBushaCurrency(input.currency);
-    return this.client.post(
+    const networkLimits = await this.assertWithdrawAmountWithinLimits(
+      userId,
+      currency,
+      input.network,
+      input.amount
+    );
+    const quote = await this.client.post(
       '/v1/quotes',
       {
         source_currency: currency,
@@ -1452,12 +1561,23 @@ export class BushaAppService {
       },
       customer.bushaProfileId
     );
+    const { fees, feeTotal } = this.extractQuoteFees(quote);
+    return {
+      ...quote,
+      feeTotal,
+      fees,
+      minWithdrawalAmount: networkLimits?.minWithdrawalAmount ?? null,
+      maxWithdrawalAmount: networkLimits?.maxWithdrawalAmount ?? null,
+      networkWithdrawalFee: networkLimits?.withdrawalFee ?? null,
+      networkName: networkLimits?.name ?? null,
+    };
   }
 
   async executeSend(userId: number, input: { currency: string; amount: string; destinationAddress: string; network: string; memo?: string }) {
     const customer = await this.assertCustomerTradeReady(userId);
     const currency = toBushaCurrency(input.currency);
     const network = toBushaNetwork(input.network, currency);
+    await this.assertWithdrawAmountWithinLimits(userId, currency, input.network, input.amount);
     const { quote, transfer } = await this.createQuoteAndTransfer(customer.bushaProfileId, {
       source_currency: currency,
       target_currency: currency,
