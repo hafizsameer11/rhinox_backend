@@ -147,17 +147,8 @@ export function shouldPreferStableNetworkDefaults(
   networks: Array<{ bushaNetwork?: string; blockchain?: string; blockchainName?: string }>
 ): boolean {
   const code = toBushaCurrency(currency);
-  const expected = BUSHA_STABLE_NETWORKS[code];
-  if (!expected) return false;
-  if (!networks?.length) return true;
-
-  const codes = networks.map((n) =>
-    toBushaNetwork(String(n.bushaNetwork || n.blockchain || ''), code)
-  );
-  const unique = [...new Set(codes.filter(Boolean))];
-  // Polygon is not a Busha USDT deposit network — treat as bad catalog data
-  if (code === 'USDT' && unique.some((c) => c === 'MATIC')) return true;
-  if (unique.length < 2) return true;
-  if (code === 'USDT' && !unique.includes('TRX') && !unique.includes('ETH')) return true;
-  return false;
+  if (!BUSHA_STABLE_NETWORKS[code]) return false;
+  // Always use known Busha deposit/withdraw nets for stables — API often returns
+  // a single Plasma/Polygon id or incomplete set that breaks the picker.
+  return true;
 }
