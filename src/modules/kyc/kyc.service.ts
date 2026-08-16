@@ -121,6 +121,14 @@ export class KYCService {
     
     const kyc = await prisma.kYC.findUnique({
       where: { userId: parsedUserId },
+      include: {
+        user: {
+          select: {
+            countryId: true,
+            country: { select: { id: true, name: true, code: true } },
+          },
+        },
+      },
     });
 
     // Debug logging in development
@@ -148,6 +156,10 @@ export class KYCService {
       idType: kyc.idType,
       idNumber: kyc.idNumber,
       faceVerificationSuccessful: kyc.faceVerificationSuccessful,
+      faceVerificationImageUrl: kyc.faceVerificationImageUrl,
+      countryId: kyc.user?.countryId || kyc.user?.country?.id || null,
+      countryCode: kyc.user?.country?.code || null,
+      countryName: kyc.user?.country?.name || null,
       verifiedAt: kyc.verifiedAt,
       createdAt: kyc.createdAt,
       updatedAt: kyc.updatedAt,
