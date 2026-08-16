@@ -3,11 +3,34 @@ import prisma from '../../core/config/database.js';
 import { getBaseSymbol } from '../../services/crypto/unified-stablecoin.service.js';
 import { ensureRhinoxPayId } from '../../core/utils/rhinox-pay-id.service.js';
 
+const BUSHA_CRYPTO_TX_TYPES = new Set([
+  'crypto_buy',
+  'crypto_sell',
+  'crypto_deposit',
+  'crypto_withdrawal',
+  'crypto_send',
+  'crypto_recv',
+]);
+
 /**
  * Transaction History Service
  * Business logic for transaction history with chart data and filtering
  */
 export class TransactionHistoryService {
+  /** Busha buy/sell post to NGN fiat wallet but must show under crypto history */
+  private isCryptoHistoryTx(tx: {
+    type?: string | null;
+    channel?: string | null;
+    currency?: string | null;
+    wallet?: { type?: string | null } | null;
+  }): boolean {
+    if (tx.wallet?.type === 'crypto') return true;
+    const channel = String(tx.channel || '').toLowerCase();
+    if (channel === 'busha' || channel === 'crypto') return true;
+    if (BUSHA_CRYPTO_TX_TYPES.has(String(tx.type || ''))) return true;
+    return false;
+  }
+
   private resolveP2PRoles(orderType: string, vendorId: string | number, userId: string | number) {
     if (orderType === 'buy') {
       return { buyerId: String(vendorId), sellerId: String(userId) };
@@ -187,20 +210,32 @@ export class TransactionHistoryService {
   /**
    * Normalize transaction type to UI-friendly label
    */
-  private normalizeTransactionType(type: string, walletType: string): string {
-    if (walletType === 'crypto') {
+  private normalizeTransactionType(type: string, walletType: string, channel?: string | null): string {
+    if (type === 'crypto_buy') return 'Buy Crypto';
+    if (type === 'crypto_sell') return 'Sell Crypto';
+    if (type === 'crypto_deposit') return 'Crypto Deposit';
+    if (type === 'crypto_withdrawal' || type === 'crypto_send') return 'Crypto Withdrawal';
+    if (type === 'crypto_recv') return 'Crypto Deposit';
+
+    const isCrypto =
+      walletType === 'crypto' ||
+      channel === 'busha' ||
+      channel === 'crypto' ||
+      BUSHA_CRYPTO_TX_TYPES.has(type);
+
+    if (isCrypto) {
       if (type === 'deposit') return 'Crypto Deposit';
-      if (type === 'withdrawal') return 'Crypto Withdrawals';
+      if (type === 'withdrawal' || type === 'transfer') return 'Crypto Withdrawal';
       if (type === 'p2p') return 'P2P Transactions';
       return 'Crypto Transaction';
-    } else {
-      if (type === 'transfer') return 'Send Transactions';
-      if (type === 'deposit') return 'Fund Transaction';
-      if (type === 'withdrawal') return 'Withdrawals';
-      if (type === 'bill_payment') return 'Bill Payments';
-      if (type === 'p2p') return 'P2P Transactions';
-      return 'Transaction';
     }
+
+    if (type === 'transfer') return 'Send Transactions';
+    if (type === 'deposit') return 'Fund Transaction';
+    if (type === 'withdrawal') return 'Withdrawals';
+    if (type === 'bill_payment') return 'Bill Payments';
+    if (type === 'p2p') return 'P2P Transactions';
+    return 'Transaction';
   }
 
   /**
@@ -403,9 +438,54 @@ export class TransactionHistoryService {
     
     console.log(`[TransactionHistoryService] Found ${transactions.length} transactions in date range`);
 
-    // Separate fiat and crypto transactions
-    const fiatTransactions = transactions.filter((tx: { wallet: { type: string } }) => tx.wallet.type === 'fiat');
-    const cryptoTransactions = transactions.filter((tx: { wallet: { type: string } }) => tx.wallet.type === 'crypto');
+    // Separate fiat and crypto (Busha buy/sell live on NGN wallet but belong in crypto)
+    const fiatTransactions = transactions.filter((tx: any) => !this.isCryptoHistoryTx(tx));
+    const cryptoFromLedger = transactions.filter((tx: any) => this.isCryptoHistoryTx(tx));
+
+    // Busha crypto send/recv often have no Transaction row — include trade log
+    const bushaTrades = await prisma.bushaTradeLog.findMany({
+      where: {
+        userId: userIdNum,
+        createdAt: { gte: start, lte: end },
+        side: { in: ['cryptoSend', 'cryptoRecv'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    const bushaAsCrypto = bushaTrades.map((trade) => {
+      const isDeposit = trade.side === 'cryptoRecv';
+      const amount = new Decimal(trade.sourceAmount || trade.targetAmount || '0').abs();
+      const type = isDeposit ? 'crypto_recv' : 'crypto_send';
+      const normalizedType = this.normalizeTransactionType(type, 'crypto', 'busha');
+      return {
+        id: trade.fiatTransactionId || `busha_${trade.id}`,
+        type,
+        normalizedType,
+        status: trade.status === 'completed' || trade.status === 'wallet_credited' ? 'completed' : trade.status,
+        amount: amount.toString(),
+        currency: isDeposit ? trade.targetCurrency : trade.sourceCurrency,
+        fee: '0',
+        reference: trade.bushaTransferId || `busha_${trade.id}`,
+        description: trade.destinationAddress
+          ? `${normalizedType} · ${trade.destinationAddress.slice(0, 10)}…`
+          : normalizedType,
+        channel: 'busha',
+        paymentMethod: trade.network || null,
+        metadata: {
+          provider: 'busha',
+          bushaTradeId: trade.id,
+          side: trade.side,
+          network: trade.network,
+          destinationAddress: trade.destinationAddress,
+          sourceAmount: trade.sourceAmount,
+          targetAmount: trade.targetAmount,
+        },
+        completedAt: trade.updatedAt,
+        createdAt: trade.createdAt,
+        walletType: 'crypto' as const,
+      };
+    });
 
     // Calculate summary (total, incoming, outgoing)
     let totalIncoming = new Decimal(0);
@@ -416,11 +496,16 @@ export class TransactionHistoryService {
       const absAmount = amount.abs();
       
       // Categorize transactions as incoming or outgoing
-      if (tx.type === 'deposit') {
-        // Deposits are always incoming
+      if (tx.type === 'deposit' || tx.type === 'crypto_sell' || tx.type === 'crypto_recv') {
         totalIncoming = totalIncoming.plus(absAmount);
-      } else if (tx.type === 'withdrawal' || tx.type === 'transfer' || tx.type === 'bill_payment') {
-        // Withdrawals, transfers, and bill payments are always outgoing
+      } else if (
+        tx.type === 'withdrawal' ||
+        tx.type === 'transfer' ||
+        tx.type === 'bill_payment' ||
+        tx.type === 'crypto_buy' ||
+        tx.type === 'crypto_send' ||
+        tx.type === 'crypto_withdrawal'
+      ) {
         totalOutgoing = totalOutgoing.plus(absAmount);
       } else if (tx.type === 'p2p') {
         // For P2P, check metadata to determine direction
@@ -452,7 +537,7 @@ export class TransactionHistoryService {
 
     // Normalize and format transactions
     const normalizeTransaction = (tx: any) => {
-      const normalizedType = this.normalizeTransactionType(tx.type, tx.wallet.type);
+      const normalizedType = this.normalizeTransactionType(tx.type, tx.wallet.type, tx.channel);
       const amount = new Decimal(tx.amount);
       
       return {
@@ -462,7 +547,7 @@ export class TransactionHistoryService {
         status: tx.status,
         amount: amount.abs().toString(),
         currency: tx.currency,
-        fee: new Decimal(tx.fee).toString(),
+        fee: new Decimal(tx.fee || 0).toString(),
         reference: tx.reference,
         description: tx.description || normalizedType,
         channel: tx.channel,
@@ -470,12 +555,17 @@ export class TransactionHistoryService {
         metadata: tx.metadata,
         completedAt: tx.completedAt,
         createdAt: tx.createdAt,
-        walletType: tx.wallet.type,
+        walletType: this.isCryptoHistoryTx(tx) ? 'crypto' : tx.wallet.type,
       };
     };
 
     // Generate summary grouped by transaction type
     const typeSummary = await this.generateTypeSummary(transactions);
+
+    const cryptoNormalized = [
+      ...cryptoFromLedger.map((tx: any) => normalizeTransaction(tx)),
+      ...bushaAsCrypto,
+    ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     return {
       summary: {
@@ -486,7 +576,7 @@ export class TransactionHistoryService {
       typeSummary,
       chartData,
       fiat: fiatTransactions.map((tx: any) => normalizeTransaction(tx)),
-      crypto: cryptoTransactions.map((tx: any) => normalizeTransaction(tx)),
+      crypto: cryptoNormalized,
     };
   }
 
@@ -511,7 +601,7 @@ export class TransactionHistoryService {
     }>();
 
     transactions.forEach((tx) => {
-      const normalizedType = this.normalizeTransactionType(tx.type, tx.wallet.type);
+      const normalizedType = this.normalizeTransactionType(tx.type, tx.wallet.type, tx.channel);
       const key = `${normalizedType}_${tx.currency}_${tx.wallet.type}`;
       const amount = new Decimal(tx.amount).abs();
 
@@ -1315,7 +1405,11 @@ export class TransactionHistoryService {
     const amount = new Decimal(transaction.amount);
     const fee = new Decimal(transaction.fee);
     const metadata = transaction.metadata as any;
-    const normalizedType = this.normalizeTransactionType(transaction.type, transaction.wallet.type);
+    const normalizedType = this.normalizeTransactionType(
+      transaction.type,
+      transaction.wallet.type,
+      transaction.channel
+    );
 
     // Build transaction details based on type
     const details: any = {
@@ -1335,12 +1429,13 @@ export class TransactionHistoryService {
       completedAt: transaction.completedAt,
       createdAt: transaction.createdAt,
       updatedAt: transaction.updatedAt,
+      walletType: this.isCryptoHistoryTx(transaction) ? 'crypto' : transaction.wallet.type,
       wallet: {
         id: transaction.wallet.id,
         currency: transaction.wallet.currency,
         currencyName: transaction.wallet.currencyRef?.name,
         symbol: transaction.wallet.currencyRef?.symbol,
-        type: transaction.wallet.type,
+        type: this.isCryptoHistoryTx(transaction) ? 'crypto' : transaction.wallet.type,
       },
     };
 

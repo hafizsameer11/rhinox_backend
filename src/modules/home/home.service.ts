@@ -308,8 +308,17 @@ export class HomeService {
       take: fiatLimit,
     });
 
-    // Format fiat transactions
-    const formattedFiatTransactions = recentFiatTransactions.map((tx: any) => {
+    // Format fiat transactions (exclude Busha/crypto ledger rows — they belong in crypto)
+    const formattedFiatTransactions = recentFiatTransactions
+      .filter((tx: any) => {
+        const channel = String(tx.channel || '').toLowerCase();
+        if (channel === 'busha' || channel === 'crypto') return false;
+        if (['crypto_buy', 'crypto_sell', 'crypto_deposit', 'crypto_withdrawal'].includes(tx.type)) {
+          return false;
+        }
+        return true;
+      })
+      .map((tx: any) => {
       const amount = new Decimal(tx.amount);
       const isPositive = tx.type === 'deposit' || tx.type === 'transfer';
       
@@ -342,6 +351,7 @@ export class HomeService {
         formattedAmount: `${isPositive ? '+' : ''}${tx.wallet.currencyRef?.symbol || ''}${amount.toString()}`,
         createdAt: tx.createdAt,
         completedAt: tx.completedAt,
+        walletType: 'fiat',
       };
     });
 
@@ -413,9 +423,7 @@ export class HomeService {
       cryptoCurrencyList = cryptoVirtualAccounts.map((va: { currency: string }) => va.currency);
     }
 
-    // Get recent crypto transactions
-    // Crypto transactions are stored in Transaction table with wallets that have type: 'crypto'
-    // Also check for crypto currencies in any wallet
+    // Crypto ledger: crypto wallets OR Busha channel rows (buy/sell on NGN wallet)
     const cryptoWalletIds = await prisma.wallet.findMany({
       where: {
         userId: userIdNum,
@@ -426,17 +434,21 @@ export class HomeService {
 
     const recentCryptoTransactions = await prisma.transaction.findMany({
       where: {
+        wallet: { userId: userIdNum },
         OR: [
-          // Transactions from crypto wallets
           { walletId: { in: cryptoWalletIds.map((w: { id: number }) => w.id) } },
-          // Transactions with crypto currencies (even if wallet type is fiat, e.g., P2P)
-          { currency: { in: cryptoCurrencyList.length > 0 ? cryptoCurrencyList : ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'TRX', 'DOGE', 'MATIC'] } },
-          // Transactions with crypto channel
+          { channel: 'busha' },
           { channel: 'crypto' },
+          { type: { in: ['crypto_buy', 'crypto_sell', 'crypto_deposit', 'crypto_withdrawal'] } },
+          {
+            currency: {
+              in:
+                cryptoCurrencyList.length > 0
+                  ? cryptoCurrencyList
+                  : ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'TRX', 'DOGE', 'MATIC', 'TON', 'USDC'],
+            },
+          },
         ],
-        wallet: {
-          userId: userIdNum,
-        },
       },
       include: {
         wallet: {
@@ -451,22 +463,35 @@ export class HomeService {
       take: cryptoLimit,
     });
 
+    const bushaTrades = await prisma.bushaTradeLog.findMany({
+      where: {
+        userId: userIdNum,
+        side: { in: ['cryptoSend', 'cryptoRecv', 'buy', 'sell'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: cryptoLimit,
+    });
+
     // Format crypto transactions
     const formattedCryptoTransactions = recentCryptoTransactions.map((tx: any) => {
       const amount = new Decimal(tx.amount);
-      const isPositive = tx.type === 'deposit';
-      
-      // Try to get crypto price for USDT conversion
+      const isPositive = tx.type === 'deposit' || tx.type === 'crypto_sell' || tx.type === 'crypto_recv';
+      const label =
+        tx.type === 'crypto_buy'
+          ? 'Buy Crypto'
+          : tx.type === 'crypto_sell'
+            ? 'Sell Crypto'
+            : tx.description || `${tx.type} ${tx.currency}`;
+
       let amountInUSDT: string | null = null;
-      if (tx.currency && ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'TRX', 'DOGE', 'MATIC'].includes(tx.currency)) {
-        // Find wallet currency for this crypto
+      if (tx.currency && ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'TRX', 'DOGE', 'MATIC', 'USDC'].includes(tx.currency)) {
         const cryptoBalance = cryptoBalances.find((cb: { currency: string }) => cb.currency === tx.currency);
         if (cryptoBalance && cryptoBalance.priceInUSDT) {
           const priceInUSDT = new Decimal(cryptoBalance.priceInUSDT);
           amountInUSDT = amount.times(priceInUSDT).toString();
         }
       }
-      
+
       return {
         id: tx.id,
         type: tx.type,
@@ -475,15 +500,82 @@ export class HomeService {
         currency: tx.currency,
         currencySymbol: tx.wallet.currencyRef?.symbol || tx.currency,
         amountInUSDT,
-        description: tx.description || `${tx.type} ${tx.currency}`,
+        description: label,
         reference: tx.reference,
-        channel: tx.channel,
+        channel: tx.channel || 'busha',
         isPositive,
-        formattedAmount: `${isPositive ? '+' : ''}${amount.toString()} ${tx.currency}`,
+        formattedAmount: `${isPositive ? '+' : '-'}${amount.toString()} ${tx.currency}`,
         createdAt: tx.createdAt,
         completedAt: tx.completedAt,
+        walletType: 'crypto',
+        metadata: tx.metadata,
       };
     });
+
+    const seenRefs = new Set(
+      formattedCryptoTransactions.map((t) => String(t.reference || t.id)).filter(Boolean)
+    );
+    for (const trade of bushaTrades) {
+      if (trade.fiatTransactionId && seenRefs.has(String(trade.fiatTransactionId))) continue;
+      const transferRef = trade.bushaTransferId || `busha_${trade.id}`;
+      if (seenRefs.has(transferRef)) continue;
+      seenRefs.add(transferRef);
+
+      const isDeposit = trade.side === 'cryptoRecv' || trade.side === 'buy';
+      const isSell = trade.side === 'sell';
+      const amount = String(isSell || trade.side === 'buy' ? trade.sourceAmount || trade.targetAmount : trade.sourceAmount || '0');
+      const currency =
+        trade.side === 'buy'
+          ? trade.targetCurrency
+          : trade.side === 'sell'
+            ? trade.sourceCurrency
+            : trade.sourceCurrency;
+      const label =
+        trade.side === 'buy'
+          ? `Buy ${trade.targetCurrency}`
+          : trade.side === 'sell'
+            ? `Sell ${trade.sourceCurrency}`
+            : trade.side === 'cryptoSend'
+              ? `Withdraw ${trade.sourceCurrency}`
+              : `Deposit ${trade.targetCurrency || trade.sourceCurrency}`;
+
+      formattedCryptoTransactions.push({
+        id: trade.fiatTransactionId || (`busha_${trade.id}` as any),
+        type:
+          trade.side === 'buy'
+            ? 'crypto_buy'
+            : trade.side === 'sell'
+              ? 'crypto_sell'
+              : trade.side === 'cryptoSend'
+                ? 'crypto_send'
+                : 'crypto_recv',
+        status:
+          trade.status === 'completed' || trade.status === 'wallet_credited'
+            ? 'completed'
+            : trade.status,
+        amount,
+        currency,
+        currencySymbol: currency,
+        amountInUSDT: null,
+        description: label,
+        reference: transferRef,
+        channel: 'busha',
+        isPositive: isDeposit,
+        formattedAmount: `${isDeposit ? '+' : '-'}${amount} ${currency}`,
+        createdAt: trade.createdAt,
+        completedAt: trade.updatedAt,
+        walletType: 'crypto',
+        metadata: {
+          bushaTradeId: trade.id,
+          network: trade.network,
+          destinationAddress: trade.destinationAddress,
+        },
+      });
+    }
+
+    formattedCryptoTransactions.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
 
     return {
       fiat: {
