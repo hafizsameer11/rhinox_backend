@@ -87,6 +87,103 @@ async function getOrCreateConfig() {
   });
 }
 
+type BushaMoney = { amount: string; currency: string };
+
+/** Parse Busha AmountWithCurrency / plain number into { amount, currency }. */
+function parseBushaMoney(value: any, fallbackCurrency?: string): BushaMoney | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'object') {
+    const amount = value.amount ?? value.value;
+    if (amount == null || amount === '') return null;
+    const currency = String(value.currency || fallbackCurrency || '').toUpperCase();
+    return { amount: String(amount), currency };
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return { amount: String(value), currency: String(fallbackCurrency || '').toUpperCase() };
+}
+
+function roundMoney(n: number, decimals = 2): string {
+  if (!Number.isFinite(n)) return '0';
+  const f = 10 ** decimals;
+  return String(Math.ceil(n * f - Number.EPSILON) / f);
+}
+
+/**
+ * Convert a Busha pair limit into the unit the app uses:
+ * - Buy UI / quote source_amount → NGN
+ * - Sell UI / quote source_amount → crypto units
+ */
+function normalizePairLimit(opts: {
+  money: BushaMoney | null;
+  cryptoCode: string;
+  /** NGN per 1 crypto (from buy_price or sell_price when priced in NGN) */
+  priceNgn: number | null;
+  as: 'buy_ngn' | 'sell_crypto';
+}): { amount: string | null; currency: string | null; displayAmount: string | null; displayCurrency: string } {
+  const { money, cryptoCode, priceNgn, as } = opts;
+  if (!money?.amount) {
+    return {
+      amount: null,
+      currency: null,
+      displayAmount: null,
+      displayCurrency: as === 'buy_ngn' ? 'NGN' : cryptoCode,
+    };
+  }
+  const raw = Number(money.amount);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return {
+      amount: null,
+      currency: money.currency || null,
+      displayAmount: null,
+      displayCurrency: as === 'buy_ngn' ? 'NGN' : cryptoCode,
+    };
+  }
+  const cur = (money.currency || '').toUpperCase();
+
+  if (as === 'buy_ngn') {
+    if (cur === 'NGN' || cur === '') {
+      return { amount: String(raw), currency: 'NGN', displayAmount: String(raw), displayCurrency: 'NGN' };
+    }
+    // Limit quoted in crypto → convert with NGN price
+    if (priceNgn && priceNgn > 0) {
+      const ngn = roundMoney(raw * priceNgn, 2);
+      return { amount: ngn, currency: cur || cryptoCode, displayAmount: ngn, displayCurrency: 'NGN' };
+    }
+    return {
+      amount: String(raw),
+      currency: cur || cryptoCode,
+      displayAmount: String(raw),
+      displayCurrency: cur || cryptoCode,
+    };
+  }
+
+  // sell_crypto
+  if (!cur || cur === cryptoCode) {
+    return {
+      amount: String(raw),
+      currency: cryptoCode,
+      displayAmount: String(raw),
+      displayCurrency: cryptoCode,
+    };
+  }
+  if (cur === 'NGN' && priceNgn && priceNgn > 0) {
+    const cryptoAmt = String(Number((raw / priceNgn).toPrecision(8)));
+    return {
+      amount: cryptoAmt,
+      currency: 'NGN',
+      displayAmount: cryptoAmt,
+      displayCurrency: cryptoCode,
+    };
+  }
+  return {
+    amount: String(raw),
+    currency: cur,
+    displayAmount: String(raw),
+    displayCurrency: cur,
+  };
+}
+
 export class BushaAppService {
   constructor(
     private readonly client = new BushaClient(),
@@ -587,6 +684,9 @@ export class BushaAppService {
 
   /**
    * List crypto assets available for NGN buy/sell from Busha pairs.
+   * Min/max come from Busha pair fields and are normalized for the app:
+   * - Buy: minBuyNgn / maxBuyNgn (user pays NGN)
+   * - Sell: minSellAmount / maxSellAmount in crypto (user sells crypto)
    */
   async listTradeAssets(userId: number) {
     await this.assertPlatformActive();
@@ -625,10 +725,21 @@ export class BushaAppService {
         sellSupported: boolean;
         buyPrice: string | null;
         sellPrice: string | null;
+        /** Raw Busha min buy (may be crypto or NGN) */
         minBuyAmount: string | null;
-        minSellAmount: string | null;
+        minBuyCurrency: string | null;
         maxBuyAmount: string | null;
+        maxBuyCurrency: string | null;
+        /** Normalized: NGN the user must pay at minimum / maximum */
+        minBuyNgn: string | null;
+        maxBuyNgn: string | null;
+        minSellAmount: string | null;
+        minSellCurrency: string | null;
         maxSellAmount: string | null;
+        maxSellCurrency: string | null;
+        /** Normalized crypto amount to sell (same unit as sell input) */
+        minSellCrypto: string | null;
+        maxSellCrypto: string | null;
       }
     >();
 
@@ -645,49 +756,98 @@ export class BushaAppService {
       const existing = byCode.get(cryptoCode);
       const buySupported = Boolean(pair?.is_buy_supported ?? pair?.buy_supported ?? true);
       const sellSupported = Boolean(pair?.is_sell_supported ?? pair?.sell_supported ?? true);
+
+      const buyPriceMoney = parseBushaMoney(pair?.buy_price, 'NGN');
+      const sellPriceMoney = parseBushaMoney(pair?.sell_price, 'NGN');
       const buyPrice =
-        pair?.buy_price?.amount != null
-          ? String(pair.buy_price.amount)
-          : pair?.buy_price != null
-            ? String(pair.buy_price)
-            : existing?.buyPrice || null;
+        buyPriceMoney?.amount != null
+          ? buyPriceMoney.amount
+          : existing?.buyPrice || null;
       const sellPrice =
-        pair?.sell_price?.amount != null
-          ? String(pair.sell_price.amount)
-          : pair?.sell_price != null
-            ? String(pair.sell_price)
-            : existing?.sellPrice || null;
+        sellPriceMoney?.amount != null
+          ? sellPriceMoney.amount
+          : existing?.sellPrice || null;
+
+      // Prefer NGN-denominated price for conversions (fiat pair prices are usually in NGN)
+      const buyPriceNgn =
+        buyPriceMoney && (!buyPriceMoney.currency || buyPriceMoney.currency === 'NGN')
+          ? Number(buyPriceMoney.amount)
+          : null;
+      const sellPriceNgn =
+        sellPriceMoney && (!sellPriceMoney.currency || sellPriceMoney.currency === 'NGN')
+          ? Number(sellPriceMoney.amount)
+          : null;
+      const priceForBuy =
+        Number.isFinite(buyPriceNgn as number) && (buyPriceNgn as number) > 0
+          ? (buyPriceNgn as number)
+          : Number.isFinite(sellPriceNgn as number) && (sellPriceNgn as number) > 0
+            ? (sellPriceNgn as number)
+            : null;
+      const priceForSell =
+        Number.isFinite(sellPriceNgn as number) && (sellPriceNgn as number) > 0
+          ? (sellPriceNgn as number)
+          : priceForBuy;
+
+      const minBuyRaw = parseBushaMoney(pair?.min_buy_amount, cryptoCode);
+      const maxBuyRaw = parseBushaMoney(pair?.max_buy_amount, 'NGN');
+      const minSellRaw = parseBushaMoney(pair?.min_sell_amount, cryptoCode);
+      const maxSellRaw = parseBushaMoney(pair?.max_sell_amount, cryptoCode);
+
+      const minBuy = normalizePairLimit({
+        money: minBuyRaw,
+        cryptoCode,
+        priceNgn: priceForBuy,
+        as: 'buy_ngn',
+      });
+      const maxBuy = normalizePairLimit({
+        money: maxBuyRaw,
+        cryptoCode,
+        priceNgn: priceForBuy,
+        as: 'buy_ngn',
+      });
+      const minSell = normalizePairLimit({
+        money: minSellRaw,
+        cryptoCode,
+        priceNgn: priceForSell,
+        as: 'sell_crypto',
+      });
+      const maxSell = normalizePairLimit({
+        money: maxSellRaw,
+        cryptoCode,
+        priceNgn: priceForSell,
+        as: 'sell_crypto',
+      });
 
       byCode.set(cryptoCode, {
         code: cryptoCode,
-        // Prefer ticker for UI; Busha often sends base_name "Tether" which confused the app icon mapper
         name:
           cryptoCode === 'USDT'
             ? 'Tether USD'
             : cryptoCode === 'USDC'
               ? 'USD Coin'
-              : pair?.base_name || pair?.counter_name || pair?.name || existing?.name || cryptoCode,
+              : pair?.base_currency_name ||
+                pair?.base_name ||
+                pair?.counter_currency_name ||
+                pair?.name ||
+                existing?.name ||
+                cryptoCode,
         pairId: String(pair?.id || `${cryptoCode}NGN`),
         buySupported: existing?.buySupported || buySupported,
         sellSupported: existing?.sellSupported || sellSupported,
         buyPrice,
         sellPrice,
-        minBuyAmount:
-          pair?.min_buy_amount?.amount != null
-            ? String(pair.min_buy_amount.amount)
-            : existing?.minBuyAmount || null,
-        minSellAmount:
-          pair?.min_sell_amount?.amount != null
-            ? String(pair.min_sell_amount.amount)
-            : existing?.minSellAmount || null,
-        maxBuyAmount:
-          pair?.max_buy_amount?.amount != null
-            ? String(pair.max_buy_amount.amount)
-            : existing?.maxBuyAmount || null,
-        maxSellAmount:
-          pair?.max_sell_amount?.amount != null
-            ? String(pair.max_sell_amount.amount)
-            : existing?.maxSellAmount || null,
+        minBuyAmount: minBuyRaw?.amount || existing?.minBuyAmount || null,
+        minBuyCurrency: minBuyRaw?.currency || existing?.minBuyCurrency || null,
+        maxBuyAmount: maxBuyRaw?.amount || existing?.maxBuyAmount || null,
+        maxBuyCurrency: maxBuyRaw?.currency || existing?.maxBuyCurrency || null,
+        minBuyNgn: minBuy.displayCurrency === 'NGN' ? minBuy.displayAmount : existing?.minBuyNgn || null,
+        maxBuyNgn: maxBuy.displayCurrency === 'NGN' ? maxBuy.displayAmount : existing?.maxBuyNgn || null,
+        minSellAmount: minSellRaw?.amount || existing?.minSellAmount || null,
+        minSellCurrency: minSellRaw?.currency || existing?.minSellCurrency || null,
+        maxSellAmount: maxSellRaw?.amount || existing?.maxSellAmount || null,
+        maxSellCurrency: maxSellRaw?.currency || existing?.maxSellCurrency || null,
+        minSellCrypto: minSell.displayAmount || existing?.minSellCrypto || null,
+        maxSellCrypto: maxSell.displayAmount || existing?.maxSellCrypto || null,
       });
     }
 
@@ -703,14 +863,66 @@ export class BushaAppService {
           buyPrice: null,
           sellPrice: null,
           minBuyAmount: null,
-          minSellAmount: null,
+          minBuyCurrency: null,
           maxBuyAmount: null,
+          maxBuyCurrency: null,
+          minBuyNgn: null,
+          maxBuyNgn: null,
+          minSellAmount: null,
+          minSellCurrency: null,
           maxSellAmount: null,
+          maxSellCurrency: null,
+          minSellCrypto: null,
+          maxSellCrypto: null,
         });
       }
     }
 
     return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code));
+  }
+
+  /** Look up Busha pair limits for one crypto vs NGN. */
+  private async getPairLimitsForCrypto(userId: number, cryptoCode: string) {
+    const assets = await this.listTradeAssets(userId);
+    const code = toBushaCurrency(cryptoCode);
+    return assets.find((a) => a.code === code) || null;
+  }
+
+  private assertBuyAmountWithinPairLimits(
+    limits: Awaited<ReturnType<BushaAppService['getPairLimitsForCrypto']>>,
+    sourceAmountNgn: number,
+    targetCurrency: string
+  ) {
+    if (!limits) return;
+    const min = Number(limits.minBuyNgn);
+    const max = Number(limits.maxBuyNgn);
+    if (Number.isFinite(min) && min > 0 && sourceAmountNgn + 1e-9 < min) {
+      throw ApiError.badRequest(
+        `Minimum buy is ₦${Number(min).toLocaleString('en-NG')} for ${toBushaCurrency(targetCurrency)}`
+      );
+    }
+    if (Number.isFinite(max) && max > 0 && sourceAmountNgn - 1e-9 > max) {
+      throw ApiError.badRequest(
+        `Maximum buy is ₦${Number(max).toLocaleString('en-NG')} for ${toBushaCurrency(targetCurrency)}`
+      );
+    }
+  }
+
+  private assertSellAmountWithinPairLimits(
+    limits: Awaited<ReturnType<BushaAppService['getPairLimitsForCrypto']>>,
+    sourceAmountCrypto: number,
+    sourceCurrency: string
+  ) {
+    if (!limits) return;
+    const min = Number(limits.minSellCrypto ?? limits.minSellAmount);
+    const max = Number(limits.maxSellCrypto ?? limits.maxSellAmount);
+    const code = toBushaCurrency(sourceCurrency);
+    if (Number.isFinite(min) && min > 0 && sourceAmountCrypto + 1e-12 < min) {
+      throw ApiError.badRequest(`Minimum sell is ${min} ${code}`);
+    }
+    if (Number.isFinite(max) && max > 0 && sourceAmountCrypto - 1e-12 > max) {
+      throw ApiError.badRequest(`Maximum sell is ${max} ${code}`);
+    }
   }
 
   async getDepositAddress(userId: number, currency: string, blockchain: string) {
@@ -1252,6 +1464,13 @@ export class BushaAppService {
 
   async previewBuy(userId: number, sourceAmount: string, targetCurrency: string) {
     const customer = await this.assertCustomerTradeReady(userId);
+    const amount = Number(sourceAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw ApiError.badRequest('Enter a valid NGN amount');
+    }
+    const pairLimits = await this.getPairLimitsForCrypto(userId, targetCurrency);
+    this.assertBuyAmountWithinPairLimits(pairLimits, amount, targetCurrency);
+
     const quote = await this.client.post(
       '/v1/quotes',
       {
@@ -1271,6 +1490,8 @@ export class BushaAppService {
       youReceive: quote?.target_amount ?? null,
       feeTotal,
       fees,
+      minBuyNgn: pairLimits?.minBuyNgn ?? null,
+      maxBuyNgn: pairLimits?.maxBuyNgn ?? null,
       note: 'Estimated crypto you receive. Fees (if any) are shown separately.',
     };
   }
@@ -1281,6 +1502,9 @@ export class BushaAppService {
     if (!Number.isFinite(amount) || amount <= 0) {
       throw ApiError.badRequest('Enter a valid NGN amount');
     }
+
+    const pairLimits = await this.getPairLimitsForCrypto(userId, targetCurrency);
+    this.assertBuyAmountWithinPairLimits(pairLimits, amount, targetCurrency);
 
     const ngnWallet = await prisma.wallet.findUnique({
       where: { userId_currency: { userId, currency: 'NGN' } },
@@ -1395,6 +1619,12 @@ export class BushaAppService {
   async previewSell(userId: number, sourceCurrency: string, sourceAmount: string) {
     const platform = await this.assertPlatformActive();
     const customer = await this.assertCustomerTradeReady(userId);
+    const amount = Number(sourceAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw ApiError.badRequest('Enter a valid sell amount');
+    }
+    const pairLimits = await this.getPairLimitsForCrypto(userId, sourceCurrency);
+    this.assertSellAmountWithinPairLimits(pairLimits, amount, sourceCurrency);
     // Must use bank_transfer (same as execute). Balance→balance quotes omit payout fees (feeTotal=0).
     let recipientId = await this.ensureSellPreviewRecipient(userId, customer, platform);
     let quote: any;
@@ -1437,6 +1667,8 @@ export class BushaAppService {
       /** Gross before fees when fees are listed separately */
       grossNgnEstimate:
         Number.isFinite(netNgn) && feeTotal > 0 ? String(Number((netNgn + feeTotal).toFixed(2))) : null,
+      minSellCrypto: pairLimits?.minSellCrypto ?? pairLimits?.minSellAmount ?? null,
+      maxSellCrypto: pairLimits?.maxSellCrypto ?? pairLimits?.maxSellAmount ?? null,
       note:
         'Estimated NGN you receive after bank payout fees. Final amount is confirmed when the sell executes.',
     };
@@ -1445,6 +1677,12 @@ export class BushaAppService {
   async executeSell(userId: number, sourceCurrency: string, sourceAmount: string, network?: string) {
     const platform = await this.assertPlatformActive();
     const customer = await this.assertCustomerTradeReady(userId);
+    const amount = Number(sourceAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw ApiError.badRequest('Enter a valid sell amount');
+    }
+    const pairLimits = await this.getPairLimitsForCrypto(userId, sourceCurrency);
+    this.assertSellAmountWithinPairLimits(pairLimits, amount, sourceCurrency);
     const preview = await this.previewSell(userId, sourceCurrency, sourceAmount);
     const estimatedNgn = Number(preview.target_amount || preview.netNgn || 0);
     if (estimatedNgn < 100) {
