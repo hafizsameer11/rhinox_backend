@@ -1048,11 +1048,97 @@ export class BushaAppService {
     }));
   }
 
+  /**
+   * Build crypto → USDT unit price map from Busha pairs.
+   * Prefer *USDT / *USDC pairs; fall back to *NGN ÷ USDTNGN.
+   */
+  private async fetchCryptoPricesInUsdt(profileId: string): Promise<Map<string, number>> {
+    const prices = new Map<string, number>([
+      ['USDT', 1],
+      ['USDC', 1],
+    ]);
+
+    const loadPairs = async (currency: string) => {
+      try {
+        const remote = await this.client.get<any>('/v1/pairs', profileId, { currency });
+        return Array.isArray(remote) ? remote : Array.isArray(remote?.data) ? remote.data : [];
+      } catch (error: any) {
+        console.warn(`[Busha] pairs ${currency} for prices failed:`, error?.message || error);
+        return [];
+      }
+    };
+
+    const [usdtPairs, usdcPairs, ngnPairs] = await Promise.all([
+      loadPairs('USDT'),
+      loadPairs('USDC'),
+      loadPairs('NGN'),
+    ]);
+
+    const unitPriceInCounter = (pair: any): number | null => {
+      const base = String(pair?.base || '').toUpperCase();
+      const counter = String(pair?.counter || '').toUpperCase();
+      if (!base || !counter) return null;
+      for (const side of [pair?.sell_price, pair?.buy_price]) {
+        const money = parseBushaMoney(side, counter);
+        if (!money) continue;
+        const amt = Number(money.amount);
+        if (!Number.isFinite(amt) || amt <= 0) continue;
+        const cur = money.currency || counter;
+        if (cur === counter) return amt;
+        if (cur === base) return 1 / amt;
+      }
+      return null;
+    };
+
+    const applyStablePairs = (pairs: any[], stable: 'USDT' | 'USDC') => {
+      for (const pair of pairs) {
+        const base = String(pair?.base || '').toUpperCase();
+        const counter = String(pair?.counter || '').toUpperCase();
+        const price = unitPriceInCounter(pair);
+        if (!price) continue;
+        if (counter === stable && isCryptoCurrency(base) && base !== 'USDT' && base !== 'USDC') {
+          if (!prices.has(base)) prices.set(base, price);
+        } else if (base === stable && isCryptoCurrency(counter) && counter !== 'USDT' && counter !== 'USDC') {
+          // Inverted pair (USDTBTC) — price is USDT per 1 counter? unitPrice gives price of 1 base in counter
+          // base=USDT counter=BTC → price = BTC per 1 USDT → USD price of BTC = 1/price
+          if (!prices.has(counter) && price > 0) prices.set(counter, 1 / price);
+        }
+      }
+    };
+
+    applyStablePairs(usdtPairs, 'USDT');
+    applyStablePairs(usdcPairs, 'USDC');
+
+    let usdtNgn: number | null = null;
+    const ngnByCrypto = new Map<string, number>();
+    for (const pair of ngnPairs) {
+      const base = String(pair?.base || '').toUpperCase();
+      const counter = String(pair?.counter || '').toUpperCase();
+      const price = unitPriceInCounter(pair);
+      if (!price) continue;
+      if (base === 'USDT' && counter === 'NGN') usdtNgn = price;
+      else if (base === 'NGN' && counter === 'USDT') usdtNgn = 1 / price;
+      else if (counter === 'NGN' && isCryptoCurrency(base)) ngnByCrypto.set(base, price);
+      else if (base === 'NGN' && isCryptoCurrency(counter)) ngnByCrypto.set(counter, 1 / price);
+    }
+
+    if (usdtNgn && usdtNgn > 0) {
+      for (const [code, ngnPrice] of ngnByCrypto) {
+        if (!prices.has(code)) {
+          prices.set(code, ngnPrice / usdtNgn);
+        }
+      }
+    }
+
+    return prices;
+  }
+
   async mapBalancesForWallet(userId: number) {
     const customer = await this.assertCustomerTradeReady(userId);
-    const [balances, catalog] = await Promise.all([
+    const [balances, catalog, priceByCode] = await Promise.all([
       this.listBalances(userId),
       this.listBushaCryptoCatalog(customer.bushaProfileId),
+      this.fetchCryptoPricesInUsdt(customer.bushaProfileId),
     ]);
 
     const balanceByCode = new Map<string, any>();
@@ -1084,6 +1170,19 @@ export class BushaAppService {
       );
       const total = bal?.total || '0';
       const available = bal?.available || '0';
+      const unitPrice =
+        priceByCode.get(currency) ??
+        (currency === 'USDT' || currency === 'USDC' ? 1 : 0);
+      const totalNum = Number(total) || 0;
+      const priceStr =
+        unitPrice > 0
+          ? unitPrice >= 1
+            ? unitPrice.toFixed(2)
+            : unitPrice.toPrecision(6)
+          : '0';
+      const balanceUsdt =
+        unitPrice > 0 ? (totalNum * unitPrice).toFixed(2) : currency === 'USDT' ? String(total) : '0';
+
       return {
         id: bal?.id || index,
         type: 'crypto' as const,
@@ -1094,8 +1193,8 @@ export class BushaAppService {
         balance: String(total),
         lockedBalance: '0',
         availableBalance: String(available),
-        balanceInUSDT: currency === 'USDT' ? String(total) : '0',
-        priceInUSDT: currency === 'USDT' ? '1' : '0',
+        balanceInUSDT: balanceUsdt,
+        priceInUSDT: String(priceStr),
         icon: null,
         isToken: ['USDT', 'USDC'].includes(currency),
         active: true,
@@ -1107,7 +1206,7 @@ export class BushaAppService {
   }
 
   async mapUnifiedBalances(userId: number) {
-    // mapBalancesForWallet already merges Busha catalog + funded balances
+    // mapBalancesForWallet already merges Busha catalog + funded balances + USD prices
     const rows = await this.mapBalancesForWallet(userId);
     const catalogByCode = new Map(
       rows
@@ -1143,6 +1242,11 @@ export class BushaAppService {
         const totalAvailable = networks
           .reduce((sum, item) => sum + Number(item.availableBalance || 0), 0)
           .toString();
+        const priceInUSDT = String(networks[0]?.priceInUSDT || (symbol === 'USDT' || symbol === 'USDC' ? '1' : '0'));
+        const priceNum = Number(priceInUSDT) || 0;
+        const balNum = Number(totalAvailable) || 0;
+        const balanceInUSDT =
+          priceNum > 0 ? (balNum * priceNum).toFixed(2) : networks[0]?.balanceInUSDT || '0';
         const isUnifiedStable = symbol === 'USDT' || symbol === 'USDC';
         const catalogNets = catalogByCode.get(symbol)?.networks;
         const bushaNetworks =
@@ -1171,6 +1275,8 @@ export class BushaAppService {
           name: catalogByCode.get(symbol)?.name || this.currencyDisplayName(symbol),
           totalBalance,
           totalAvailable,
+          priceInUSDT,
+          balanceInUSDT,
           isUnifiedStable,
           networks: networkRows,
         };
