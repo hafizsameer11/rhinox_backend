@@ -472,6 +472,11 @@ export class TransactionHistoryService {
       const tx = cryptoFromLedger.find((t: any) => t.id === fiatTxId);
       if (!tx) continue;
       if (status === 'completed' && tx.status === 'pending') {
+        // crypto_sell must be credited via settleTrade/creditSell before we mark completed
+        if (tx.type === 'crypto_sell') {
+          tx.status = 'pending';
+          continue;
+        }
         try {
           await prisma.transaction.update({
             where: { id: fiatTxId },
@@ -595,23 +600,46 @@ export class TransactionHistoryService {
     );
 
     // Normalize and format transactions
+    const tradeByFiatTx = new Map(
+      buySellTrades.filter((t) => t.fiatTransactionId != null).map((t) => [t.fiatTransactionId as number, t])
+    );
     const normalizeTransaction = (tx: any) => {
       const normalizedType = this.normalizeTransactionType(tx.type, tx.wallet.type, tx.channel);
-      const amount = new Decimal(tx.amount);
-      
+      const trade = tradeByFiatTx.get(tx.id);
+      let amount = new Decimal(tx.amount).abs();
+      let currency = tx.currency;
+      const metadata: any = {
+        ...((tx.metadata as object) || {}),
+      };
+      if (trade) {
+        metadata.bushaTradeId = trade.id;
+        metadata.sourceAmount = trade.sourceAmount;
+        metadata.targetAmount = trade.targetAmount;
+        metadata.sourceCurrency = trade.sourceCurrency;
+        metadata.targetCurrency = trade.targetCurrency;
+        metadata.side = trade.side;
+        if (tx.type === 'crypto_buy' && trade.targetAmount) {
+          amount = new Decimal(trade.targetAmount).abs();
+          currency = trade.targetCurrency || currency;
+        } else if (tx.type === 'crypto_sell' && trade.sourceAmount) {
+          amount = new Decimal(trade.sourceAmount).abs();
+          currency = trade.sourceCurrency || currency;
+        }
+      }
+
       return {
         id: tx.id,
         type: tx.type,
         normalizedType,
         status: tx.status,
-        amount: amount.abs().toString(),
-        currency: tx.currency,
+        amount: amount.toString(),
+        currency,
         fee: new Decimal(tx.fee || 0).toString(),
         reference: tx.reference,
         description: tx.description || normalizedType,
         channel: tx.channel,
         paymentMethod: tx.paymentMethod,
-        metadata: tx.metadata,
+        metadata,
         completedAt: tx.completedAt,
         createdAt: tx.createdAt,
         walletType: this.isCryptoHistoryTx(tx) ? 'crypto' : tx.wallet.type,
@@ -1686,17 +1714,25 @@ export class TransactionHistoryService {
         transaction.status === 'pending' &&
         trade.fiatTransactionId === transaction.id
       ) {
-        try {
-          await prisma.transaction.update({
-            where: { id: transaction.id },
-            data: { status: 'completed', completedAt: transaction.completedAt || new Date() },
-          });
-          details.status = 'completed';
-          details.completedAt = details.completedAt || new Date();
-        } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error('[TransactionHistory] Failed to sync Busha tx status:', message);
-          details.status = 'completed';
+        // For sells, only mark completed after NGN was actually credited
+        const meta = (transaction.metadata as any) || {};
+        const sellReady =
+          transaction.type !== 'crypto_sell' ||
+          meta.ngnCredited === true ||
+          trade.status === 'wallet_credited';
+        if (sellReady) {
+          try {
+            await prisma.transaction.update({
+              where: { id: transaction.id },
+              data: { status: 'completed', completedAt: transaction.completedAt || new Date() },
+            });
+            details.status = 'completed';
+            details.completedAt = details.completedAt || new Date();
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error('[TransactionHistory] Failed to sync Busha tx status:', message);
+            details.status = 'completed';
+          }
         }
       }
 

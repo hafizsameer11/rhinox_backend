@@ -105,7 +105,31 @@ export class PalmPayWebhookService {
       });
 
       if (mappedStatus === 'completed') {
-        const creditedAmount = fromPalmPayAmount(payload.amount || 0);
+        const ledgerAmount = Number(virtualAccount.transaction.amount);
+        const webhookRaw = Number(payload.amount);
+        let creditedAmount: Decimal;
+
+        if (Number.isFinite(ledgerAmount) && ledgerAmount > 0) {
+          // App creates the deposit with major-unit amount — credit that, not a missing webhook amount
+          creditedAmount = new Decimal(ledgerAmount);
+        } else if (Number.isFinite(webhookRaw) && webhookRaw > 0) {
+          // PalmPay amounts are typically kobo; if value is huge vs typical NGN, treat as kobo
+          creditedAmount =
+            webhookRaw >= 1000 ? fromPalmPayAmount(webhookRaw) : new Decimal(webhookRaw);
+        } else {
+          console.error(
+            '[PalmPay webhook] Deposit completed but no credit amount',
+            payload.orderId,
+            payload.amount
+          );
+          return;
+        }
+
+        if (creditedAmount.lte(0)) {
+          console.error('[PalmPay webhook] Refusing to complete deposit with zero credit', payload.orderId);
+          return;
+        }
+
         await tx.wallet.update({
           where: { id: virtualAccount.transaction.walletId },
           data: {
@@ -125,6 +149,7 @@ export class PalmPayWebhookService {
               provider: 'palmpay',
               palmpayOrderNo: payload.orderNo,
               palmpayStatus: payload.orderStatus,
+              creditedAmount: creditedAmount.toString(),
               webhook: payload,
             },
           },

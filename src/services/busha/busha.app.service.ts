@@ -2442,18 +2442,47 @@ export class BushaAppService {
     const trade = await prisma.bushaTradeLog.findUnique({ where: { id: tradeId } });
     if (!trade?.fiatTransactionId) return;
     const creditAmount = Number(amount);
+    if (!Number.isFinite(creditAmount) || creditAmount <= 0) return;
+
     const tx = await prisma.transaction.findUnique({ where: { id: trade.fiatTransactionId } });
-    if (!tx || tx.status === 'completed') {
-      await prisma.bushaTradeLog.update({ where: { id: tradeId }, data: { status: 'wallet_credited' } });
+    if (!tx) return;
+
+    const meta = (tx.metadata as Record<string, any>) || {};
+    // Idempotent: only skip when we already credited NGN to the wallet
+    if (meta.ngnCredited === true || trade.status === 'wallet_credited') {
+      if (tx.status !== 'completed') {
+        await prisma.transaction.update({
+          where: { id: tx.id },
+          data: { status: 'completed', completedAt: tx.completedAt || new Date() },
+        });
+      }
+      if (trade.status !== 'wallet_credited') {
+        await prisma.bushaTradeLog.update({
+          where: { id: tradeId },
+          data: { status: 'wallet_credited', targetAmount: String(amount) },
+        });
+      }
       return;
     }
+
     await prisma.wallet.update({
       where: { id: tx.walletId },
       data: { balance: { increment: creditAmount } },
     });
     await prisma.transaction.update({
       where: { id: tx.id },
-      data: { status: 'completed', amount: creditAmount, completedAt: new Date() },
+      data: {
+        status: 'completed',
+        amount: creditAmount,
+        completedAt: new Date(),
+        metadata: {
+          ...meta,
+          provider: meta.provider || 'busha',
+          ngnCredited: true,
+          creditedAt: new Date().toISOString(),
+          creditAmount,
+        },
+      },
     });
     await prisma.bushaTradeLog.update({
       where: { id: tradeId },

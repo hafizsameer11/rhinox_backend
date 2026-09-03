@@ -100,8 +100,12 @@ export class BillPaymentService {
     return Math.max(calculatedFee, minFee);
   }
 
-  private isFixedAmountItem(item: { isFixAmount?: number; raw?: { isFixAmount?: number } }): boolean {
-    return item.isFixAmount === 1 || item.raw?.isFixAmount === 1;
+  private isFixedAmountItem(item: {
+    isFixAmount?: number;
+    raw?: { isFixAmount?: number; is_fix_amount?: number };
+  }): boolean {
+    const flag = item.isFixAmount ?? item.raw?.isFixAmount ?? item.raw?.is_fix_amount;
+    return Number(flag) === 1;
   }
 
   private resolvePalmPayAmount(
@@ -412,6 +416,8 @@ export class BillPaymentService {
           dataAmount: item.raw?.dataAmount || null,
           validity: item.raw?.validity || null,
           description: item.raw?.description || item.name,
+          isFixAmount: item.isFixAmount ?? item.raw?.isFixAmount ?? null,
+          isOpenAmount: !this.isFixedAmountItem(item),
           metadata: item.raw || item,
         }));
       } catch (error: any) {
@@ -558,21 +564,54 @@ export class BillPaymentService {
     }
 
     const { sceneCode, billerId } = this.parsePalmPayProviderId(providerIdStr, 'betting');
-    const verification = await this.palmPayBillPaymentService.verifyRechargeAccount({
-      sceneCode,
-      billerId,
-      rechargeAccount: accountNumber,
-    });
+    try {
+      const verification = await this.palmPayBillPaymentService.verifyRechargeAccount({
+        sceneCode,
+        billerId,
+        rechargeAccount: accountNumber,
+      });
 
-    return {
-      isValid: true,
-      accountNumber,
-      provider: {
-        id: providerId,
-        code: billerId,
-      },
-      verification,
-    };
+      const verificationAny = verification as any;
+      const accountName =
+        verificationAny?.customerName ||
+        verificationAny?.accountName ||
+        verificationAny?.name ||
+        verificationAny?.fullName ||
+        null;
+
+      // PalmPay may return a payload that still indicates an invalid account
+      const statusFlag = verificationAny?.status ?? verificationAny?.valid ?? verificationAny?.success;
+      if (statusFlag === false || statusFlag === 0 || statusFlag === 'false' || statusFlag === 'FAILED') {
+        return {
+          isValid: false,
+          message: verificationAny?.message || verificationAny?.respMsg || 'Invalid betting account ID',
+          accountNumber,
+          provider: { id: providerId, code: billerId },
+          verification,
+        };
+      }
+
+      return {
+        isValid: true,
+        accountNumber,
+        accountName: typeof accountName === 'string' ? accountName.trim() || null : null,
+        provider: {
+          id: providerId,
+          code: billerId,
+        },
+        verification,
+      };
+    } catch (error: any) {
+      return {
+        isValid: false,
+        message: error?.message || 'Invalid betting account ID',
+        accountNumber,
+        provider: {
+          id: providerId,
+          code: billerId,
+        },
+      };
+    }
   }
 
   /**

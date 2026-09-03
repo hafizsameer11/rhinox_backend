@@ -25,6 +25,7 @@ export type FlutterwaveBillItem = {
   amount: number;
   fee?: number;
   isAirtime: boolean;
+  isFixAmount?: number;
   labelName?: string | null;
   groupName?: string | null;
   raw: any;
@@ -120,6 +121,7 @@ export class FlutterwaveBillPaymentService {
         amount: Number(row.amount || 0),
         fee: row.fee !== undefined ? Number(row.fee) : undefined,
         isAirtime: Boolean(row.is_airtime),
+        isFixAmount: row.is_fix_amount !== undefined ? Number(row.is_fix_amount) : undefined,
         labelName: row.label_name || null,
         groupName: row.group_name || null,
         raw: row,

@@ -504,22 +504,39 @@ export class HomeService {
         if (['completed', 'wallet_credited'].includes(linkedTrade.status)) status = 'completed';
         else if (['busha_failed', 'palmpay_failed', 'buy_reversed'].includes(linkedTrade.status)) {
           status = 'failed';
+        } else if (
+          ['settling', 'awaiting_busha', 'awaiting_palmpay', 'awaiting_crypto_deposit', 'quoted'].includes(
+            linkedTrade.status
+          )
+        ) {
+          status = 'pending';
         }
+      }
+
+      // Buy: show crypto received; Sell: show crypto sold (source)
+      let displayAmount = amount.toString();
+      let displayCurrency = tx.currency;
+      if (tx.type === 'crypto_buy' && linkedTrade?.targetAmount) {
+        displayAmount = String(linkedTrade.targetAmount);
+        displayCurrency = linkedTrade.targetCurrency || displayCurrency;
+      } else if (tx.type === 'crypto_sell' && linkedTrade?.sourceAmount) {
+        displayAmount = String(linkedTrade.sourceAmount);
+        displayCurrency = linkedTrade.sourceCurrency || displayCurrency;
       }
 
       return {
         id: tx.id,
         type: tx.type,
         status,
-        amount: amount.toString(),
-        currency: tx.currency,
-        currencySymbol: tx.wallet.currencyRef?.symbol || tx.currency,
+        amount: displayAmount,
+        currency: displayCurrency,
+        currencySymbol: tx.wallet.currencyRef?.symbol || displayCurrency,
         amountInUSDT,
         description: label,
         reference: tx.reference,
         channel: tx.channel || 'busha',
         isPositive,
-        formattedAmount: `${isPositive ? '+' : '-'}${amount.toString()} ${tx.currency}`,
+        formattedAmount: `${isPositive ? '+' : '-'}${displayAmount} ${displayCurrency}`,
         createdAt: tx.createdAt,
         completedAt: tx.completedAt,
         walletType: 'crypto',
@@ -550,13 +567,22 @@ export class HomeService {
 
       const isDeposit = trade.side === 'cryptoRecv' || trade.side === 'buy';
       const isSell = trade.side === 'sell';
-      const amount = String(isSell || trade.side === 'buy' ? trade.sourceAmount || trade.targetAmount : trade.sourceAmount || '0');
+      // Buy list must show crypto received (target), not NGN paid (source)
+      const amount = String(
+        trade.side === 'buy'
+          ? trade.targetAmount || trade.sourceAmount || '0'
+          : isSell
+            ? trade.sourceAmount || trade.targetAmount || '0'
+            : trade.sourceAmount || trade.targetAmount || '0'
+      );
       const currency =
         trade.side === 'buy'
           ? trade.targetCurrency
           : trade.side === 'sell'
             ? trade.sourceCurrency
-            : trade.sourceCurrency;
+            : trade.side === 'cryptoRecv'
+              ? trade.targetCurrency || trade.sourceCurrency
+              : trade.sourceCurrency;
       const label =
         trade.side === 'buy'
           ? `Buy ${trade.targetCurrency}`
