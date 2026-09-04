@@ -229,20 +229,35 @@ export class BushaAppService {
       }
 
       const rhinoxKycReady = Boolean(
-        kyc?.status === 'verified' &&
+        kyc &&
+          ['pending', 'submitted', 'under_review', 'verified'].includes(String(kyc.status || '')) &&
+          kyc.faceVerificationSuccessful &&
           kyc.firstName &&
           kyc.lastName &&
           kyc.dateOfBirth &&
           kyc.idNumber
       );
       const canTrade = enabled && customer?.status === 'active';
+      // Settings "Verified" must wait for Busha customer.active — not local face/admin alone
+      const displayRhinoxKycStatus =
+        customer?.status === 'active'
+          ? 'verified'
+          : customer?.status === 'rejected'
+            ? 'rejected'
+            : ['in_review', 'pending', 'submitted', 'inactive'].includes(
+                  String(customer?.status || '')
+                )
+              ? 'under_review'
+              : kyc?.status === 'verified'
+                ? 'under_review'
+                : kyc?.status || 'not_started';
 
       return {
         isActive: enabled,
         provider: 'busha',
         environment: isBushaEnabled() ? getBushaConfig().environment : null,
         rhinoxKycReady,
-        rhinoxKycStatus: kyc?.status || 'not_started',
+        rhinoxKycStatus: displayRhinoxKycStatus,
         bushaStatus: customer?.status || 'missing',
         bushaProfileId: customer?.bushaProfileId || null,
         kycApplicationStatus: latestKycApp?.status || null,
@@ -278,61 +293,126 @@ export class BushaAppService {
   }
 
   /**
+   * Mirror Busha customer status into bushaCustomer / bushaKycApplication,
+   * and only then mark Rhinox KYC as verified (or rejected).
+   */
+  private async applyBushaCustomerStatus(
+    customer: { id: number; userId: number; bushaProfileId: string; status: string },
+    nextStatusRaw: string,
+    providerData?: any
+  ) {
+    const nextStatus = String(nextStatusRaw || customer.status || 'inactive').toLowerCase();
+
+    const updated = await prisma.bushaCustomer.update({
+      where: { id: customer.id },
+      data: {
+        status: nextStatus,
+        ...(providerData ? { providerData } : {}),
+      },
+    });
+
+    if (nextStatus === 'active') {
+      await prisma.bushaKycApplication.updateMany({
+        where: {
+          OR: [{ bushaCustomerId: customer.id }, { userId: updated.userId }],
+          status: { not: 'active' },
+        },
+        data: { status: 'active', errorMessage: null, bushaCustomerId: customer.id },
+      });
+      // Rhinox Settings "Verified" is driven by Busha approval only
+      await prisma.kYC.updateMany({
+        where: {
+          userId: updated.userId,
+          status: { not: 'verified' },
+        },
+        data: {
+          status: 'verified',
+          verifiedAt: new Date(),
+        },
+      });
+    } else if (nextStatus === 'rejected') {
+      await prisma.bushaKycApplication.updateMany({
+        where: {
+          OR: [{ bushaCustomerId: customer.id }, { userId: updated.userId }],
+          status: { in: ['pending', 'processing', 'submitted', 'in_review'] },
+        },
+        data: { status: 'rejected', bushaCustomerId: customer.id },
+      });
+      await prisma.kYC.updateMany({
+        where: {
+          userId: updated.userId,
+          status: { in: ['pending', 'submitted', 'under_review', 'verified'] },
+        },
+        data: {
+          status: 'rejected',
+        },
+      });
+    } else if (['in_review', 'pending', 'inactive', 'submitted'].includes(nextStatus)) {
+      await prisma.bushaKycApplication.updateMany({
+        where: {
+          OR: [{ bushaCustomerId: customer.id }, { userId: updated.userId }],
+          status: { in: ['pending', 'processing', 'submitted', 'in_review'] },
+        },
+        data: {
+          status:
+            nextStatus === 'inactive'
+              ? 'submitted'
+              : nextStatus === 'pending'
+                ? 'submitted'
+                : nextStatus,
+          bushaCustomerId: customer.id,
+        },
+      });
+      // Keep Rhinox KYC in review until Busha approves — never leave premature "verified"
+      await prisma.kYC.updateMany({
+        where: {
+          userId: updated.userId,
+          status: { in: ['pending', 'verified', 'submitted'] },
+        },
+        data: {
+          status: 'under_review',
+          verifiedAt: null,
+        },
+      });
+    }
+
+    if (nextStatus !== customer.status) {
+      console.log(
+        `[Busha] customer ${customer.bushaProfileId}: ${customer.status} → ${nextStatus}`
+      );
+    }
+
+    return updated;
+  }
+
+  /**
    * Pull latest customer status from Busha and mirror it into our DB.
    */
   async syncCustomerFromProvider(customer: {
     id: number;
+    userId?: number;
     bushaProfileId: string;
     status: string;
   }) {
     try {
       const remote = await this.client.get<any>(`/v1/customers/${customer.bushaProfileId}`);
       const nextStatus = String(remote?.status || customer.status || 'inactive').toLowerCase();
+      const full =
+        customer.userId != null
+          ? customer
+          : await prisma.bushaCustomer.findUnique({ where: { id: customer.id } });
+      if (!full?.userId) return full;
 
-      const updated = await prisma.bushaCustomer.update({
-        where: { id: customer.id },
-        data: {
-          status: nextStatus,
-          providerData: remote,
+      return await this.applyBushaCustomerStatus(
+        {
+          id: full.id,
+          userId: full.userId,
+          bushaProfileId: full.bushaProfileId,
+          status: full.status,
         },
-      });
-
-      if (nextStatus === 'active') {
-        await prisma.bushaKycApplication.updateMany({
-          where: {
-            OR: [{ bushaCustomerId: customer.id }, { userId: updated.userId }],
-            status: { not: 'active' },
-          },
-          data: { status: 'active', errorMessage: null, bushaCustomerId: customer.id },
-        });
-      } else if (nextStatus === 'rejected') {
-        await prisma.bushaKycApplication.updateMany({
-          where: {
-            OR: [{ bushaCustomerId: customer.id }, { userId: updated.userId }],
-            status: { in: ['pending', 'processing', 'submitted', 'in_review'] },
-          },
-          data: { status: 'rejected', bushaCustomerId: customer.id },
-        });
-      } else if (['in_review', 'pending', 'inactive', 'submitted'].includes(nextStatus)) {
-        await prisma.bushaKycApplication.updateMany({
-          where: {
-            OR: [{ bushaCustomerId: customer.id }, { userId: updated.userId }],
-            status: { in: ['pending', 'processing', 'submitted', 'in_review'] },
-          },
-          data: {
-            status: nextStatus === 'inactive' ? 'submitted' : nextStatus === 'pending' ? 'submitted' : nextStatus,
-            bushaCustomerId: customer.id,
-          },
-        });
-      }
-
-      if (nextStatus !== customer.status) {
-        console.log(
-          `[Busha] synced customer ${customer.bushaProfileId}: ${customer.status} → ${nextStatus}`
-        );
-      }
-
-      return updated;
+        nextStatus,
+        remote
+      );
     } catch (error: any) {
       console.warn(
         `[Busha] sync customer ${customer.bushaProfileId} failed:`,
@@ -361,11 +441,20 @@ export class BushaAppService {
     });
     if (!user) throw ApiError.notFound('User not found');
     const kyc = user.kyc;
-    if (!kyc || kyc.status !== 'verified') {
-      throw ApiError.badRequest('Complete Rhinox KYC before activating crypto');
+    if (
+      !kyc ||
+      !kyc.faceVerificationSuccessful ||
+      !kyc.firstName ||
+      !kyc.lastName ||
+      !kyc.dateOfBirth ||
+      !kyc.idNumber
+    ) {
+      throw ApiError.badRequest(
+        'Complete Rhinox KYC (including face verification) before activating crypto'
+      );
     }
-    if (!kyc.firstName || !kyc.lastName || !kyc.dateOfBirth || !kyc.idNumber) {
-      throw ApiError.badRequest('KYC is missing name, date of birth, or ID number');
+    if (['rejected'].includes(String(kyc.status || ''))) {
+      throw ApiError.badRequest('KYC was rejected. Please update your documents and try again.');
     }
 
     const application = await prisma.bushaKycApplication.create({
@@ -2407,19 +2496,32 @@ export class BushaAppService {
   }
 
   async handleCustomerWebhook(payload: any) {
+    const event = String(payload?.event || '').toLowerCase();
     const profileId = payload?.data?.id || payload?.id;
-    const status = payload?.data?.status || payload?.status;
-    if (!profileId || !status) return;
-    const customer = await prisma.bushaCustomer.findUnique({ where: { bushaProfileId: profileId } });
-    if (!customer) return;
-    await prisma.bushaCustomer.update({
-      where: { id: customer.id },
-      data: { status, providerData: payload.data || payload },
+    let status = String(payload?.data?.status || payload?.status || '').toLowerCase();
+
+    // Derive status from verification event names when payload status is missing
+    if (!status && event.includes('verification')) {
+      if (event.endsWith('.active') || event.includes('verification.active')) status = 'active';
+      else if (event.endsWith('.rejected') || event.includes('verification.rejected')) status = 'rejected';
+      else if (event.endsWith('.in_review') || event.includes('verification.in_review')) status = 'in_review';
+      else if (event.endsWith('.inactive') || event.includes('verification.inactive')) status = 'inactive';
+    }
+
+    if (!profileId || !status) {
+      console.warn('[Busha Webhook] customer event missing id/status', event, profileId, status);
+      return;
+    }
+
+    const customer = await prisma.bushaCustomer.findUnique({
+      where: { bushaProfileId: profileId },
     });
-    await prisma.bushaKycApplication.updateMany({
-      where: { bushaCustomerId: customer.id },
-      data: { status: status === 'rejected' ? 'rejected' : status },
-    });
+    if (!customer) {
+      console.warn('[Busha Webhook] No local customer for', profileId);
+      return;
+    }
+
+    await this.applyBushaCustomerStatus(customer, status, payload.data || payload);
   }
 
   async handleTransferWebhook(payload: any) {

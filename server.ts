@@ -461,6 +461,7 @@ app.post('/api/webhooks/busha', async (req: express.Request, res: express.Respon
     const signature =
       req.get('x-busha-signature') ||
       req.get('x-bc-signature') ||
+      req.get('x-bu-signature') ||
       req.get('x-signature');
     const rawBody = (req as any).rawBody || Buffer.from(JSON.stringify(req.body || {}));
     if (!bushaAppService.verifyWebhookSignature(rawBody, signature)) {

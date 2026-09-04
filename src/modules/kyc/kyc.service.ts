@@ -110,6 +110,7 @@ export class KYCService {
 
   /**
    * Get user KYC status
+   * "verified" is only returned after Busha customer.status === active
    */
   async getKYCStatus(userId: string | number) {
     const parsedUserId = parseId(userId, 'userId');
@@ -119,17 +120,20 @@ export class KYCService {
       console.log('[KYC Service] getKYCStatus - userId:', userId, 'parsedUserId:', parsedUserId);
     }
     
-    const kyc = await prisma.kYC.findUnique({
-      where: { userId: parsedUserId },
-      include: {
-        user: {
-          select: {
-            countryId: true,
-            country: { select: { id: true, name: true, code: true } },
+    const [kyc, bushaCustomer] = await Promise.all([
+      prisma.kYC.findUnique({
+        where: { userId: parsedUserId },
+        include: {
+          user: {
+            select: {
+              countryId: true,
+              country: { select: { id: true, name: true, code: true } },
+            },
           },
         },
-      },
-    });
+      }),
+      prisma.bushaCustomer.findUnique({ where: { userId: parsedUserId } }),
+    ]);
 
     // Debug logging in development
     if (process.env.NODE_ENV === 'development') {
@@ -141,14 +145,40 @@ export class KYCService {
         hasKYC: false,
         status: 'not_started',
         tier: 0,
+        bushaStatus: bushaCustomer?.status || 'missing',
       };
+    }
+
+    const bushaStatus = String(bushaCustomer?.status || 'missing').toLowerCase();
+    let status = kyc.status;
+    let verifiedAt = kyc.verifiedAt;
+
+    if (bushaStatus === 'active') {
+      status = 'verified';
+      if (kyc.status !== 'verified') {
+        const updated = await prisma.kYC.update({
+          where: { userId: parsedUserId },
+          data: { status: 'verified', verifiedAt: new Date() },
+        });
+        verifiedAt = updated.verifiedAt;
+      }
+    } else if (bushaStatus === 'rejected') {
+      status = 'rejected';
+    } else if (['in_review', 'pending', 'submitted', 'inactive'].includes(bushaStatus)) {
+      status = 'under_review';
+      verifiedAt = null;
+    } else if (status === 'verified' && bushaStatus !== 'active') {
+      // Legacy: face/admin marked verified before Busha — do not show Verified yet
+      status = kyc.faceVerificationSuccessful ? 'under_review' : 'pending';
+      verifiedAt = null;
     }
 
     return {
       hasKYC: true,
       id: kyc.id,
       tier: kyc.tier,
-      status: kyc.status,
+      status,
+      kycStatus: status,
       firstName: kyc.firstName,
       lastName: kyc.lastName,
       middleName: kyc.middleName,
@@ -160,7 +190,8 @@ export class KYCService {
       countryId: kyc.user?.countryId || kyc.user?.country?.id || null,
       countryCode: kyc.user?.country?.code || null,
       countryName: kyc.user?.country?.name || null,
-      verifiedAt: kyc.verifiedAt,
+      verifiedAt,
+      bushaStatus,
       createdAt: kyc.createdAt,
       updatedAt: kyc.updatedAt,
     };
@@ -168,6 +199,7 @@ export class KYCService {
 
   /**
    * Submit face verification
+   * Does NOT mark KYC verified — Busha approval (webhook/sync) owns that.
    */
   async submitFaceVerification(userId: string, imageUrl: string, isSuccessful: boolean) {
     const parsedUserId = parseId(userId, 'userId');
@@ -184,7 +216,12 @@ export class KYCService {
       data: {
         faceVerificationImageUrl: imageUrl,
         faceVerificationSuccessful: isSuccessful,
-        ...(isSuccessful && { status: 'verified', verifiedAt: new Date() }),
+        // Documents + face ready for Busha review; keep pending until Busha is active
+        ...(isSuccessful &&
+          kyc.status !== 'verified' && {
+            status: 'pending',
+            verifiedAt: null,
+          }),
       },
     });
 
@@ -193,6 +230,9 @@ export class KYCService {
       faceVerificationSuccessful: updatedKYC.faceVerificationSuccessful,
       status: updatedKYC.status,
       verifiedAt: updatedKYC.verifiedAt,
+      message: isSuccessful
+        ? 'Face verification saved. Account stays unverified until crypto KYC is approved.'
+        : undefined,
     };
   }
 
@@ -252,15 +292,18 @@ export class KYCService {
     }
 
     if (kyc.status === 'verified') {
-      throw new Error('KYC is already approved');
+      const busha = await prisma.bushaCustomer.findUnique({ where: { userId: parsedUserId } });
+      if (busha?.status === 'active') {
+        throw new Error('KYC is already approved');
+      }
     }
 
-    // Update KYC status to verified
+    // Admin only clears local docs review — final Verified comes from Busha webhook
     const updatedKYC = await prisma.kYC.update({
       where: { userId: parsedUserId },
       data: {
-        status: 'verified',
-        verifiedAt: new Date(),
+        status: 'pending',
+        verifiedAt: null,
       },
       include: {
         user: {
@@ -274,13 +317,24 @@ export class KYCService {
       },
     });
 
+    // Kick off / requeue Busha KYC when platform is live
+    try {
+      const { BushaAppService, isBushaEnabled } = await import('../../services/busha/index.js');
+      if (isBushaEnabled()) {
+        await new BushaAppService().startKyc(parsedUserId);
+      }
+    } catch (error: any) {
+      console.warn('[KYC] Admin approve: Busha start skipped:', error?.message || error);
+    }
+
     return {
       id: updatedKYC.id,
       userId: updatedKYC.userId,
       status: updatedKYC.status,
       verifiedAt: updatedKYC.verifiedAt,
       user: updatedKYC.user,
-      message: 'KYC approved successfully',
+      message:
+        'Documents accepted. Account will show Verified after Busha KYC approval.',
     };
   }
 
