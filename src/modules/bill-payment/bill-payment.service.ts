@@ -101,11 +101,53 @@ export class BillPaymentService {
   }
 
   private isFixedAmountItem(item: {
+    amount?: number;
     isFixAmount?: number;
-    raw?: { isFixAmount?: number; is_fix_amount?: number };
+    raw?: { isFixAmount?: number; is_fix_amount?: number; amount?: number | string };
   }): boolean {
     const flag = item.isFixAmount ?? item.raw?.isFixAmount ?? item.raw?.is_fix_amount;
-    return Number(flag) === 1;
+    if (flag !== undefined && flag !== null && String(flag) !== '') {
+      return Number(flag) === 1;
+    }
+    // Flutterwave often omits is_fix_amount for internet/data bundles that still have a price.
+    const amount = Number(item.amount ?? item.raw?.amount ?? 0);
+    return Number.isFinite(amount) && amount > 0;
+  }
+
+  /** Pull amount / data size / validity out of Flutterwave item names when fields are missing. */
+  private enrichFlutterwavePlanFields(item: FlutterwaveBillItem): {
+    amount?: string;
+    dataAmount: string | null;
+    validity: string | null;
+    description: string;
+  } {
+    const haystack = `${item.name || ''} ${item.shortName || ''} ${item.raw?.description || ''}`;
+    const rawAmount = Number(item.amount || 0);
+    let amount =
+      Number.isFinite(rawAmount) && rawAmount > 0 ? rawAmount.toString() : undefined;
+
+    if (!amount) {
+      const amountMatch =
+        haystack.match(/(?:₦|NGN|N)\s*([\d,]+(?:\.\d+)?)/i) ||
+        haystack.match(/([\d,]+(?:\.\d+)?)\s*(?:naira|ngn)\b/i) ||
+        haystack.match(/-\s*([\d,]+(?:\.\d+)?)\s*$/);
+      if (amountMatch?.[1]) {
+        const parsed = Number(String(amountMatch[1]).replace(/,/g, ''));
+        if (Number.isFinite(parsed) && parsed > 0) amount = parsed.toString();
+      }
+    }
+
+    const dataMatch = haystack.match(/(\d+(?:\.\d+)?\s*(?:TB|GB|MB))\b/i);
+    const validityMatch = haystack.match(
+      /(\d+\s*(?:days?|weeks?|months?|hrs?|hours?))\b/i
+    );
+
+    return {
+      amount,
+      dataAmount: item.raw?.dataAmount || dataMatch?.[1] || null,
+      validity: item.raw?.validity || validityMatch?.[1] || null,
+      description: item.raw?.description || item.name,
+    };
   }
 
   private resolvePalmPayAmount(
@@ -405,21 +447,28 @@ export class BillPaymentService {
 
       try {
         const items = await this.flutterwaveBillPaymentService.getBillItems(decoded.billerCode);
-        return items.map((item: FlutterwaveBillItem) => ({
-          id: encodeFlutterwaveItemId(item.itemCode),
-          code: item.itemCode,
-          itemId: item.itemCode,
-          providerId: encodeFlutterwaveProviderId(decoded.categoryCode, decoded.billerCode),
-          name: item.name,
-          amount: item.amount > 0 ? item.amount.toString() : undefined,
-          currency: 'NGN',
-          dataAmount: item.raw?.dataAmount || null,
-          validity: item.raw?.validity || null,
-          description: item.raw?.description || item.name,
-          isFixAmount: item.isFixAmount ?? item.raw?.isFixAmount ?? null,
-          isOpenAmount: !this.isFixedAmountItem(item),
-          metadata: item.raw || item,
-        }));
+        return items.map((item: FlutterwaveBillItem) => {
+          const enriched = this.enrichFlutterwavePlanFields(item);
+          const isOpenAmount = !this.isFixedAmountItem({
+            ...item,
+            amount: enriched.amount ? Number(enriched.amount) : item.amount,
+          });
+          return {
+            id: encodeFlutterwaveItemId(item.itemCode),
+            code: item.itemCode,
+            itemId: item.itemCode,
+            providerId: encodeFlutterwaveProviderId(decoded.categoryCode, decoded.billerCode),
+            name: item.name,
+            amount: enriched.amount,
+            currency: 'NGN',
+            dataAmount: enriched.dataAmount,
+            validity: enriched.validity,
+            description: enriched.description,
+            isFixAmount: item.isFixAmount ?? item.raw?.is_fix_amount ?? null,
+            isOpenAmount,
+            metadata: item.raw || item,
+          };
+        });
       } catch (error: any) {
         throw createProviderUnavailableError(error.message || 'Bill payment plans are unavailable');
       }

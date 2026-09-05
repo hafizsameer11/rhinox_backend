@@ -30,18 +30,18 @@ const BILLER_CODE_LOGOS: Record<string, string> = {
   BIL125: `${LOGO_BASE}/dstv.png`,
   BIL133: `${LOGO_BASE}/showmax.png`,
 
-  // Electricity
-  BIL113: `${LOGO_BASE}/ikeja.png`,
-  BIL114: `${LOGO_BASE}/ibandan.png`,
-  BIL115: `${LOGO_BASE}/eko.png`,
-  BIL116: `${LOGO_BASE}/enugu.png`,
-  BIL117: `${LOGO_BASE}/ph.png`,
-  BIL118: `${LOGO_BASE}/benin.png`,
-  BIL204: `${LOGO_BASE}/abuja.png`,
-  BIL112: `${LOGO_BASE}/kaduna.png`,
-  BIL124: `${LOGO_BASE}/kano.png`,
-  BIL126: `${LOGO_BASE}/jos.png`,
-  BIL127: `${LOGO_BASE}/yola.png`,
+  // Electricity — Flutterwave UTILITYBILLS (NG DISCOs)
+  BIL113: `${LOGO_BASE}/ikeja.png`, // Ikeja Electric
+  BIL114: `${LOGO_BASE}/ibandan.png`, // Ibadan Electric
+  BIL115: `${LOGO_BASE}/eko.png`, // Eko Electricity
+  BIL116: `${LOGO_BASE}/enugu.png`, // Enugu Electric
+  BIL117: `${LOGO_BASE}/ph.png`, // Port Harcourt Electric
+  BIL118: `${LOGO_BASE}/benin.png`, // Benin Electric
+  BIL204: `${LOGO_BASE}/abuja.png`, // Abuja Electric
+  BIL112: `${LOGO_BASE}/kaduna.png`, // Kaduna Electric
+  BIL124: `${LOGO_BASE}/kano.png`, // Kano Electric
+  BIL126: `${LOGO_BASE}/jos.png`, // Jos Electric
+  BIL127: `${LOGO_BASE}/yola.png`, // Yola Electric
 
   // Internet
   BIL128: `${LOGO_BASE}/smile.png`,
@@ -69,14 +69,14 @@ const NAME_KEYWORD_LOGOS: Array<{ match: RegExp; logo: string }> = [
   { match: /\bIKEJA\b|\bIKEDC\b/i, logo: `${LOGO_BASE}/ikeja.png` },
   { match: /\bIBADAN\b|\bIBEDC\b/i, logo: `${LOGO_BASE}/ibandan.png` },
   { match: /\bABUJA\b|\bAEDC\b/i, logo: `${LOGO_BASE}/abuja.png` },
-  { match: /\bEKO\b|\bEKEDC\b/i, logo: `${LOGO_BASE}/eko.png` },
+  { match: /\bEKO\b|\bEKEDC\b|\bEKEDP\b/i, logo: `${LOGO_BASE}/eko.png` },
   { match: /\bENUGU\b|\bEEDC\b/i, logo: `${LOGO_BASE}/enugu.png` },
   { match: /\bPORT\s*HARCOURT\b|\bPHED\b|\bPHEDC\b/i, logo: `${LOGO_BASE}/ph.png` },
   { match: /\bBENIN\b|\bBEDC\b/i, logo: `${LOGO_BASE}/benin.png` },
   { match: /\bYOLA\b|\bYEDC\b/i, logo: `${LOGO_BASE}/yola.png` },
-  { match: /\bKADUNA\b|\bKAEDCO\b|\bKEDCO\b/i, logo: `${LOGO_BASE}/kaduna.png` },
-  { match: /\bKANO\b/i, logo: `${LOGO_BASE}/kano.png` },
-  { match: /\bJOS\b|\bJED\b/i, logo: `${LOGO_BASE}/jos.png` },
+  { match: /\bKADUNA\b|\bKAEDCO\b|\bKAEDC\b/i, logo: `${LOGO_BASE}/kaduna.png` },
+  { match: /\bKANO\b|\bKEDCO\b/i, logo: `${LOGO_BASE}/kano.png` },
+  { match: /\bJOS\b|\bJEDC?\b|\bJED\b/i, logo: `${LOGO_BASE}/jos.png` },
   { match: /\bBET9JA\b/i, logo: `${LOGO_BASE}/bet9ja.png` },
   { match: /\b1XBET\b/i, logo: `${LOGO_BASE}/1xbet.png` },
   { match: /\bSPORT(Y)?BET\b/i, logo: `${LOGO_BASE}/sportbet.png` },

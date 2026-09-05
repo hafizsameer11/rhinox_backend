@@ -579,65 +579,76 @@ async function main() {
 
   // Seed Exchange Rates (NGN as base currency)
   console.log('💱 Seeding exchange rates...');
+  // Mid-market-ish USD crosses (Sep 2026). Seed upserts so re-seed refreshes stale DB rates.
+  const USD_NGN = 1325;
+  const USD_KES = 129.4;
+  const USD_GHS = 11.36;
+  const USD_ZAR = 15.97;
+  const USD_TZS = 2642;
+  const USD_UGX = 3717;
+  const USD_BWP = 13.69;
+  const USD_EUR = 0.861;
+  const USD_GBP = 0.74;
+  const USD_CAD = 1.383;
+  const USD_AUD = 1.388;
+
   const exchangeRates = [
     // NGN to other currencies (NGN as base)
-    { from: 'NGN', to: 'USD', rate: 0.0012 }, // 1 NGN = 0.0012 USD (approx 833 NGN = 1 USD)
-    { from: 'NGN', to: 'EUR', rate: 0.0011 }, // 1 NGN = 0.0011 EUR
-    { from: 'NGN', to: 'GBP', rate: 0.00095 }, // 1 NGN = 0.00095 GBP
-    { from: 'NGN', to: 'KES', rate: 0.15 }, // 1 NGN = 0.15 KES
-    { from: 'NGN', to: 'GHS', rate: 0.012 }, // 1 NGN = 0.012 GHS
-    { from: 'NGN', to: 'ZAR', rate: 0.022 }, // 1 NGN = 0.022 ZAR
-    { from: 'NGN', to: 'TZS', rate: 2.8 }, // 1 NGN = 2.8 TZS
-    { from: 'NGN', to: 'UGX', rate: 4.5 }, // 1 NGN = 4.5 UGX
-    { from: 'NGN', to: 'BWP', rate: 0.016 }, // 1 NGN = 0.016 BWP (Botswana Pula)
-    { from: 'NGN', to: 'CAD', rate: 0.0016 }, // 1 NGN = 0.0016 CAD
-    { from: 'NGN', to: 'AUD', rate: 0.0018 }, // 1 NGN = 0.0018 AUD
-    
-    // USD to other currencies (USD as base for international)
-    { from: 'USD', to: 'NGN', rate: 833.33 }, // 1 USD = 833.33 NGN
-    { from: 'USD', to: 'EUR', rate: 0.92 }, // 1 USD = 0.92 EUR
-    { from: 'USD', to: 'GBP', rate: 0.79 }, // 1 USD = 0.79 GBP
-    { from: 'USD', to: 'KES', rate: 125 }, // 1 USD = 125 KES
-    { from: 'USD', to: 'GHS', rate: 10 }, // 1 USD = 10 GHS
-    { from: 'USD', to: 'ZAR', rate: 18.5 }, // 1 USD = 18.5 ZAR
-    { from: 'USD', to: 'TZS', rate: 2333 }, // 1 USD = 2333 TZS
-    { from: 'USD', to: 'UGX', rate: 3750 }, // 1 USD = 3750 UGX
-    { from: 'USD', to: 'BWP', rate: 13.5 }, // 1 USD = 13.5 BWP
-    { from: 'USD', to: 'CAD', rate: 1.35 }, // 1 USD = 1.35 CAD
-    { from: 'USD', to: 'AUD', rate: 1.52 }, // 1 USD = 1.52 AUD
-    
-    // EUR to other currencies
-    { from: 'EUR', to: 'NGN', rate: 909.09 }, // 1 EUR = 909.09 NGN
-    { from: 'EUR', to: 'USD', rate: 1.087 }, // 1 EUR = 1.087 USD
-    { from: 'EUR', to: 'GBP', rate: 0.86 }, // 1 EUR = 0.86 GBP
-    { from: 'EUR', to: 'KES', rate: 136 }, // 1 EUR = 136 KES
-    
-    // GBP to other currencies
-    { from: 'GBP', to: 'NGN', rate: 1052.63 }, // 1 GBP = 1052.63 NGN
-    { from: 'GBP', to: 'USD', rate: 1.266 }, // 1 GBP = 1.266 USD
-    { from: 'GBP', to: 'EUR', rate: 1.163 }, // 1 GBP = 1.163 EUR
-    
-    // African currencies to NGN (reverse rates)
-    { from: 'KES', to: 'NGN', rate: 6.67 }, // 1 KES = 6.67 NGN
-    { from: 'GHS', to: 'NGN', rate: 83.33 }, // 1 GHS = 83.33 NGN
-    { from: 'ZAR', to: 'NGN', rate: 45.45 }, // 1 ZAR = 45.45 NGN
-    { from: 'TZS', to: 'NGN', rate: 0.357 }, // 1 TZS = 0.357 NGN
-    { from: 'UGX', to: 'NGN', rate: 0.222 }, // 1 UGX = 0.222 NGN
-    { from: 'BWP', to: 'NGN', rate: 62.5 }, // 1 BWP = 62.5 NGN
-    
-    // African currencies to USD
-    { from: 'KES', to: 'USD', rate: 0.008 }, // 1 KES = 0.008 USD
-    { from: 'GHS', to: 'USD', rate: 0.1 }, // 1 GHS = 0.1 USD
-    { from: 'ZAR', to: 'USD', rate: 0.054 }, // 1 ZAR = 0.054 USD
-    { from: 'TZS', to: 'USD', rate: 0.00043 }, // 1 TZS = 0.00043 USD
-    { from: 'UGX', to: 'USD', rate: 0.00027 }, // 1 UGX = 0.00027 USD
-    { from: 'BWP', to: 'USD', rate: 0.074 }, // 1 BWP = 0.074 USD
-    
-    // USDT (Tether) rates - USDT is pegged to USD (1 USDT ≈ 1 USD)
-    { from: 'USDT', to: 'NGN', rate: 833.33 }, // 1 USDT = 833.33 NGN (same as USD)
-    { from: 'USDT', to: 'USD', rate: 1.0 }, // 1 USDT = 1 USD (pegged)
-    { from: 'NGN', to: 'USDT', rate: 0.0012 }, // 1 NGN = 0.0012 USDT (same as USD)
-    { from: 'USD', to: 'USDT', rate: 1.0 }, // 1 USD = 1 USDT
+    { from: 'NGN', to: 'USD', rate: 1 / USD_NGN },
+    { from: 'NGN', to: 'EUR', rate: USD_EUR / USD_NGN },
+    { from: 'NGN', to: 'GBP', rate: USD_GBP / USD_NGN },
+    { from: 'NGN', to: 'KES', rate: USD_KES / USD_NGN },
+    { from: 'NGN', to: 'GHS', rate: USD_GHS / USD_NGN },
+    { from: 'NGN', to: 'ZAR', rate: USD_ZAR / USD_NGN },
+    { from: 'NGN', to: 'TZS', rate: USD_TZS / USD_NGN },
+    { from: 'NGN', to: 'UGX', rate: USD_UGX / USD_NGN },
+    { from: 'NGN', to: 'BWP', rate: USD_BWP / USD_NGN },
+    { from: 'NGN', to: 'CAD', rate: USD_CAD / USD_NGN },
+    { from: 'NGN', to: 'AUD', rate: USD_AUD / USD_NGN },
+
+    // USD to other currencies
+    { from: 'USD', to: 'NGN', rate: USD_NGN },
+    { from: 'USD', to: 'EUR', rate: USD_EUR },
+    { from: 'USD', to: 'GBP', rate: USD_GBP },
+    { from: 'USD', to: 'KES', rate: USD_KES },
+    { from: 'USD', to: 'GHS', rate: USD_GHS },
+    { from: 'USD', to: 'ZAR', rate: USD_ZAR },
+    { from: 'USD', to: 'TZS', rate: USD_TZS },
+    { from: 'USD', to: 'UGX', rate: USD_UGX },
+    { from: 'USD', to: 'BWP', rate: USD_BWP },
+    { from: 'USD', to: 'CAD', rate: USD_CAD },
+    { from: 'USD', to: 'AUD', rate: USD_AUD },
+
+    // EUR / GBP
+    { from: 'EUR', to: 'NGN', rate: USD_NGN / USD_EUR },
+    { from: 'EUR', to: 'USD', rate: 1 / USD_EUR },
+    { from: 'EUR', to: 'GBP', rate: USD_GBP / USD_EUR },
+    { from: 'EUR', to: 'KES', rate: USD_KES / USD_EUR },
+
+    { from: 'GBP', to: 'NGN', rate: USD_NGN / USD_GBP },
+    { from: 'GBP', to: 'USD', rate: 1 / USD_GBP },
+    { from: 'GBP', to: 'EUR', rate: USD_EUR / USD_GBP },
+
+    // African currencies to NGN / USD
+    { from: 'KES', to: 'NGN', rate: USD_NGN / USD_KES },
+    { from: 'GHS', to: 'NGN', rate: USD_NGN / USD_GHS },
+    { from: 'ZAR', to: 'NGN', rate: USD_NGN / USD_ZAR },
+    { from: 'TZS', to: 'NGN', rate: USD_NGN / USD_TZS },
+    { from: 'UGX', to: 'NGN', rate: USD_NGN / USD_UGX },
+    { from: 'BWP', to: 'NGN', rate: USD_NGN / USD_BWP },
+
+    { from: 'KES', to: 'USD', rate: 1 / USD_KES },
+    { from: 'GHS', to: 'USD', rate: 1 / USD_GHS },
+    { from: 'ZAR', to: 'USD', rate: 1 / USD_ZAR },
+    { from: 'TZS', to: 'USD', rate: 1 / USD_TZS },
+    { from: 'UGX', to: 'USD', rate: 1 / USD_UGX },
+    { from: 'BWP', to: 'USD', rate: 1 / USD_BWP },
+
+    // USDT pegged to USD
+    { from: 'USDT', to: 'NGN', rate: USD_NGN },
+    { from: 'USDT', to: 'USD', rate: 1.0 },
+    { from: 'NGN', to: 'USDT', rate: 1 / USD_NGN },
+    { from: 'USD', to: 'USDT', rate: 1.0 },
   ];
 
   for (const rate of exchangeRates) {

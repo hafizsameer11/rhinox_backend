@@ -19,6 +19,7 @@
     "tatum:backfill-users:dev": "tsx scripts/backfill-crypto-wallets.ts",
     "wallets:backfill": "node --import dotenv/config dist/scripts/backfill-user-wallets.js",
     "wallets:backfill:dev": "tsx scripts/backfill-user-wallets.ts",
+    "rates:update": "tsx scripts/update-exchange-rates.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

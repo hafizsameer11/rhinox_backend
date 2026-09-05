@@ -91,6 +91,10 @@ export class PalmPayWebhookService {
     if (virtualAccount.transaction.status === 'completed') {
       return;
     }
+    const existingMeta = (virtualAccount.transaction.metadata as any) || {};
+    if (existingMeta.ngnCredited === true) {
+      return;
+    }
 
     const mappedStatus = mapPalmPayStatus(payload.orderStatus);
 
@@ -130,17 +134,12 @@ export class PalmPayWebhookService {
           return;
         }
 
-        await tx.wallet.update({
-          where: { id: virtualAccount.transaction.walletId },
-          data: {
-            balance: {
-              increment: creditedAmount.toNumber(),
-            },
+        // Atomic claim: only one of webhook / Fund poll may credit this deposit
+        const claimed = await tx.transaction.updateMany({
+          where: {
+            id: virtualAccount.transactionId,
+            status: { in: ['pending', 'processing'] },
           },
-        });
-
-        await tx.transaction.update({
-          where: { id: virtualAccount.transactionId },
           data: {
             status: 'completed',
             completedAt: payload.completeTime ? new Date(payload.completeTime) : new Date(),
@@ -150,7 +149,22 @@ export class PalmPayWebhookService {
               palmpayOrderNo: payload.orderNo,
               palmpayStatus: payload.orderStatus,
               creditedAmount: creditedAmount.toString(),
+              ngnCredited: true,
               webhook: payload,
+            },
+          },
+        });
+
+        if (claimed.count !== 1) {
+          // Already completed/credited by a concurrent webhook or status poll
+          return;
+        }
+
+        await tx.wallet.update({
+          where: { id: virtualAccount.transaction.walletId },
+          data: {
+            balance: {
+              increment: creditedAmount.toNumber(),
             },
           },
         });
