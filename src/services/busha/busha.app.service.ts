@@ -1164,7 +1164,7 @@ export class BushaAppService {
 
   /**
    * Live buy minimum for one coin — probes Busha quote so the app shows the real
-   * NGN floor (pair counter alone is often too low once fees apply).
+   * NGN floor including processing fees (not just the pair counter).
    */
   async resolveLiveBuyMin(userId: number, targetCurrency: string) {
     const customer = await this.assertCustomerTradeReady(userId);
@@ -1180,24 +1180,31 @@ export class BushaAppService {
 
     let liveMin =
       Number.isFinite(pairMinNgn) && pairMinNgn > 0 ? pairMinNgn : null;
+    let feeTotal = 0;
 
     if (minCrypto && Number(minCrypto) > 0) {
-      const probed = await this.probeBuyMinSourceNgn(customer.bushaProfileId, code, minCrypto);
+      const probed = await this.probeBuyMinSourceNgn(
+        customer.bushaProfileId,
+        code,
+        minCrypto,
+        Number.isFinite(pairMinNgn) ? pairMinNgn : null
+      );
       if (probed != null) {
         liveMin = probed;
       }
-    }
-
-    // Confirm with a source_amount quote at the candidate min; parse provider floor if rejected
-    if (liveMin != null && liveMin > 0) {
+    } else if (Number.isFinite(pairMinNgn) && pairMinNgn > 0) {
+      // No crypto min — still learn fees from a quote at the pair floor
       try {
-        await this.createQuote(customer.bushaProfileId, {
+        const q = await this.createQuote(customer.bushaProfileId, {
           source_currency: 'NGN',
           target_currency: code,
-          source_amount: formatNgnAmount(liveMin),
-          pay_in: { type: 'temporary_bank_account' },
-          pay_out: { type: 'balance' },
+          source_amount: formatNgnAmount(pairMinNgn),
+          ...this.quoteBuyPayIn(),
         });
+        feeTotal = this.extractQuoteFees(q).feeTotal;
+        if (feeTotal > 0) {
+          liveMin = Math.ceil((pairMinNgn + feeTotal) * 100 - Number.EPSILON) / 100;
+        }
       } catch (error: any) {
         const required = parseBushaMinNgnError(error?.message || '');
         if (required != null) {
@@ -1213,6 +1220,7 @@ export class BushaAppService {
       minBuyAmount: minCrypto || limits?.minBuyAmount || null,
       minBuyCurrency: code,
       buyPrice: limits?.buyPrice ?? null,
+      feeTotal,
     };
   }
 
@@ -1635,44 +1643,145 @@ export class BushaAppService {
     return this.client.post('/v1/quotes', quoteBody, profileId);
   }
 
-  /** In-memory cache: true NGN needed to buy pair min crypto (includes provider fees). */
+  /** In-memory cache: true NGN the user must pay for pair-min crypto (includes fees). */
   private buyMinNgnProbeCache = new Map<string, { min: number; at: number }>();
 
+  private quoteBuyPayIn() {
+    return {
+      pay_in: { type: 'temporary_bank_account' as const },
+      pay_out: { type: 'balance' as const },
+    };
+  }
+
+  /**
+   * Lowest NGN source_amount that Busha accepts for this buy
+   * (pair floor + processing fees when they are charged on the payment).
+   */
   private async probeBuyMinSourceNgn(
     profileId: string,
     targetCurrency: string,
-    minCryptoAmount: string
+    minCryptoAmount: string,
+    pairMinNgn?: number | null
   ): Promise<number | null> {
     const code = toBushaCurrency(targetCurrency);
     const cryptoAmt = String(minCryptoAmount || '').trim();
     if (!cryptoAmt || Number(cryptoAmt) <= 0) return null;
 
-    const cacheKey = `${code}:${cryptoAmt}`;
+    const pairFloor =
+      Number.isFinite(Number(pairMinNgn)) && Number(pairMinNgn) > 0 ? Number(pairMinNgn) : 0;
+    const cacheKey = `${code}:${cryptoAmt}:${pairFloor}`;
     const hit = this.buyMinNgnProbeCache.get(cacheKey);
     if (hit && Date.now() - hit.at < 5 * 60 * 1000) {
       return hit.min;
     }
+
+    const pay = this.quoteBuyPayIn();
+    const candidates = new Set<number>();
 
     try {
       const quote = await this.createQuote(profileId, {
         source_currency: 'NGN',
         target_currency: code,
         target_amount: cryptoAmt,
-        pay_in: { type: 'temporary_bank_account' },
-        pay_out: { type: 'balance' },
+        ...pay,
       });
       const src = Number(quote?.source_amount);
-      if (!Number.isFinite(src) || src <= 0) return null;
-      const min = Math.ceil(src * 100 - Number.EPSILON) / 100;
-      this.buyMinNgnProbeCache.set(cacheKey, { min, at: Date.now() });
-      return min;
+      const { feeTotal } = this.extractQuoteFees(quote);
+      if (Number.isFinite(src) && src > 0) {
+        candidates.add(Math.ceil(src * 100 - Number.EPSILON) / 100);
+        // Fees are listed separately from source_amount — user payment must cover both
+        if (feeTotal > 0) {
+          candidates.add(Math.ceil((src + feeTotal) * 100 - Number.EPSILON) / 100);
+        }
+      }
+      if (pairFloor > 0 && feeTotal > 0) {
+        candidates.add(Math.ceil((pairFloor + feeTotal) * 100 - Number.EPSILON) / 100);
+      }
     } catch (error: any) {
       const required = parseBushaMinNgnError(error?.message || '');
-      if (required == null) return null;
-      const min = Math.ceil(required * 100 - Number.EPSILON) / 100;
-      this.buyMinNgnProbeCache.set(cacheKey, { min, at: Date.now() });
-      return min;
+      if (required != null) {
+        candidates.add(Math.ceil(required * 100 - Number.EPSILON) / 100);
+      }
     }
+
+    if (pairFloor > 0) {
+      candidates.add(Math.ceil(pairFloor * 100 - Number.EPSILON) / 100);
+      // Learn fee from a quote at the pair floor (even if it fails on min)
+      try {
+        const floorQuote = await this.createQuote(profileId, {
+          source_currency: 'NGN',
+          target_currency: code,
+          source_amount: formatNgnAmount(pairFloor),
+          ...pay,
+        });
+        const { feeTotal } = this.extractQuoteFees(floorQuote);
+        if (feeTotal > 0) {
+          candidates.add(Math.ceil((pairFloor + feeTotal) * 100 - Number.EPSILON) / 100);
+        }
+      } catch (error: any) {
+        const required = parseBushaMinNgnError(error?.message || '');
+        if (required != null) {
+          candidates.add(Math.ceil(required * 100 - Number.EPSILON) / 100);
+        }
+        // Still try to read fees off provider error payloads when present
+        const feeFromErr = Number(
+          error?.providerResponse?.error?.fees?.[0]?.amount?.amount ??
+            error?.providerResponse?.fees?.[0]?.amount?.amount
+        );
+        if (Number.isFinite(feeFromErr) && feeFromErr > 0 && pairFloor > 0) {
+          candidates.add(Math.ceil((pairFloor + feeFromErr) * 100 - Number.EPSILON) / 100);
+        }
+      }
+    }
+
+    const sorted = Array.from(candidates)
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .sort((a, b) => a - b);
+
+    if (!sorted.length) return null;
+
+    // Pick the lowest candidate that actually quotes successfully
+    let fallback = sorted[sorted.length - 1];
+    for (const candidate of sorted) {
+      try {
+        const q = await this.createQuote(profileId, {
+          source_currency: 'NGN',
+          target_currency: code,
+          source_amount: formatNgnAmount(candidate),
+          ...pay,
+        });
+        const { feeTotal } = this.extractQuoteFees(q);
+        // If this quote still lists fees on top of source, require source+fee
+        if (feeTotal > 0) {
+          const withFee = Math.ceil((candidate + feeTotal) * 100 - Number.EPSILON) / 100;
+          if (withFee > candidate + 1e-9) {
+            try {
+              await this.createQuote(profileId, {
+                source_currency: 'NGN',
+                target_currency: code,
+                source_amount: formatNgnAmount(withFee),
+                ...pay,
+              });
+              this.buyMinNgnProbeCache.set(cacheKey, { min: withFee, at: Date.now() });
+              return withFee;
+            } catch {
+              fallback = Math.max(fallback, withFee);
+              continue;
+            }
+          }
+        }
+        this.buyMinNgnProbeCache.set(cacheKey, { min: candidate, at: Date.now() });
+        return candidate;
+      } catch (error: any) {
+        const required = parseBushaMinNgnError(error?.message || '');
+        if (required != null) {
+          fallback = Math.max(fallback, Math.ceil(required * 100 - Number.EPSILON) / 100);
+        }
+      }
+    }
+
+    this.buyMinNgnProbeCache.set(cacheKey, { min: fallback, at: Date.now() });
+    return fallback;
   }
 
   /**
