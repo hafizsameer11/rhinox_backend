@@ -2,27 +2,35 @@ import axios, { type AxiosInstance } from 'axios';
 import ApiError from '../../core/utils/ApiError.js';
 import { getBushaConfig } from './busha.config.js';
 
+function sanitizeBushaUserMessage(message: string): string {
+  return String(message || '')
+    .replace(/\bBusha\b/gi, 'crypto')
+    .replace(/\bbusha\b/g, 'crypto')
+    .trim() || 'Crypto request failed';
+}
+
 export class BushaProviderError extends Error {
   constructor(
     message: string,
     public readonly statusCode = 500,
     public readonly providerResponse?: any
   ) {
-    super(message);
+    super(sanitizeBushaUserMessage(message));
     this.name = 'BushaProviderError';
   }
 
   toApiError(): ApiError {
+    const message = sanitizeBushaUserMessage(this.message);
     if (this.statusCode === 400 || this.statusCode === 422) {
-      return ApiError.badRequest(this.message);
+      return ApiError.badRequest(message);
     }
     if (this.statusCode === 401 || this.statusCode === 403) {
-      return ApiError.unauthorized(this.message);
+      return ApiError.unauthorized(message);
     }
     if (this.statusCode === 404) {
-      return ApiError.notFound(this.message);
+      return ApiError.notFound(message);
     }
-    return ApiError.internal(this.message);
+    return ApiError.internal(message);
   }
 }
 
@@ -48,7 +56,7 @@ export class BushaClient {
   private unwrap<T>(data: any): T {
     if (data?.error) {
       const statusName = String(data.error.name || '');
-      const message = data.error.message || 'Busha request failed';
+      const message = sanitizeBushaUserMessage(data.error.message || 'Crypto request failed');
       let statusCode = 400;
       if (statusName.includes('unauthorized')) statusCode = 401;
       if (statusName.includes('not_found')) statusCode = 404;
@@ -63,11 +71,12 @@ export class BushaClient {
     }
     const status = error.response?.status || 503;
     const body = error.response?.data;
-    const message =
+    const message = sanitizeBushaUserMessage(
       body?.error?.message ||
       body?.message ||
       error.message ||
-      'Busha is unavailable';
+      'Crypto service is unavailable'
+    );
     throw new BushaProviderError(message, status, body);
   }
 

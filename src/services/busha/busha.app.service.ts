@@ -89,19 +89,29 @@ async function getOrCreateConfig() {
 
 type BushaMoney = { amount: string; currency: string };
 
-/** Extract a numeric amount string from Busha scalar / AmountWithCurrency / nested counter. */
+/** Extract a numeric amount string from Busha scalar / AmountWithCurrency.
+ * Never fall back to `counter.amount` — that is the fiat equivalent, not crypto units.
+ */
 function extractBushaAmountField(value: any): string | null {
   if (value == null || value === '') return null;
   if (typeof value === 'object') {
-    const nested = value.amount ?? value.value ?? value.counter?.amount;
+    const nested = value.amount ?? value.value;
     if (nested == null || nested === '' || typeof nested === 'object') return null;
     return String(nested);
   }
   return String(value);
 }
 
-/** Positive limit only — Busha uses "0" for unlimited / not set on max withdrawal. */
+/** Positive limit only — Busha uses "0" for unlimited / not set on max withdrawal.
+ * Ignores NGN-denominated objects so fiat counters never show as USDT/USD mins.
+ */
 function normalizePositiveAmount(value: any): string | null {
+  if (value != null && typeof value === 'object') {
+    const cur = String(value.currency || '').toUpperCase();
+    if (cur === 'NGN' || cur === 'USD' || cur === 'KES' || cur === 'GHS') {
+      return null;
+    }
+  }
   const raw = extractBushaAmountField(value);
   if (raw == null) return null;
   const n = Number(raw);
@@ -150,13 +160,15 @@ function parseBushaPairLimitCrypto(value: any, cryptoCode: string): BushaMoney |
   if (value == null || value === '') return null;
   if (typeof value === 'object') {
     const top = parseBushaMoney(value, cryptoCode);
+    // Only accept top-level when it is clearly crypto (not NGN fiat)
     if (top && top.currency && top.currency !== 'NGN') {
       return { amount: top.amount, currency: top.currency || cryptoCode };
     }
-    // Only NGN on the object — convert later via normalizePairLimit
-    const counter = parseBushaMoney(value.counter, 'NGN');
-    if (counter?.currency === 'NGN') return counter;
-    return top;
+    // Top-level NGN only — return for convert via normalizePairLimit; never use counter here
+    if (top?.currency === 'NGN') {
+      return top;
+    }
+    return null;
   }
   return parseBushaMoney(value, cryptoCode);
 }
@@ -165,6 +177,38 @@ function roundMoney(n: number, decimals = 2): string {
   if (!Number.isFinite(n)) return '0';
   const f = 10 ** decimals;
   return String(Math.ceil(n * f - Number.EPSILON) / f);
+}
+
+/** Prefer the higher of fiat counter vs crypto×price so exact min never fails quote validation. */
+function resolveBuyMinNgn(opts: {
+  ngnFromCounter: string | null;
+  cryptoMin: BushaMoney | null;
+  priceNgn: number | null;
+  cryptoCode: string;
+}): string | null {
+  const candidates: number[] = [];
+  const counter = Number(opts.ngnFromCounter);
+  if (Number.isFinite(counter) && counter > 0) {
+    // +1 NGN so exact counter amounts still clear quote/fee checks
+    candidates.push(counter + 1);
+  }
+
+  const cryptoAmt = Number(opts.cryptoMin?.amount);
+  const cryptoCur = String(opts.cryptoMin?.currency || '').toUpperCase();
+  if (
+    Number.isFinite(cryptoAmt) &&
+    cryptoAmt > 0 &&
+    cryptoCur &&
+    cryptoCur !== 'NGN' &&
+    opts.priceNgn &&
+    opts.priceNgn > 0
+  ) {
+    // Ceil + 1 NGN buffer — Busha often rejects exact counter when fees reduce crypto received
+    candidates.push(Number(roundMoney(cryptoAmt * opts.priceNgn, 2)) + 1);
+  }
+
+  if (!candidates.length) return null;
+  return String(Math.max(...candidates));
 }
 
 /**
@@ -251,7 +295,7 @@ export class BushaAppService {
 
   async assertPlatformActive() {
     if (!isBushaEnabled()) {
-      throw ApiError.serviceUnavailable('Busha is not configured');
+      throw ApiError.serviceUnavailable('Crypto trading is not configured');
     }
     const config = await getOrCreateConfig();
     if (!config.isActive) {
@@ -956,6 +1000,12 @@ export class BushaAppService {
         priceNgn: priceForBuy,
         as: 'buy_ngn',
       });
+      const resolvedMinBuyNgn = resolveBuyMinNgn({
+        ngnFromCounter: minBuy.displayCurrency === 'NGN' ? minBuy.displayAmount : null,
+        cryptoMin: minBuyCryptoRaw,
+        priceNgn: priceForBuy,
+        cryptoCode,
+      });
       const minSell = normalizePairLimit({
         money: minSellRaw,
         cryptoCode,
@@ -981,6 +1031,13 @@ export class BushaAppService {
         as: 'buy_ngn',
       });
 
+      const cryptoOnly = (m: BushaMoney | null) =>
+        m && m.currency && m.currency !== 'NGN' ? m : null;
+      const minBuyCryptoOnly = cryptoOnly(minBuyCryptoRaw);
+      const maxBuyCryptoOnly = cryptoOnly(maxBuyCryptoRaw);
+      const minSellCryptoOnly = cryptoOnly(minSellRaw);
+      const maxSellCryptoOnly = cryptoOnly(maxSellRaw);
+
       byCode.set(cryptoCode, {
         code: cryptoCode,
         name:
@@ -999,18 +1056,18 @@ export class BushaAppService {
         sellSupported: existing?.sellSupported || sellSupported,
         buyPrice,
         sellPrice,
-        minBuyAmount: minBuyCryptoRaw?.amount || existing?.minBuyAmount || null,
-        minBuyCurrency: minBuyCryptoRaw?.currency || existing?.minBuyCurrency || cryptoCode,
-        maxBuyAmount: maxBuyCryptoRaw?.amount || existing?.maxBuyAmount || null,
-        maxBuyCurrency: maxBuyCryptoRaw?.currency || existing?.maxBuyCurrency || cryptoCode,
-        minBuyNgn: minBuy.displayCurrency === 'NGN' ? minBuy.displayAmount : existing?.minBuyNgn || null,
+        minBuyAmount: minBuyCryptoOnly?.amount || existing?.minBuyAmount || null,
+        minBuyCurrency: minBuyCryptoOnly?.currency || existing?.minBuyCurrency || cryptoCode,
+        maxBuyAmount: maxBuyCryptoOnly?.amount || existing?.maxBuyAmount || null,
+        maxBuyCurrency: maxBuyCryptoOnly?.currency || existing?.maxBuyCurrency || cryptoCode,
+        minBuyNgn: resolvedMinBuyNgn || existing?.minBuyNgn || null,
         maxBuyNgn: maxBuy.displayCurrency === 'NGN' ? maxBuy.displayAmount : existing?.maxBuyNgn || null,
-        minSellAmount: minSellRaw?.amount || existing?.minSellAmount || null,
-        minSellCurrency: minSellRaw?.currency || existing?.minSellCurrency || null,
-        maxSellAmount: maxSellRaw?.amount || existing?.maxSellAmount || null,
-        maxSellCurrency: maxSellRaw?.currency || existing?.maxSellCurrency || null,
-        minSellCrypto: minSell.displayAmount || existing?.minSellCrypto || null,
-        maxSellCrypto: maxSell.displayAmount || existing?.maxSellCrypto || null,
+        minSellAmount: minSellCryptoOnly?.amount || minSell.displayAmount || existing?.minSellAmount || null,
+        minSellCurrency: minSellCryptoOnly?.currency || cryptoCode,
+        maxSellAmount: maxSellCryptoOnly?.amount || maxSell.displayAmount || existing?.maxSellAmount || null,
+        maxSellCurrency: maxSellCryptoOnly?.currency || cryptoCode,
+        minSellCrypto: minSell.displayCurrency === cryptoCode ? minSell.displayAmount : existing?.minSellCrypto || null,
+        maxSellCrypto: maxSell.displayCurrency === cryptoCode ? maxSell.displayAmount : existing?.maxSellCrypto || null,
         minSellNgn:
           minSellNgn.displayCurrency === 'NGN' ? minSellNgn.displayAmount : existing?.minSellNgn || null,
         maxSellNgn:
@@ -1147,7 +1204,7 @@ export class BushaAppService {
       (Array.isArray(addressPayload) ? addressPayload[0]?.address : null);
 
     if (!address) {
-      throw ApiError.internal('Busha did not return a deposit address');
+      throw ApiError.internal('Could not generate a deposit address');
     }
 
     return {
@@ -1673,7 +1730,7 @@ export class BushaAppService {
     }
 
     throw ApiError.serviceUnavailable(
-      'Sell preview recipient is not configured. Set Busha payout bank details or complete one sell setup first.'
+      'Sell preview recipient is not configured. Complete one sell setup first or contact support.'
     );
   }
 
