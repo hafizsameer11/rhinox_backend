@@ -221,6 +221,21 @@ function formatNgnAmount(amount: number): string {
   return (Math.round((amount + Number.EPSILON) * 100) / 100).toFixed(2);
 }
 
+/** User-facing fee labels — never show provider jargon like "payment gateway fee". */
+function sanitizeFeeLabel(name?: string | null): string {
+  const raw = String(name || '').trim();
+  if (!raw) return 'Fee';
+  if (/payment\s*gateway/i.test(raw) || /^gateway(\s+fee)?$/i.test(raw)) {
+    return 'Processing fee';
+  }
+  const cleaned = raw
+    .replace(/\bbusha\b/gi, '')
+    .replace(/\bpalmpay\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return cleaned || 'Fee';
+}
+
 /**
  * Convert a Busha pair limit into the unit the app uses:
  * - Buy UI / quote source_amount → NGN
@@ -1114,7 +1129,30 @@ export class BushaAppService {
       }
     }
 
-    return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code));
+    const assets = Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code));
+
+    // Probe live NGN mins (includes fees) so the app shows the real floor on first paint
+    await Promise.all(
+      assets.map(async (asset) => {
+        if (!asset.buySupported || !asset.minBuyAmount) return;
+        try {
+          const probed = await this.probeBuyMinSourceNgn(
+            customer.bushaProfileId,
+            asset.code,
+            asset.minBuyAmount
+          );
+          if (probed == null) return;
+          const current = Number(asset.minBuyNgn);
+          asset.minBuyNgn = String(
+            Math.max(Number.isFinite(current) && current > 0 ? current : 0, probed)
+          );
+        } catch {
+          /* keep pair-derived min */
+        }
+      })
+    );
+
+    return assets;
   }
 
   /** Look up Busha pair limits for one crypto vs NGN. */
@@ -1723,7 +1761,10 @@ export class BushaAppService {
   }
 
   private extractQuoteFees(quote: any) {
-    const fees = Array.isArray(quote?.fees) ? quote.fees : [];
+    const fees = (Array.isArray(quote?.fees) ? quote.fees : []).map((fee: any) => ({
+      ...fee,
+      name: sanitizeFeeLabel(fee?.name),
+    }));
     const feeTotal = fees.reduce((sum: number, fee: any) => {
       const raw = fee?.amount?.amount ?? fee?.amount ?? fee?.converted_amount?.amount ?? 0;
       const n = Number(raw);
