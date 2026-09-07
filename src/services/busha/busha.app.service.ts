@@ -1133,25 +1133,6 @@ export class BushaAppService {
 
     const assets = Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code));
 
-    // Probe live NGN mins from Busha quotes (authoritative — includes fees)
-    await Promise.all(
-      assets.map(async (asset) => {
-        if (!asset.buySupported || !asset.minBuyAmount) return;
-        try {
-          const probed = await this.probeBuyMinSourceNgn(
-            customer.bushaProfileId,
-            asset.code,
-            asset.minBuyAmount
-          );
-          if (probed == null) return;
-          // Prefer live quote min over pair counter (that's the amount Busha actually accepts)
-          asset.minBuyNgn = String(probed);
-        } catch {
-          /* keep pair-derived min */
-        }
-      })
-    );
-
     // Sell: raise crypto min if PalmPay payout floor (₦100) requires more crypto
     const PALMPAY_SELL_MIN_NGN = 100;
     for (const asset of assets) {
@@ -1179,6 +1160,60 @@ export class BushaAppService {
     }
 
     return assets;
+  }
+
+  /**
+   * Live buy minimum for one coin — probes Busha quote so the app shows the real
+   * NGN floor (pair counter alone is often too low once fees apply).
+   */
+  async resolveLiveBuyMin(userId: number, targetCurrency: string) {
+    const customer = await this.assertCustomerTradeReady(userId);
+    const code = toBushaCurrency(targetCurrency);
+    const limits = await this.getPairLimitsForCrypto(userId, code);
+    const pairMinNgn = Number(limits?.minBuyNgn);
+    const price = Number(limits?.buyPrice || limits?.sellPrice);
+    let minCrypto = limits?.minBuyAmount ? String(limits.minBuyAmount) : null;
+
+    if ((!minCrypto || Number(minCrypto) <= 0) && Number.isFinite(price) && price > 0 && pairMinNgn > 0) {
+      minCrypto = String(pairMinNgn / price);
+    }
+
+    let liveMin =
+      Number.isFinite(pairMinNgn) && pairMinNgn > 0 ? pairMinNgn : null;
+
+    if (minCrypto && Number(minCrypto) > 0) {
+      const probed = await this.probeBuyMinSourceNgn(customer.bushaProfileId, code, minCrypto);
+      if (probed != null) {
+        liveMin = probed;
+      }
+    }
+
+    // Confirm with a source_amount quote at the candidate min; parse provider floor if rejected
+    if (liveMin != null && liveMin > 0) {
+      try {
+        await this.createQuote(customer.bushaProfileId, {
+          source_currency: 'NGN',
+          target_currency: code,
+          source_amount: formatNgnAmount(liveMin),
+          pay_in: { type: 'temporary_bank_account' },
+          pay_out: { type: 'balance' },
+        });
+      } catch (error: any) {
+        const required = parseBushaMinNgnError(error?.message || '');
+        if (required != null) {
+          liveMin = Math.ceil(required * 100 - Number.EPSILON) / 100;
+        }
+      }
+    }
+
+    return {
+      code,
+      minBuyNgn: liveMin != null ? String(liveMin) : limits?.minBuyNgn ?? null,
+      maxBuyNgn: limits?.maxBuyNgn ?? null,
+      minBuyAmount: minCrypto || limits?.minBuyAmount || null,
+      minBuyCurrency: code,
+      buyPrice: limits?.buyPrice ?? null,
+    };
   }
 
   /** Look up Busha pair limits for one crypto vs NGN. */

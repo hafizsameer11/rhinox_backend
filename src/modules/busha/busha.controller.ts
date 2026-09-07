@@ -72,6 +72,16 @@ export class BushaController {
     }
   }
 
+  async buyMin(req: Request, res: Response) {
+    try {
+      const code = String(req.params.code || req.query.currency || '');
+      const data = await this.service.resolveLiveBuyMin(userIdFrom(req), code);
+      return res.json({ success: true, data });
+    } catch (error) {
+      return sendError(res, error);
+    }
+  }
+
   async currencyLimits(req: Request, res: Response) {
     try {
       const data = await this.service.getWithdrawLimits(userIdFrom(req), String(req.params.code || ''));
