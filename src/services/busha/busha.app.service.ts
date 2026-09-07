@@ -189,8 +189,8 @@ function resolveBuyMinNgn(opts: {
   const candidates: number[] = [];
   const counter = Number(opts.ngnFromCounter);
   if (Number.isFinite(counter) && counter > 0) {
-    // +1 NGN so exact counter amounts still clear quote/fee checks
-    candidates.push(counter + 1);
+    // Provider often enforces counter+0.01 and may skim fees from source_amount
+    candidates.push(Math.ceil(counter) + 2);
   }
 
   const cryptoAmt = Number(opts.cryptoMin?.amount);
@@ -203,12 +203,22 @@ function resolveBuyMinNgn(opts: {
     opts.priceNgn &&
     opts.priceNgn > 0
   ) {
-    // Ceil + 1 NGN buffer — Busha often rejects exact counter when fees reduce crypto received
-    candidates.push(Number(roundMoney(cryptoAmt * opts.priceNgn, 2)) + 1);
+    candidates.push(Number(roundMoney(cryptoAmt * opts.priceNgn, 2)) + 2);
   }
 
   if (!candidates.length) return null;
   return String(Math.max(...candidates));
+}
+
+function parseBushaMinNgnError(message: string): number | null {
+  const m = String(message || '').match(/minimum\s+(?:sale|buy)\s+amount\s+is\s+([\d.]+)\s*NGN/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function formatNgnAmount(amount: number): string {
+  return (Math.round((amount + Number.EPSILON) * 100) / 100).toFixed(2);
 }
 
 /**
@@ -1526,6 +1536,113 @@ export class BushaAppService {
     return this.client.post('/v1/quotes', quoteBody, profileId);
   }
 
+  /** In-memory cache: true NGN needed to buy pair min crypto (includes provider fees). */
+  private buyMinNgnProbeCache = new Map<string, { min: number; at: number }>();
+
+  private async probeBuyMinSourceNgn(
+    profileId: string,
+    targetCurrency: string,
+    minCryptoAmount: string
+  ): Promise<number | null> {
+    const code = toBushaCurrency(targetCurrency);
+    const cryptoAmt = String(minCryptoAmount || '').trim();
+    if (!cryptoAmt || Number(cryptoAmt) <= 0) return null;
+
+    const cacheKey = `${code}:${cryptoAmt}`;
+    const hit = this.buyMinNgnProbeCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < 5 * 60 * 1000) {
+      return hit.min;
+    }
+
+    try {
+      const quote = await this.createQuote(profileId, {
+        source_currency: 'NGN',
+        target_currency: code,
+        target_amount: cryptoAmt,
+        pay_in: { type: 'temporary_bank_account' },
+        pay_out: { type: 'balance' },
+      });
+      const src = Number(quote?.source_amount);
+      if (!Number.isFinite(src) || src <= 0) return null;
+      const min = Math.ceil(src * 100 - Number.EPSILON) / 100;
+      this.buyMinNgnProbeCache.set(cacheKey, { min, at: Date.now() });
+      return min;
+    } catch (error: any) {
+      const required = parseBushaMinNgnError(error?.message || '');
+      if (required == null) return null;
+      const min = Math.ceil(required * 100 - Number.EPSILON) / 100;
+      this.buyMinNgnProbeCache.set(cacheKey, { min, at: Date.now() });
+      return min;
+    }
+  }
+
+  /**
+   * Create NGN→crypto buy quote. Uses 2dp source_amount; if provider rejects an amount
+   * that already meets the stated min (fees/rounding), retries via target_amount.
+   */
+  private async createBuyQuote(opts: {
+    profileId: string;
+    targetCurrency: string;
+    sourceAmountNgn: number;
+    buyPriceNgn?: number | null;
+    minCryptoAmount?: string | null;
+  }) {
+    const code = toBushaCurrency(opts.targetCurrency);
+    const sourceAmount = formatNgnAmount(opts.sourceAmountNgn);
+    const pay = {
+      pay_in: { type: 'temporary_bank_account' as const },
+      pay_out: { type: 'balance' as const },
+    };
+
+    try {
+      return await this.createQuote(opts.profileId, {
+        source_currency: 'NGN',
+        target_currency: code,
+        source_amount: sourceAmount,
+        ...pay,
+      });
+    } catch (error: any) {
+      const required = parseBushaMinNgnError(error?.message || '');
+      const price = Number(opts.buyPriceNgn);
+      const canRetryViaTarget =
+        required != null &&
+        opts.sourceAmountNgn + 1e-9 >= required &&
+        Number.isFinite(price) &&
+        price > 0;
+
+      if (canRetryViaTarget) {
+        let targetCrypto = opts.sourceAmountNgn / price;
+        const minCrypto = Number(opts.minCryptoAmount);
+        if (Number.isFinite(minCrypto) && minCrypto > 0) {
+          targetCrypto = Math.max(targetCrypto, minCrypto);
+        }
+        try {
+          return await this.createQuote(opts.profileId, {
+            source_currency: 'NGN',
+            target_currency: code,
+            target_amount: targetCrypto.toFixed(8),
+            ...pay,
+          });
+        } catch (retryError: any) {
+          const req2 = parseBushaMinNgnError(retryError?.message || '');
+          if (req2 != null) {
+            throw ApiError.badRequest(
+              `Minimum buy is ₦${Math.ceil(req2).toLocaleString('en-NG')} for ${code}`
+            );
+          }
+          throw retryError;
+        }
+      }
+
+      if (required != null) {
+        throw ApiError.badRequest(
+          `Minimum buy is ₦${Math.ceil(required).toLocaleString('en-NG')} for ${code}`
+        );
+      }
+      throw error;
+    }
+  }
+
   private async createTransferFromQuote(profileId: string, quoteId: string) {
     return this.client.post('/v1/transfers', { quote_id: quoteId }, profileId);
   }
@@ -1801,28 +1918,46 @@ export class BushaAppService {
       throw ApiError.badRequest('Enter a valid NGN amount');
     }
     const pairLimits = await this.getPairLimitsForCrypto(userId, targetCurrency);
-    this.assertBuyAmountWithinPairLimits(pairLimits, amount, targetCurrency);
-
-    const quote = await this.client.post(
-      '/v1/quotes',
-      {
-        source_currency: 'NGN',
-        target_currency: toBushaCurrency(targetCurrency),
-        source_amount: String(sourceAmount),
-        pay_in: { type: 'temporary_bank_account' },
-        pay_out: { type: 'balance' },
-      },
-      customer.bushaProfileId
+    let effectiveMin = Number(pairLimits?.minBuyNgn);
+    if (pairLimits?.minBuyAmount) {
+      const probed = await this.probeBuyMinSourceNgn(
+        customer.bushaProfileId,
+        targetCurrency,
+        pairLimits.minBuyAmount
+      );
+      if (probed != null) {
+        effectiveMin = Math.max(Number.isFinite(effectiveMin) ? effectiveMin : 0, probed);
+      }
+    }
+    if (Number.isFinite(effectiveMin) && effectiveMin > 0 && amount + 1e-9 < effectiveMin) {
+      throw ApiError.badRequest(
+        `Minimum buy is ₦${Number(effectiveMin).toLocaleString('en-NG')} for ${toBushaCurrency(targetCurrency)}`
+      );
+    }
+    this.assertBuyAmountWithinPairLimits(
+      pairLimits
+        ? { ...pairLimits, minBuyNgn: Number.isFinite(effectiveMin) ? String(effectiveMin) : pairLimits.minBuyNgn }
+        : pairLimits,
+      amount,
+      targetCurrency
     );
+
+    const quote = await this.createBuyQuote({
+      profileId: customer.bushaProfileId,
+      targetCurrency,
+      sourceAmountNgn: amount,
+      buyPriceNgn: pairLimits?.buyPrice ? Number(pairLimits.buyPrice) : null,
+      minCryptoAmount: pairLimits?.minBuyAmount || null,
+    });
     const { fees, feeTotal } = this.extractQuoteFees(quote);
     return {
       ...quote,
       isEstimate: true,
-      youPayNgn: quote?.source_amount ?? sourceAmount,
+      youPayNgn: quote?.source_amount ?? formatNgnAmount(amount),
       youReceive: quote?.target_amount ?? null,
       feeTotal,
       fees,
-      minBuyNgn: pairLimits?.minBuyNgn ?? null,
+      minBuyNgn: Number.isFinite(effectiveMin) && effectiveMin > 0 ? String(effectiveMin) : pairLimits?.minBuyNgn ?? null,
       maxBuyNgn: pairLimits?.maxBuyNgn ?? null,
       note: 'Estimated crypto you receive. Fees (if any) are shown separately.',
     };
@@ -1836,13 +1971,47 @@ export class BushaAppService {
     }
 
     const pairLimits = await this.getPairLimitsForCrypto(userId, targetCurrency);
-    this.assertBuyAmountWithinPairLimits(pairLimits, amount, targetCurrency);
+    let effectiveMin = Number(pairLimits?.minBuyNgn);
+    if (pairLimits?.minBuyAmount) {
+      const probed = await this.probeBuyMinSourceNgn(
+        customer.bushaProfileId,
+        targetCurrency,
+        pairLimits.minBuyAmount
+      );
+      if (probed != null) {
+        effectiveMin = Math.max(Number.isFinite(effectiveMin) ? effectiveMin : 0, probed);
+      }
+    }
+    if (Number.isFinite(effectiveMin) && effectiveMin > 0 && amount + 1e-9 < effectiveMin) {
+      throw ApiError.badRequest(
+        `Minimum buy is ₦${Number(effectiveMin).toLocaleString('en-NG')} for ${toBushaCurrency(targetCurrency)}`
+      );
+    }
+    this.assertBuyAmountWithinPairLimits(
+      pairLimits
+        ? { ...pairLimits, minBuyNgn: Number.isFinite(effectiveMin) ? String(effectiveMin) : pairLimits.minBuyNgn }
+        : pairLimits,
+      amount,
+      targetCurrency
+    );
+
+    // Quote first so fees/rounding are known before debiting
+    const quote = await this.createBuyQuote({
+      profileId: customer.bushaProfileId,
+      targetCurrency,
+      sourceAmountNgn: amount,
+      buyPriceNgn: pairLimits?.buyPrice ? Number(pairLimits.buyPrice) : null,
+      minCryptoAmount: pairLimits?.minBuyAmount || null,
+    });
+    const payAmount = Number(quote?.source_amount);
+    const debitAmount =
+      Number.isFinite(payAmount) && payAmount > 0 ? Math.round(payAmount * 100) / 100 : amount;
 
     const ngnWallet = await prisma.wallet.findUnique({
       where: { userId_currency: { userId, currency: 'NGN' } },
     });
     if (!ngnWallet) throw ApiError.badRequest('NGN wallet not found');
-    if (Number(ngnWallet.balance) < amount) {
+    if (Number(ngnWallet.balance) < debitAmount) {
       throw ApiError.badRequest('Insufficient NGN balance');
     }
 
@@ -1852,7 +2021,7 @@ export class BushaAppService {
         walletId: ngnWallet.id,
         type: 'crypto_buy',
         status: 'pending',
-        amount,
+        amount: debitAmount,
         currency: 'NGN',
         reference,
         description: `Buy ${toBushaCurrency(targetCurrency)}`,
@@ -1863,18 +2032,12 @@ export class BushaAppService {
 
     await prisma.wallet.update({
       where: { id: ngnWallet.id },
-      data: { balance: { decrement: amount } },
+      data: { balance: { decrement: debitAmount } },
     });
 
     let debitReversed = false;
     try {
-      const { quote, transfer } = await this.createQuoteAndTransfer(customer.bushaProfileId, {
-        source_currency: 'NGN',
-        target_currency: toBushaCurrency(targetCurrency),
-        source_amount: String(sourceAmount),
-        pay_in: { type: 'temporary_bank_account' },
-        pay_out: { type: 'balance' },
-      });
+      const transfer = await this.createTransferFromQuote(customer.bushaProfileId, quote.id);
 
       const details = transfer.pay_in?.recipient_details || {};
       const trade = await prisma.bushaTradeLog.create({
@@ -1885,7 +2048,7 @@ export class BushaAppService {
           status: 'awaiting_palmpay',
           sourceCurrency: 'NGN',
           targetCurrency: toBushaCurrency(targetCurrency),
-          sourceAmount: String(sourceAmount),
+          sourceAmount: formatNgnAmount(debitAmount),
           targetAmount: String(transfer.target_amount || quote.target_amount || ''),
           bushaQuoteId: quote.id,
           bushaTransferId: transfer.id,
@@ -1901,17 +2064,17 @@ export class BushaAppService {
       });
 
       if (!details.account_number) {
-        await this.reverseBuy(trade.id, 'Busha did not return a temporary bank account');
+        await this.reverseBuy(trade.id, 'Crypto provider did not return a temporary bank account');
         debitReversed = true;
-        throw ApiError.internal('Busha buy account missing');
+        throw ApiError.internal('Buy funding account missing');
       }
 
       const palmpayBankCode = resolvePalmpayBankCode(details.bank_code, details.bank_name);
       const payout = await this.palmPayPayout.initiatePayout({
         orderId: reference.slice(0, 32),
-        amount,
+        amount: debitAmount,
         accountNumber: details.account_number,
-        accountName: details.account_name || 'Busha',
+        accountName: details.account_name || 'Crypto',
         bankCode: palmpayBankCode,
         userId,
       });
@@ -1927,9 +2090,9 @@ export class BushaAppService {
       });
 
       if (palmpayStatus === 'failed') {
-        await this.reverseBuy(trade.id, 'PalmPay payout to Busha failed');
+        await this.reverseBuy(trade.id, 'PalmPay payout to crypto provider failed');
         debitReversed = true;
-        throw ApiError.internal('Failed to fund Busha buy account');
+        throw ApiError.internal('Failed to fund buy account');
       }
 
       return prisma.bushaTradeLog.findUnique({ where: { id: trade.id } });
@@ -1937,11 +2100,11 @@ export class BushaAppService {
       if (!debitReversed) {
         await prisma.wallet.update({
           where: { id: ngnWallet.id },
-          data: { balance: { increment: amount } },
+          data: { balance: { increment: debitAmount } },
         });
         await prisma.transaction.update({
           where: { id: fiatTx.id },
-          data: { status: 'failed', description: 'Busha buy reversed' },
+          data: { status: 'failed', description: 'Crypto buy reversed' },
         });
       }
       throw error instanceof BushaProviderError ? error.toApiError() : error;
