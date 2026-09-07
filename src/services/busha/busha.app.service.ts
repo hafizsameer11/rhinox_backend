@@ -103,12 +103,14 @@ function extractBushaAmountField(value: any): string | null {
 }
 
 /** Positive limit only — Busha uses "0" for unlimited / not set on max withdrawal.
- * Ignores NGN-denominated objects so fiat counters never show as USDT/USD mins.
+ * Ignores fiat-denominated objects when expecting crypto units.
  */
-function normalizePositiveAmount(value: any): string | null {
+function normalizePositiveAmount(value: any, expectedCurrency?: string): string | null {
   if (value != null && typeof value === 'object') {
     const cur = String(value.currency || '').toUpperCase();
-    if (cur === 'NGN' || cur === 'USD' || cur === 'KES' || cur === 'GHS') {
+    const expected = String(expectedCurrency || '').toUpperCase();
+    const fiat = ['NGN', 'USD', 'KES', 'GHS', 'UGX', 'TZS', 'ZAR', 'EUR', 'GBP'];
+    if (cur && fiat.includes(cur) && cur !== expected) {
       return null;
     }
   }
@@ -179,7 +181,7 @@ function roundMoney(n: number, decimals = 2): string {
   return String(Math.ceil(n * f - Number.EPSILON) / f);
 }
 
-/** Prefer the higher of fiat counter vs crypto×price so exact min never fails quote validation. */
+/** Resolve buy min NGN from Busha pair fields only (no artificial padding). */
 function resolveBuyMinNgn(opts: {
   ngnFromCounter: string | null;
   cryptoMin: BushaMoney | null;
@@ -189,8 +191,8 @@ function resolveBuyMinNgn(opts: {
   const candidates: number[] = [];
   const counter = Number(opts.ngnFromCounter);
   if (Number.isFinite(counter) && counter > 0) {
-    // Provider often enforces counter+0.01 and may skim fees from source_amount
-    candidates.push(Math.ceil(counter) + 2);
+    // Exact Busha counter, kobo precision
+    candidates.push(Math.ceil(counter * 100 - Number.EPSILON) / 100);
   }
 
   const cryptoAmt = Number(opts.cryptoMin?.amount);
@@ -203,7 +205,7 @@ function resolveBuyMinNgn(opts: {
     opts.priceNgn &&
     opts.priceNgn > 0
   ) {
-    candidates.push(Number(roundMoney(cryptoAmt * opts.priceNgn, 2)) + 2);
+    candidates.push(Number(roundMoney(cryptoAmt * opts.priceNgn, 2)));
   }
 
   if (!candidates.length) return null;
@@ -844,7 +846,7 @@ export class BushaAppService {
               id: String(n?.id || chain.blockchain),
               blockchain: chain.blockchain,
               blockchainName: chain.blockchainName,
-              minDepositAmount: normalizePositiveAmount(n?.min_deposit_amount),
+              minDepositAmount: normalizePositiveAmount(n?.min_deposit_amount, code),
             };
           })
           // Drop unknown / empty mappings; never keep Polygon for USDT
@@ -1131,7 +1133,7 @@ export class BushaAppService {
 
     const assets = Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code));
 
-    // Probe live NGN mins (includes fees) so the app shows the real floor on first paint
+    // Probe live NGN mins from Busha quotes (authoritative — includes fees)
     await Promise.all(
       assets.map(async (asset) => {
         if (!asset.buySupported || !asset.minBuyAmount) return;
@@ -1142,15 +1144,39 @@ export class BushaAppService {
             asset.minBuyAmount
           );
           if (probed == null) return;
-          const current = Number(asset.minBuyNgn);
-          asset.minBuyNgn = String(
-            Math.max(Number.isFinite(current) && current > 0 ? current : 0, probed)
-          );
+          // Prefer live quote min over pair counter (that's the amount Busha actually accepts)
+          asset.minBuyNgn = String(probed);
         } catch {
           /* keep pair-derived min */
         }
       })
     );
+
+    // Sell: raise crypto min if PalmPay payout floor (₦100) requires more crypto
+    const PALMPAY_SELL_MIN_NGN = 100;
+    for (const asset of assets) {
+      if (!asset.sellSupported) continue;
+      const price = Number(asset.sellPrice || asset.buyPrice);
+      const pairCryptoMin = Number(asset.minSellCrypto ?? asset.minSellAmount);
+      let effectiveCryptoMin = Number.isFinite(pairCryptoMin) && pairCryptoMin > 0 ? pairCryptoMin : 0;
+      if (Number.isFinite(price) && price > 0) {
+        const palmPayCryptoMin = PALMPAY_SELL_MIN_NGN / price;
+        effectiveCryptoMin = Math.max(effectiveCryptoMin, palmPayCryptoMin);
+      }
+      if (effectiveCryptoMin > 0) {
+        const formatted =
+          effectiveCryptoMin >= 1
+            ? String(Number(effectiveCryptoMin.toFixed(8)))
+            : String(Number(effectiveCryptoMin.toPrecision(8)));
+        asset.minSellCrypto = formatted;
+        asset.minSellAmount = formatted;
+        asset.minSellCurrency = asset.code;
+        const pairNgn = Number(asset.minSellNgn);
+        asset.minSellNgn = String(
+          Math.max(Number.isFinite(pairNgn) ? pairNgn : 0, PALMPAY_SELL_MIN_NGN, effectiveCryptoMin * (price || 0))
+        );
+      }
+    }
 
     return assets;
   }
@@ -2450,10 +2476,10 @@ export class BushaAppService {
         blockchainName: chain.blockchainName,
         withdrawal: n?.withdrawal !== false,
         deposit: n?.deposit !== false,
-        minWithdrawalAmount: normalizePositiveAmount(n?.min_withdrawal_amount),
-        maxWithdrawalAmount: normalizePositiveAmount(n?.max_withdrawal_amount),
+        minWithdrawalAmount: normalizePositiveAmount(n?.min_withdrawal_amount, code),
+        maxWithdrawalAmount: normalizePositiveAmount(n?.max_withdrawal_amount, code),
         withdrawalFee: extractBushaAmountField(n?.withdrawal_fee),
-        minDepositAmount: normalizePositiveAmount(n?.min_deposit_amount),
+        minDepositAmount: normalizePositiveAmount(n?.min_deposit_amount, code),
       };
     });
 
