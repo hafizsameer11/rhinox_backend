@@ -43,11 +43,11 @@ const BILLER_CODE_LOGOS: Record<string, string> = {
   BIL126: `${LOGO_BASE}/jos.png`, // Jos Electric
   BIL127: `${LOGO_BASE}/yola.png`, // Yola Electric
 
-  // Internet
+  // Internet — prefer name matching; codes below are best-effort (FLW logo is always null)
   BIL128: `${LOGO_BASE}/smile.png`,
   BIL129: `${LOGO_BASE}/spectranet.png`,
   BIL130: `${LOGO_BASE}/smile.png`,
-  BIL131: `${LOGO_BASE}/spectranet.png`,
+  // Do NOT map BIL131 → spectranet (that was wrongly showing Spectranet on ipNX)
   BIL136: `${LOGO_BASE}/mtn.png`,
   BIL137: `${LOGO_BASE}/airtel.png`,
   BIL138: `${LOGO_BASE}/glo.png`,
@@ -58,6 +58,8 @@ const BILLER_CODE_LOGOS: Record<string, string> = {
 const NAME_KEYWORD_LOGOS: Array<{ match: RegExp; logo: string }> = [
   { match: /\b9\s*MOBILE\b|\bETISALAT\b/i, logo: `${LOGO_BASE}/9mobile.png` },
   { match: /\bSPECTRANET\b/i, logo: `${LOGO_BASE}/spectranet.png` },
+  { match: /\bIPNX\b/i, logo: `${LOGO_BASE}/ipnx.png` },
+  { match: /\bSWIFT\s*4G\b|\bSWIFTNG\b|\bSWIFT\b/i, logo: `${LOGO_BASE}/swift4g.png` },
   { match: /\bSMILE\b/i, logo: `${LOGO_BASE}/smile.png` },
   { match: /\bSTARTIMES?\b|\bSTAR\s*TIMES\b/i, logo: `${LOGO_BASE}/startimes.png` },
   { match: /\bSHOWMAX\b/i, logo: `${LOGO_BASE}/showmax.png` },
@@ -84,7 +86,8 @@ const NAME_KEYWORD_LOGOS: Array<{ match: RegExp; logo: string }> = [
 
 /**
  * Resolve a logo URL for a Flutterwave biller.
- * Prefers provider-returned logo, then biller code, then name keywords.
+ * Prefers provider-returned logo, then name keywords (brands), then biller code.
+ * Name-first avoids wrong shared codes (e.g. ipNX must not inherit Spectranet).
  * Returns null when unknown (client should use a neutral placeholder — never MTN/Smile).
  */
 export function resolveFlutterwaveBillerLogo(input: {
@@ -96,18 +99,18 @@ export function resolveFlutterwaveBillerLogo(input: {
   const remote = input.logo?.trim();
   if (remote) return remote;
 
+  const haystack = `${input.name || ''} ${input.shortName || ''}`.trim();
+  if (haystack) {
+    for (const entry of NAME_KEYWORD_LOGOS) {
+      if (entry.match.test(haystack)) {
+        return entry.logo;
+      }
+    }
+  }
+
   const code = (input.billerCode || '').trim().toUpperCase();
   if (code && BILLER_CODE_LOGOS[code]) {
     return BILLER_CODE_LOGOS[code];
-  }
-
-  const haystack = `${input.name || ''} ${input.shortName || ''}`.trim();
-  if (!haystack) return null;
-
-  for (const entry of NAME_KEYWORD_LOGOS) {
-    if (entry.match.test(haystack)) {
-      return entry.logo;
-    }
   }
 
   return null;

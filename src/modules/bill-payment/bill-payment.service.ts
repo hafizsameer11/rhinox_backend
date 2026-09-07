@@ -105,13 +105,18 @@ export class BillPaymentService {
     isFixAmount?: number;
     raw?: { isFixAmount?: number; is_fix_amount?: number; amount?: number | string };
   }): boolean {
+    const amount = Number(item.amount ?? item.raw?.amount ?? 0);
+    // Any positive catalog price is a fixed package — Flutterwave often sets
+    // is_fix_amount=0 on internet/data bundles that still have amount > 0.
+    if (Number.isFinite(amount) && amount > 0) {
+      return true;
+    }
+
     const flag = item.isFixAmount ?? item.raw?.isFixAmount ?? item.raw?.is_fix_amount;
     if (flag !== undefined && flag !== null && String(flag) !== '') {
       return Number(flag) === 1;
     }
-    // Flutterwave often omits is_fix_amount for internet/data bundles that still have a price.
-    const amount = Number(item.amount ?? item.raw?.amount ?? 0);
-    return Number.isFinite(amount) && amount > 0;
+    return false;
   }
 
   /** Pull amount / data size / validity out of Flutterwave item names when fields are missing. */
@@ -121,32 +126,35 @@ export class BillPaymentService {
     validity: string | null;
     description: string;
   } {
-    const haystack = `${item.name || ''} ${item.shortName || ''} ${item.raw?.description || ''}`;
+    const haystack = `${item.name || ''} ${item.shortName || ''} ${item.raw?.biller_name || ''} ${item.raw?.description || ''}`;
     const rawAmount = Number(item.amount || 0);
     let amount =
       Number.isFinite(rawAmount) && rawAmount > 0 ? rawAmount.toString() : undefined;
 
     if (!amount) {
       const amountMatch =
-        haystack.match(/(?:₦|NGN|N)\s*([\d,]+(?:\.\d+)?)/i) ||
+        haystack.match(/(?:₦|NGN|N|#)\s*([\d,]+(?:\.\d+)?)/i) ||
         haystack.match(/([\d,]+(?:\.\d+)?)\s*(?:naira|ngn)\b/i) ||
-        haystack.match(/-\s*([\d,]+(?:\.\d+)?)\s*$/);
+        haystack.match(/(?:amount|price|fee)\s*[:=]?\s*([\d,]+(?:\.\d+)?)/i) ||
+        haystack.match(/-\s*([\d,]+(?:\.\d+)?)\s*$/) ||
+        haystack.match(/\b([\d]{3,7}(?:\.\d+)?)\s*$/);
       if (amountMatch?.[1]) {
         const parsed = Number(String(amountMatch[1]).replace(/,/g, ''));
-        if (Number.isFinite(parsed) && parsed > 0) amount = parsed.toString();
+        // Ignore tiny trailing numbers that are likely days/hours (e.g. "30")
+        if (Number.isFinite(parsed) && parsed >= 50) amount = parsed.toString();
       }
     }
 
     const dataMatch = haystack.match(/(\d+(?:\.\d+)?\s*(?:TB|GB|MB))\b/i);
     const validityMatch = haystack.match(
-      /(\d+\s*(?:days?|weeks?|months?|hrs?|hours?))\b/i
+      /(\d+\s*(?:days?|weeks?|months?|yrs?|years?|hrs?|hours?))\b/i
     );
 
     return {
       amount,
       dataAmount: item.raw?.dataAmount || dataMatch?.[1] || null,
-      validity: item.raw?.validity || validityMatch?.[1] || null,
-      description: item.raw?.description || item.name,
+      validity: item.raw?.validity || item.raw?.validity_period || validityMatch?.[1] || null,
+      description: item.raw?.description || item.raw?.biller_name || item.name,
     };
   }
 
@@ -185,7 +193,9 @@ export class BillPaymentService {
       return parsedUserAmount;
     }
 
-    if (!item.isAirtime && item.amount > 0) {
+    // Internet/data/cable packages: use catalog amount when present.
+    // Flutterwave sometimes marks priced bundles as is_airtime=true incorrectly.
+    if (Number(item.amount) > 0) {
       return new Decimal(item.amount);
     }
 

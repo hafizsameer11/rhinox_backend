@@ -89,18 +89,76 @@ async function getOrCreateConfig() {
 
 type BushaMoney = { amount: string; currency: string };
 
-/** Parse Busha AmountWithCurrency / plain number into { amount, currency }. */
+/** Extract a numeric amount string from Busha scalar / AmountWithCurrency / nested counter. */
+function extractBushaAmountField(value: any): string | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'object') {
+    const nested = value.amount ?? value.value ?? value.counter?.amount;
+    if (nested == null || nested === '' || typeof nested === 'object') return null;
+    return String(nested);
+  }
+  return String(value);
+}
+
+/** Positive limit only — Busha uses "0" for unlimited / not set on max withdrawal. */
+function normalizePositiveAmount(value: any): string | null {
+  const raw = extractBushaAmountField(value);
+  if (raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return raw;
+}
+
+/**
+ * Busha pair limits look like:
+ * {
+ *   amount: "0.18",                 // crypto units
+ *   currency: "USDT",
+ *   counter: { amount: "250", currency: "NGN" }  // fiat equivalent (authoritative for buy)
+ * }
+ * Prefer `counter` when we need NGN; prefer top-level `amount` when we need crypto.
+ */
 function parseBushaMoney(value: any, fallbackCurrency?: string): BushaMoney | null {
   if (value == null || value === '') return null;
   if (typeof value === 'object') {
     const amount = value.amount ?? value.value;
-    if (amount == null || amount === '') return null;
+    if (amount == null || amount === '' || typeof amount === 'object') return null;
     const currency = String(value.currency || fallbackCurrency || '').toUpperCase();
     return { amount: String(amount), currency };
   }
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
   return { amount: String(value), currency: String(fallbackCurrency || '').toUpperCase() };
+}
+
+/** NGN side of a Busha pair limit (`counter`), falling back to top-level when already NGN. */
+function parseBushaPairLimitNgn(value: any): BushaMoney | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'object') {
+    const counter = parseBushaMoney(value.counter, 'NGN');
+    if (counter && (!counter.currency || counter.currency === 'NGN')) {
+      return { amount: counter.amount, currency: 'NGN' };
+    }
+    const top = parseBushaMoney(value, 'NGN');
+    if (top?.currency === 'NGN') return top;
+  }
+  return parseBushaMoney(value, 'NGN');
+}
+
+/** Crypto side of a Busha pair limit (top-level amount in base currency). */
+function parseBushaPairLimitCrypto(value: any, cryptoCode: string): BushaMoney | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'object') {
+    const top = parseBushaMoney(value, cryptoCode);
+    if (top && top.currency && top.currency !== 'NGN') {
+      return { amount: top.amount, currency: top.currency || cryptoCode };
+    }
+    // Only NGN on the object — convert later via normalizePairLimit
+    const counter = parseBushaMoney(value.counter, 'NGN');
+    if (counter?.currency === 'NGN') return counter;
+    return top;
+  }
+  return parseBushaMoney(value, cryptoCode);
 }
 
 function roundMoney(n: number, decimals = 2): string {
@@ -717,10 +775,7 @@ export class BushaAppService {
               id: String(n?.id || chain.blockchain),
               blockchain: chain.blockchain,
               blockchainName: chain.blockchainName,
-              minDepositAmount:
-                n?.min_deposit_amount != null && n.min_deposit_amount !== ''
-                  ? String(n.min_deposit_amount)
-                  : null,
+              minDepositAmount: normalizePositiveAmount(n?.min_deposit_amount),
             };
           })
           // Drop unknown / empty mappings; never keep Polygon for USDT
@@ -829,6 +884,9 @@ export class BushaAppService {
         /** Normalized crypto amount to sell (same unit as sell input) */
         minSellCrypto: string | null;
         maxSellCrypto: string | null;
+        /** Fiat equivalent of sell min/max from Busha counter (NGN) */
+        minSellNgn: string | null;
+        maxSellNgn: string | null;
       }
     >();
 
@@ -877,10 +935,14 @@ export class BushaAppService {
           ? (sellPriceNgn as number)
           : priceForBuy;
 
-      const minBuyRaw = parseBushaMoney(pair?.min_buy_amount, cryptoCode);
-      const maxBuyRaw = parseBushaMoney(pair?.max_buy_amount, 'NGN');
-      const minSellRaw = parseBushaMoney(pair?.min_sell_amount, cryptoCode);
-      const maxSellRaw = parseBushaMoney(pair?.max_sell_amount, cryptoCode);
+      const minBuyRaw = parseBushaPairLimitNgn(pair?.min_buy_amount);
+      const maxBuyRaw = parseBushaPairLimitNgn(pair?.max_buy_amount);
+      const minBuyCryptoRaw = parseBushaPairLimitCrypto(pair?.min_buy_amount, cryptoCode);
+      const maxBuyCryptoRaw = parseBushaPairLimitCrypto(pair?.max_buy_amount, cryptoCode);
+      const minSellRaw = parseBushaPairLimitCrypto(pair?.min_sell_amount, cryptoCode);
+      const maxSellRaw = parseBushaPairLimitCrypto(pair?.max_sell_amount, cryptoCode);
+      const minSellNgnRaw = parseBushaPairLimitNgn(pair?.min_sell_amount);
+      const maxSellNgnRaw = parseBushaPairLimitNgn(pair?.max_sell_amount);
 
       const minBuy = normalizePairLimit({
         money: minBuyRaw,
@@ -906,6 +968,18 @@ export class BushaAppService {
         priceNgn: priceForSell,
         as: 'sell_crypto',
       });
+      const minSellNgn = normalizePairLimit({
+        money: minSellNgnRaw,
+        cryptoCode,
+        priceNgn: priceForSell,
+        as: 'buy_ngn',
+      });
+      const maxSellNgn = normalizePairLimit({
+        money: maxSellNgnRaw,
+        cryptoCode,
+        priceNgn: priceForSell,
+        as: 'buy_ngn',
+      });
 
       byCode.set(cryptoCode, {
         code: cryptoCode,
@@ -925,10 +999,10 @@ export class BushaAppService {
         sellSupported: existing?.sellSupported || sellSupported,
         buyPrice,
         sellPrice,
-        minBuyAmount: minBuyRaw?.amount || existing?.minBuyAmount || null,
-        minBuyCurrency: minBuyRaw?.currency || existing?.minBuyCurrency || null,
-        maxBuyAmount: maxBuyRaw?.amount || existing?.maxBuyAmount || null,
-        maxBuyCurrency: maxBuyRaw?.currency || existing?.maxBuyCurrency || null,
+        minBuyAmount: minBuyCryptoRaw?.amount || existing?.minBuyAmount || null,
+        minBuyCurrency: minBuyCryptoRaw?.currency || existing?.minBuyCurrency || cryptoCode,
+        maxBuyAmount: maxBuyCryptoRaw?.amount || existing?.maxBuyAmount || null,
+        maxBuyCurrency: maxBuyCryptoRaw?.currency || existing?.maxBuyCurrency || cryptoCode,
         minBuyNgn: minBuy.displayCurrency === 'NGN' ? minBuy.displayAmount : existing?.minBuyNgn || null,
         maxBuyNgn: maxBuy.displayCurrency === 'NGN' ? maxBuy.displayAmount : existing?.maxBuyNgn || null,
         minSellAmount: minSellRaw?.amount || existing?.minSellAmount || null,
@@ -937,6 +1011,10 @@ export class BushaAppService {
         maxSellCurrency: maxSellRaw?.currency || existing?.maxSellCurrency || null,
         minSellCrypto: minSell.displayAmount || existing?.minSellCrypto || null,
         maxSellCrypto: maxSell.displayAmount || existing?.maxSellCrypto || null,
+        minSellNgn:
+          minSellNgn.displayCurrency === 'NGN' ? minSellNgn.displayAmount : existing?.minSellNgn || null,
+        maxSellNgn:
+          maxSellNgn.displayCurrency === 'NGN' ? maxSellNgn.displayAmount : existing?.maxSellNgn || null,
       });
     }
 
@@ -963,6 +1041,8 @@ export class BushaAppService {
           maxSellCurrency: null,
           minSellCrypto: null,
           maxSellCrypto: null,
+          minSellNgn: null,
+          maxSellNgn: null,
         });
       }
     }
@@ -2109,20 +2189,10 @@ export class BushaAppService {
         blockchainName: chain.blockchainName,
         withdrawal: n?.withdrawal !== false,
         deposit: n?.deposit !== false,
-        minWithdrawalAmount:
-          n?.min_withdrawal_amount != null && n.min_withdrawal_amount !== ''
-            ? String(n.min_withdrawal_amount)
-            : null,
-        maxWithdrawalAmount:
-          n?.max_withdrawal_amount != null && n.max_withdrawal_amount !== ''
-            ? String(n.max_withdrawal_amount)
-            : null,
-        withdrawalFee:
-          n?.withdrawal_fee != null && n.withdrawal_fee !== '' ? String(n.withdrawal_fee) : null,
-        minDepositAmount:
-          n?.min_deposit_amount != null && n.min_deposit_amount !== ''
-            ? String(n.min_deposit_amount)
-            : null,
+        minWithdrawalAmount: normalizePositiveAmount(n?.min_withdrawal_amount),
+        maxWithdrawalAmount: normalizePositiveAmount(n?.max_withdrawal_amount),
+        withdrawalFee: extractBushaAmountField(n?.withdrawal_fee),
+        minDepositAmount: normalizePositiveAmount(n?.min_deposit_amount),
       };
     });
 
