@@ -6,8 +6,10 @@ import { PalmPayBillPaymentService } from '../../services/palmpay/palmpay.billpa
 import {
   createMaintenanceError,
   createProviderUnavailableError,
+  fromPalmPayLimit,
   isSupportedPalmPayScene,
   mapPalmPayStatus,
+  sanitizePalmPayUserMessage,
 } from '../../services/palmpay/palmpay.utils.js';
 import {
   FlutterwaveBillPaymentService,
@@ -295,7 +297,7 @@ export class BillPaymentService {
       const min = new Decimal(minimum);
       if (amount.lessThan(min)) {
         throw this.createAmountLimitError(
-          `Amount must not be less than ${min.toString()}`,
+          `Minimum amount is ₦${min.toFixed(0)}. Please enter a higher amount.`,
           min.toNumber(),
           maximum ?? null
         );
@@ -305,7 +307,7 @@ export class BillPaymentService {
       const max = new Decimal(maximum);
       if (amount.greaterThan(max)) {
         throw this.createAmountLimitError(
-          `Amount must not be greater than ${max.toString()}`,
+          `Maximum amount is ₦${max.toFixed(0)}. Please enter a lower amount.`,
           minimum ?? null,
           max.toNumber()
         );
@@ -402,6 +404,8 @@ export class BillPaymentService {
           countryCode: 'NG',
           currency: 'NGN',
           provider: 'palmpay',
+          minimum: fromPalmPayLimit(biller.minAmount),
+          maximum: fromPalmPayLimit(biller.maxAmount),
           category: {
             code: categoryCode,
           },
@@ -654,6 +658,14 @@ export class BillPaymentService {
         isValid: true,
         accountNumber,
         accountName: typeof accountName === 'string' ? accountName.trim() || null : null,
+        minimum:
+          fromPalmPayLimit(verificationAny?.minAmount) ??
+          fromPalmPayLimit(verificationAny?.minimum) ??
+          null,
+        maximum:
+          fromPalmPayLimit(verificationAny?.maxAmount) ??
+          fromPalmPayLimit(verificationAny?.maximum) ??
+          null,
         provider: {
           id: providerId,
           code: billerId,
@@ -663,7 +675,7 @@ export class BillPaymentService {
     } catch (error: any) {
       return {
         isValid: false,
-        message: error?.message || 'Invalid betting account ID',
+        message: sanitizePalmPayUserMessage(error?.message || 'Invalid betting account ID'),
         accountNumber,
         provider: {
           id: providerId,
@@ -684,6 +696,7 @@ export class BillPaymentService {
       currency: string;
       amount: string;
       accountNumber?: string;
+      accountName?: string;
       accountType?: string;
       planId?: string | number;
       beneficiaryId?: number;
@@ -707,6 +720,7 @@ export class BillPaymentService {
       currency: string;
       amount: string;
       accountNumber?: string;
+      accountName?: string;
       accountType?: string;
       planId?: string | number;
       beneficiaryId?: number;
@@ -793,12 +807,12 @@ export class BillPaymentService {
     }
 
     let accountNumber = data.accountNumber;
-    let accountName = null;
+    let accountName = data.accountName?.trim() || null;
     let accountType = data.accountType;
 
     if (beneficiary) {
       accountNumber = beneficiary.accountNumber;
-      accountName = beneficiary.name;
+      accountName = beneficiary.name || accountName;
       accountType = beneficiary.accountType || accountType;
     }
 
@@ -823,6 +837,17 @@ export class BillPaymentService {
     const fee = isRewardFulfillment ? 0 : this.calculateFee(amount.toNumber(), data.currency);
     const totalAmount = amount.plus(fee);
 
+    // Enforce PalmPay biller/item min/max before creating a pending tx
+    if (!isRewardFulfillment) {
+      const minimum =
+        fromPalmPayLimit(item.minAmount) ??
+        fromPalmPayLimit(biller.minAmount) ??
+        (sceneCode === 'betting' ? 100 : null); // common NG betting floor when provider omits min
+      const maximum =
+        fromPalmPayLimit(item.maxAmount) ?? fromPalmPayLimit(biller.maxAmount) ?? null;
+      this.assertAmountWithinLimits(amount, minimum, maximum);
+    }
+
     if (!isRewardFulfillment) {
       const walletBalance = new Decimal(wallet.balance);
       if (walletBalance.lessThan(totalAmount)) {
@@ -837,7 +862,13 @@ export class BillPaymentService {
         itemId: item.itemId,
         rechargeAccount: accountNumber,
       });
-      accountName = (validation as any)?.accountName || accountName;
+      const validationAny = validation as any;
+      accountName =
+        (typeof validationAny?.customerName === 'string' && validationAny.customerName.trim()) ||
+        (typeof validationAny?.accountName === 'string' && validationAny.accountName.trim()) ||
+        (typeof validationAny?.name === 'string' && validationAny.name.trim()) ||
+        (typeof validationAny?.fullName === 'string' && validationAny.fullName.trim()) ||
+        accountName;
     }
 
     const reference = this.generateReference();
@@ -1682,9 +1713,14 @@ export class BillPaymentService {
 
     let mappedStatus = (flwResult.mappedStatus || 'pending') as MappedBillStatus;
 
-    // Always try a status poll once after create — FLW often returns pending first.
+    // Cap status poll so confirm returns quickly; webhook can still finalize later
     try {
-      const status = await this.flutterwaveBillPaymentService.getBillStatus(flwReference);
+      const status = await Promise.race([
+        this.flutterwaveBillPaymentService.getBillStatus(flwReference),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('status_poll_timeout')), 2500)
+        ),
+      ]);
       if (status.mappedStatus !== 'pending') {
         mappedStatus = status.mappedStatus;
       }

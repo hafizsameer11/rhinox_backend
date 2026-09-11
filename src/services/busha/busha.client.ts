@@ -3,7 +3,15 @@ import ApiError from '../../core/utils/ApiError.js';
 import { getBushaConfig } from './busha.config.js';
 
 function sanitizeBushaUserMessage(message: string): string {
-  return String(message || '')
+  const raw = String(message || '').trim();
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes('recipient') &&
+    (lower.includes('not found') || lower.includes('not exist') || lower.includes('invalid'))
+  ) {
+    return 'Sell destination could not be verified. Please try again in a moment.';
+  }
+  return raw
     .replace(/\bBusha\b/gi, 'crypto')
     .replace(/\bbusha\b/g, 'crypto')
     .trim() || 'Crypto request failed';

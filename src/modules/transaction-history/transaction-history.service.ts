@@ -31,6 +31,57 @@ export class TransactionHistoryService {
     return false;
   }
 
+  private isFiatCurrencyCode(code: string): boolean {
+    const fiat = new Set([
+      'NGN',
+      'USD',
+      'EUR',
+      'GBP',
+      'GHS',
+      'KES',
+      'ZAR',
+      'CAD',
+      'AUD',
+      'XOF',
+      'XAF',
+    ]);
+    return fiat.has(getBaseSymbol(code).toUpperCase());
+  }
+
+  /** Match crypto asset ticker against tx currency / Busha trade metadata */
+  private cryptoAssetMatchesFilter(
+    filterCurrency: string,
+    opts: {
+      currency?: string | null;
+      type?: string | null;
+      metadata?: any;
+    }
+  ): boolean {
+    const want = getBaseSymbol(filterCurrency).toUpperCase();
+    const meta = opts.metadata || {};
+    const side = String(meta.side || opts.type || '').toLowerCase();
+
+    if (side === 'buy' || opts.type === 'crypto_buy') {
+      const target = meta.targetCurrency || opts.currency;
+      if (target && getBaseSymbol(String(target)).toUpperCase() === want) return true;
+    }
+    if (side === 'sell' || opts.type === 'crypto_sell') {
+      const source = meta.sourceCurrency || opts.currency;
+      if (source && getBaseSymbol(String(source)).toUpperCase() === want) return true;
+    }
+
+    const candidates = [
+      opts.currency,
+      meta.targetCurrency,
+      meta.sourceCurrency,
+      meta.cryptoCurrency,
+    ]
+      .filter(Boolean)
+      .map((c) => getBaseSymbol(String(c)).toUpperCase());
+
+    return candidates.includes(want);
+  }
+
   private resolveP2PRoles(orderType: string, vendorId: string | number, userId: string | number) {
     if (orderType === 'buy') {
       return { buyerId: String(vendorId), sellerId: String(userId) };
@@ -389,13 +440,23 @@ export class TransactionHistoryService {
     console.log(`[TransactionHistoryService] Total transactions for user (all time): ${totalTxCount}`);
 
     let walletIds = wallets.map((w: { id: number }) => w.id);
+    const currencyFilterRaw = filters.currency ? String(filters.currency).trim() : '';
+    const currencyFilter = currencyFilterRaw
+      ? getBaseSymbol(currencyFilterRaw).toUpperCase()
+      : null;
+    // Crypto asset screens pass USDT/BTC/etc. Those txs often live on NGN (buy/sell)
+    // or only in bushaTradeLog (send/recv) — never gate on a matching Wallet.currency row.
+    const filteringByCryptoAsset =
+      !!currencyFilter && !this.isFiatCurrencyCode(currencyFilter);
 
-    // Optional currency filter - filter wallets first if currency specified
-    if (filters.currency) {
-      const filteredWallets = wallets.filter((w: { currency: string }) => w.currency === filters.currency);
+    // Optional fiat currency filter — narrow wallets (base-symbol aware)
+    if (currencyFilter && !filteringByCryptoAsset) {
+      const filteredWallets = wallets.filter((w: { currency: string }) => {
+        const c = String(w.currency || '').toUpperCase();
+        return c === currencyFilter || getBaseSymbol(c) === currencyFilter;
+      });
       walletIds = filteredWallets.map((w: { id: number }) => w.id);
       if (walletIds.length === 0) {
-        // No wallets for this currency, return empty result
         return {
           summary: {
             total: '0',
@@ -506,50 +567,89 @@ export class TransactionHistoryService {
       }
     }
 
-    // Busha crypto send/recv often have no Transaction row — include trade log
+    // Busha send/recv (and orphaned buy/sell) often have no usable Transaction row
     const bushaTrades = await prisma.bushaTradeLog.findMany({
       where: {
         userId: userIdNum,
         createdAt: { gte: start, lte: end },
-        side: { in: ['cryptoSend', 'cryptoRecv'] },
+        side: { in: ['cryptoSend', 'cryptoRecv', 'buy', 'sell'] },
       },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
 
-    const bushaAsCrypto = bushaTrades.map((trade) => {
-      const isDeposit = trade.side === 'cryptoRecv';
-      const amount = new Decimal(trade.sourceAmount || trade.targetAmount || '0').abs();
-      const type = isDeposit ? 'crypto_recv' : 'crypto_send';
-      const normalizedType = this.normalizeTransactionType(type, 'crypto', 'busha');
-      return {
-        id: trade.fiatTransactionId || `busha_${trade.id}`,
-        type,
-        normalizedType,
-        status: trade.status === 'completed' || trade.status === 'wallet_credited' ? 'completed' : trade.status,
-        amount: amount.toString(),
-        currency: isDeposit ? trade.targetCurrency : trade.sourceCurrency,
-        fee: '0',
-        reference: trade.bushaTransferId || `busha_${trade.id}`,
-        description: trade.destinationAddress
-          ? `${normalizedType} · ${trade.destinationAddress.slice(0, 10)}…`
-          : normalizedType,
-        channel: 'busha',
-        paymentMethod: trade.network || null,
-        metadata: {
-          provider: 'busha',
-          bushaTradeId: trade.id,
-          side: trade.side,
-          network: trade.network,
-          destinationAddress: trade.destinationAddress,
-          sourceAmount: trade.sourceAmount,
-          targetAmount: trade.targetAmount,
-        },
-        completedAt: trade.updatedAt,
-        createdAt: trade.createdAt,
-        walletType: 'crypto' as const,
-      };
-    });
+    const ledgerTxIds = new Set(cryptoFromLedger.map((tx: any) => tx.id));
+
+    const bushaAsCrypto = bushaTrades
+      .filter((trade) => {
+        // Prefer ledger rows already linked via fiatTransactionId
+        if (
+          (trade.side === 'buy' || trade.side === 'sell') &&
+          trade.fiatTransactionId != null &&
+          ledgerTxIds.has(trade.fiatTransactionId)
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .map((trade) => {
+        const side = String(trade.side || '');
+        const isDeposit = side === 'cryptoRecv';
+        const isBuy = side === 'buy';
+        const isSell = side === 'sell';
+        const type = isDeposit
+          ? 'crypto_recv'
+          : isBuy
+            ? 'crypto_buy'
+            : isSell
+              ? 'crypto_sell'
+              : 'crypto_send';
+        const amount = new Decimal(
+          isBuy
+            ? trade.targetAmount || trade.sourceAmount || '0'
+            : isSell
+              ? trade.sourceAmount || trade.targetAmount || '0'
+              : isDeposit
+                ? trade.targetAmount || trade.sourceAmount || '0'
+                : trade.sourceAmount || trade.targetAmount || '0'
+        ).abs();
+        const currency = isDeposit || isBuy
+          ? trade.targetCurrency || trade.sourceCurrency
+          : trade.sourceCurrency || trade.targetCurrency;
+        const normalizedType = this.normalizeTransactionType(type, 'crypto', 'busha');
+        return {
+          id: trade.fiatTransactionId || `busha_${trade.id}`,
+          type,
+          normalizedType,
+          status:
+            trade.status === 'completed' || trade.status === 'wallet_credited'
+              ? 'completed'
+              : trade.status,
+          amount: amount.toString(),
+          currency,
+          fee: '0',
+          reference: trade.bushaTransferId || trade.bushaQuoteId || `busha_${trade.id}`,
+          description: trade.destinationAddress
+            ? `${normalizedType} · ${String(trade.destinationAddress).slice(0, 10)}…`
+            : normalizedType,
+          channel: 'busha',
+          paymentMethod: trade.network || null,
+          metadata: {
+            provider: 'busha',
+            bushaTradeId: trade.id,
+            side: trade.side,
+            network: trade.network,
+            destinationAddress: trade.destinationAddress,
+            sourceAmount: trade.sourceAmount,
+            targetAmount: trade.targetAmount,
+            sourceCurrency: trade.sourceCurrency,
+            targetCurrency: trade.targetCurrency,
+          },
+          completedAt: trade.updatedAt,
+          createdAt: trade.createdAt,
+          walletType: 'crypto' as const,
+        };
+      });
 
     // Calculate summary (total, incoming, outgoing)
     let totalIncoming = new Decimal(0);
@@ -654,6 +754,23 @@ export class TransactionHistoryService {
       ...bushaAsCrypto,
     ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+    const crypto =
+      filteringByCryptoAsset && currencyFilter
+        ? cryptoNormalized.filter((tx) =>
+            this.cryptoAssetMatchesFilter(currencyFilter, {
+              currency: tx.currency,
+              type: tx.type,
+              metadata: tx.metadata,
+            })
+          )
+        : cryptoNormalized;
+
+    // When filtering by crypto asset, hide unrelated fiat wallet noise
+    const fiat =
+      filteringByCryptoAsset
+        ? []
+        : fiatTransactions.map((tx: any) => normalizeTransaction(tx));
+
     return {
       summary: {
         total: total.toString(),
@@ -662,8 +779,8 @@ export class TransactionHistoryService {
       },
       typeSummary,
       chartData,
-      fiat: fiatTransactions.map((tx: any) => normalizeTransaction(tx)),
-      crypto: cryptoNormalized,
+      fiat,
+      crypto,
     };
   }
 

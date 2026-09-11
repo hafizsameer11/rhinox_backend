@@ -80,11 +80,55 @@ function mapIdType(idType?: string | null): 'national-id' | 'passport' | 'driver
 }
 
 async function getOrCreateConfig() {
-  return prisma.bushaConfig.upsert({
-    where: { id: 1 },
-    update: {},
-    create: { id: 1, isActive: true, sellPayoutMode: 'palmpay_temp' },
-  });
+  const defaults = {
+    sellPayoutMode: 'dashboard_bank',
+    payoutBankCode: process.env.BUSHA_SELL_PAYOUT_BANK_CODE?.trim() || '100033',
+    payoutAccountNumber:
+      process.env.BUSHA_SELL_PAYOUT_ACCOUNT_NUMBER?.trim() || '8880869454',
+    payoutAccountName:
+      process.env.BUSHA_SELL_PAYOUT_ACCOUNT_NAME?.trim() || 'RHINOX AFRITECH LTD',
+  };
+
+  const existing = await prisma.bushaConfig.findUnique({ where: { id: 1 } });
+  if (!existing) {
+    return prisma.bushaConfig.create({
+      data: {
+        id: 1,
+        isActive: true,
+        sellPayoutMode: defaults.sellPayoutMode,
+        payoutBankCode: defaults.payoutBankCode,
+        payoutAccountNumber: defaults.payoutAccountNumber,
+        payoutAccountName: defaults.payoutAccountName,
+      },
+    });
+  }
+
+  // Sell must land on Rhinox PalmPay business account; credit user after Busha confirms.
+  // Force dashboard_bank unless explicitly overridden with BUSHA_SELL_FORCE_TEMP=1.
+  const forceTemp = process.env.BUSHA_SELL_FORCE_TEMP === '1';
+  const needsBusinessAccount =
+    !existing.payoutBankCode ||
+    !existing.payoutAccountNumber ||
+    !existing.payoutAccountName;
+  const shouldSwitchToDashboard =
+    !forceTemp &&
+    (existing.sellPayoutMode !== 'dashboard_bank' || needsBusinessAccount);
+
+  if (shouldSwitchToDashboard) {
+    return prisma.bushaConfig.update({
+      where: { id: 1 },
+      data: {
+        sellPayoutMode: 'dashboard_bank',
+        payoutBankCode: existing.payoutBankCode || defaults.payoutBankCode,
+        payoutAccountNumber: existing.payoutAccountNumber || defaults.payoutAccountNumber,
+        payoutAccountName: existing.payoutAccountName || defaults.payoutAccountName,
+        // Global recipient IDs are invalid across Busha customer profiles — clear stale
+        payoutRecipientId: null,
+      },
+    });
+  }
+
+  return existing;
 }
 
 type BushaMoney = { amount: string; currency: string };
@@ -1947,8 +1991,12 @@ export class BushaAppService {
     if (!providerData || typeof providerData !== 'object' || Array.isArray(providerData)) {
       return null;
     }
-    const id = (providerData as Record<string, unknown>).sellQuoteRecipientId;
-    return typeof id === 'string' && id.length > 0 ? id : null;
+    const data = providerData as Record<string, unknown>;
+    // Per-customer settlement recipient for Rhinox PalmPay business account
+    const settlement = data.sellSettlementRecipientId;
+    if (typeof settlement === 'string' && settlement.length > 0) return settlement;
+    const legacy = data.sellQuoteRecipientId;
+    return typeof legacy === 'string' && legacy.length > 0 ? legacy : null;
   }
 
   private async persistSellQuoteRecipientId(
@@ -1961,8 +2009,10 @@ export class BushaAppService {
         ? { ...(providerData as Record<string, unknown>) }
         : {};
     if (recipientId) {
+      base.sellSettlementRecipientId = recipientId;
       base.sellQuoteRecipientId = recipientId;
     } else {
+      delete base.sellSettlementRecipientId;
       delete base.sellQuoteRecipientId;
     }
     await prisma.bushaCustomer.update({
@@ -1971,94 +2021,91 @@ export class BushaAppService {
     });
   }
 
+  private isRecipientMissingError(error: unknown): boolean {
+    const err = error as any;
+    const msg = String(
+      err?.message ||
+        err?.providerResponse?.error?.message ||
+        err?.providerResponse?.message ||
+        ''
+    ).toLowerCase();
+    return (
+      msg.includes('recipient') &&
+      (msg.includes('not found') ||
+        msg.includes('not exist') ||
+        msg.includes('invalid') ||
+        msg.includes('missing'))
+    );
+  }
+
+  private sellPayoutBankName(platform: { payoutBankCode?: string | null }): string {
+    const code = String(platform.payoutBankCode || '');
+    if (code === '100033') return 'PalmPay';
+    return process.env.BUSHA_SELL_PAYOUT_BANK_NAME?.trim() || 'PalmPay';
+  }
+
   /**
-   * Reusable NGN bank recipient for sell *preview* quotes only.
-   * Never creates a PalmPay createorder / temp VA (those stay Processing forever).
-   * Execute still creates a fresh amount-locked PalmPay VA for the real payout.
+   * Register Rhinox PalmPay business account as an NGN recipient under THIS Busha customer.
+   * Never reuse bushaConfig.payoutRecipientId across customers — Busha recipients are
+   * per-profile and that caused "Recipient is not found" for other users.
+   */
+  private async ensureCustomerSettlementRecipient(
+    customer: { id: number; bushaProfileId: string; providerData: unknown },
+    platform: Awaited<ReturnType<typeof getOrCreateConfig>>,
+    opts?: { forceNew?: boolean }
+  ): Promise<string> {
+    if (!platform.payoutBankCode || !platform.payoutAccountNumber || !platform.payoutAccountName) {
+      throw ApiError.serviceUnavailable(
+        'Sell payout account is not configured. Contact support.'
+      );
+    }
+
+    if (!opts?.forceNew) {
+      const cached = this.readSellQuoteRecipientId(customer.providerData);
+      if (cached) return cached;
+    } else {
+      await this.persistSellQuoteRecipientId(customer.id, null, customer.providerData);
+    }
+
+    const recipient = await this.client.post(
+      '/v1/recipients',
+      {
+        currency: 'NGN',
+        country_code: 'NG',
+        type: 'ngn_bank',
+        bank_code: platform.payoutBankCode,
+        bank_name: this.sellPayoutBankName(platform),
+        account_number: platform.payoutAccountNumber,
+        account_name: platform.payoutAccountName,
+      },
+      customer.bushaProfileId
+    );
+    const recipientId = String(recipient.id);
+    // Reload providerData after clear so we don't overwrite concurrent keys
+    const fresh = await prisma.bushaCustomer.findUnique({ where: { id: customer.id } });
+    await this.persistSellQuoteRecipientId(
+      customer.id,
+      recipientId,
+      fresh?.providerData ?? customer.providerData
+    );
+    return recipientId;
+  }
+
+  /**
+   * Reusable NGN bank recipient for sell preview quotes.
+   * Uses Rhinox PalmPay business account — never creates temp PalmPay VAs.
    */
   private async ensureSellPreviewRecipient(
-    userId: number,
+    _userId: number,
     customer: { id: number; bushaProfileId: string; providerData: unknown },
     platform: Awaited<ReturnType<typeof getOrCreateConfig>>
   ): Promise<string> {
-    const cached = this.readSellQuoteRecipientId(customer.providerData);
-    if (cached) return cached;
-
-    const persist = async (recipientId: string) => {
-      await this.persistSellQuoteRecipientId(customer.id, recipientId, customer.providerData);
-      return recipientId;
-    };
-
-    // Prefer configured settlement / dashboard bank (no PalmPay VA needed).
     if (platform.payoutBankCode && platform.payoutAccountNumber && platform.payoutAccountName) {
-      if (platform.payoutRecipientId) {
-        return persist(platform.payoutRecipientId);
-      }
-      const recipient = await this.client.post(
-        '/v1/recipients',
-        {
-          currency: 'NGN',
-          country_code: 'NG',
-          type: 'ngn_bank',
-          bank_code: platform.payoutBankCode,
-          bank_name: platform.payoutAccountName,
-          account_number: platform.payoutAccountNumber,
-          account_name: platform.payoutAccountName,
-        },
-        customer.bushaProfileId
-      );
-      return persist(recipient.id as string);
-    }
-
-    // Reuse any existing Busha NGN bank recipient (prefer permanent settlement accounts).
-    try {
-      const listed = await this.client.get('/v1/recipients', customer.bushaProfileId);
-      const rows = Array.isArray(listed) ? listed : (listed as any)?.data || [];
-      const ngnBanks = (rows as any[]).filter(
-        (r) => r && r.active !== false && (r.type === 'ngn_bank' || r.currency === 'NGN')
-      );
-      const permanent = ngnBanks.find(
-        (r) =>
-          typeof r.account_name === 'string' &&
-          !/\(Pay NGN /i.test(r.account_name) &&
-          r.account_number
-      );
-      const pick = permanent || ngnBanks[0];
-      if (pick?.id) return persist(String(pick.id));
-    } catch (err) {
-      console.warn('[Busha sell preview] list recipients failed', (err as any)?.message || err);
-    }
-
-    // Last resort: register recipient from last sell trade metadata (still no PalmPay createorder).
-    const lastSell = await prisma.bushaTradeLog.findFirst({
-      where: { userId, side: 'sell' },
-      orderBy: { id: 'desc' },
-    });
-    const payOut = (lastSell?.providerResponse as any)?.quote?.pay_out
-      || (lastSell?.providerResponse as any)?.transfer?.pay_out;
-    const details = payOut?.recipient_details;
-    if (payOut?.recipient_id) {
-      return persist(String(payOut.recipient_id));
-    }
-    if (details?.account_number && details?.bank_code) {
-      const recipient = await this.client.post(
-        '/v1/recipients',
-        {
-          currency: 'NGN',
-          country_code: 'NG',
-          type: 'ngn_bank',
-          bank_code: details.bank_code,
-          bank_name: details.bank_name || 'PALMPAY',
-          account_number: details.account_number,
-          account_name: String(details.account_name || 'RHINOX').replace(/\(Pay NGN .*\)/i, '').trim(),
-        },
-        customer.bushaProfileId
-      );
-      return persist(recipient.id as string);
+      return this.ensureCustomerSettlementRecipient(customer, platform);
     }
 
     throw ApiError.serviceUnavailable(
-      'Sell preview recipient is not configured. Complete one sell setup first or contact support.'
+      'Sell payout account is not configured. Contact support.'
     );
   }
 
@@ -2340,22 +2387,31 @@ export class BushaAppService {
         this.buildSellBankTransferQuoteBody(sourceCurrency, sourceAmount, recipientId)
       );
     } catch (firstError) {
-      // Stale cached recipient — clear and retry once with a fresh destination
+      // Stale cached recipient (often shared/global ID) — recreate under this customer
       console.warn(
-        '[Busha sell preview] bank_transfer quote failed; recreating preview recipient',
+        '[Busha sell preview] bank_transfer quote failed; recreating settlement recipient',
         (firstError as any)?.message || firstError
       );
       await this.persistSellQuoteRecipientId(customer.id, null, customer.providerData);
       const refreshed = await prisma.bushaCustomer.findUnique({ where: { id: customer.id } });
-      recipientId = await this.ensureSellPreviewRecipient(
-        userId,
+      recipientId = await this.ensureCustomerSettlementRecipient(
         refreshed || { ...customer, providerData: null },
-        platform
+        platform,
+        { forceNew: true }
       );
-      quote = await this.createQuote(
-        customer.bushaProfileId,
-        this.buildSellBankTransferQuoteBody(sourceCurrency, sourceAmount, recipientId)
-      );
+      try {
+        quote = await this.createQuote(
+          customer.bushaProfileId,
+          this.buildSellBankTransferQuoteBody(sourceCurrency, sourceAmount, recipientId)
+        );
+      } catch (secondError) {
+        if (this.isRecipientMissingError(secondError) || this.isRecipientMissingError(firstError)) {
+          throw ApiError.badRequest(
+            'Sell destination could not be verified. Please try again in a moment.'
+          );
+        }
+        throw secondError;
+      }
     }
     const { fees, feeTotal } = this.extractQuoteFees(quote);
     const netNgn = Number(quote?.target_amount || 0);
@@ -2376,7 +2432,7 @@ export class BushaAppService {
       minSellCrypto: pairLimits?.minSellCrypto ?? pairLimits?.minSellAmount ?? null,
       maxSellCrypto: pairLimits?.maxSellCrypto ?? pairLimits?.maxSellAmount ?? null,
       note:
-        'Estimated NGN you receive after bank payout fees. Final amount is confirmed when the sell executes.',
+        'Estimated NGN after payout fees. Funds settle to Rhinox PalmPay business account; your wallet is credited after confirmation.',
     };
   }
 
@@ -2395,7 +2451,7 @@ export class BushaAppService {
       throw ApiError.badRequest('Sell amount is below the NGN 100 minimum');
     }
 
-    let recipientId = platform.payoutRecipientId;
+    let recipientId: string | null = null;
     let payoutMode = platform.sellPayoutMode;
     let palmpayOrderId: string | null = null;
     let palmpayOrderNo: string | null = null;
@@ -2404,39 +2460,44 @@ export class BushaAppService {
     let vaAmount: number | null = null;
     let feeMeta: { fees: any[]; feeTotal: number } = { fees: [], feeTotal: 0 };
 
-    if (platform.sellPayoutMode === 'dashboard_bank') {
+    // Prefer permanent Rhinox PalmPay business account (dashboard_bank).
+    // Temp VAs are only used when explicitly forced via BUSHA_SELL_FORCE_TEMP=1.
+    const useBusinessAccount =
+      platform.sellPayoutMode === 'dashboard_bank' ||
+      (Boolean(platform.payoutBankCode && platform.payoutAccountNumber && platform.payoutAccountName) &&
+        process.env.BUSHA_SELL_FORCE_TEMP !== '1');
+
+    if (useBusinessAccount) {
       if (!platform.payoutBankCode || !platform.payoutAccountNumber || !platform.payoutAccountName) {
         throw ApiError.serviceUnavailable('Dashboard bank payout is not configured');
       }
-      if (!recipientId) {
-        const recipient = await this.client.post(
-          '/v1/recipients',
-          {
-            currency: 'NGN',
-            country_code: 'NG',
-            type: 'ngn_bank',
-            bank_code: platform.payoutBankCode,
-            bank_name: platform.payoutAccountName,
-            account_number: platform.payoutAccountNumber,
-            account_name: platform.payoutAccountName,
-          },
-          customer.bushaProfileId
-        );
-        recipientId = recipient.id;
-        await prisma.bushaConfig.update({
-          where: { id: 1 },
-          data: { payoutRecipientId: recipient.id },
+      payoutMode = 'dashboard_bank';
+      recipientId = await this.ensureCustomerSettlementRecipient(customer, platform);
+      try {
+        ({ quote, transfer } = await this.createQuoteAndTransfer(
+          customer.bushaProfileId,
+          this.buildSellBankTransferQuoteBody(
+            sourceCurrency,
+            sourceAmount,
+            recipientId,
+            network
+          )
+        ));
+      } catch (err) {
+        if (!this.isRecipientMissingError(err)) throw err;
+        recipientId = await this.ensureCustomerSettlementRecipient(customer, platform, {
+          forceNew: true,
         });
+        ({ quote, transfer } = await this.createQuoteAndTransfer(
+          customer.bushaProfileId,
+          this.buildSellBankTransferQuoteBody(
+            sourceCurrency,
+            sourceAmount,
+            recipientId,
+            network
+          )
+        ));
       }
-      ({ quote, transfer } = await this.createQuoteAndTransfer(
-        customer.bushaProfileId,
-        this.buildSellBankTransferQuoteBody(
-          sourceCurrency,
-          sourceAmount,
-          recipientId!,
-          network
-        )
-      ));
       feeMeta = this.extractQuoteFees(quote);
     } else {
       payoutMode = 'palmpay_temp';
@@ -2497,6 +2558,9 @@ export class BushaAppService {
         metadata: {
           provider: 'busha',
           transferId: transfer.id,
+          payoutMode,
+          settlementAccount: platform.payoutAccountNumber || null,
+          settlementAccountName: platform.payoutAccountName || null,
           palmpayOrderId,
           vaAmount,
           fees: feeMeta.fees,

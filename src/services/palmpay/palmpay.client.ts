@@ -2,6 +2,7 @@ import axios, { type AxiosInstance } from 'axios';
 import { randomBytes } from 'crypto';
 import { getPalmPayConfig } from './palmpay.config.js';
 import { PalmPayAuthService } from './palmpay.auth.service.js';
+import { sanitizePalmPayUserMessage } from './palmpay.utils.js';
 import type { PalmPayEnvelope } from './palmpay.types.js';
 
 export class PalmPayProviderError extends Error {
@@ -10,7 +11,7 @@ export class PalmPayProviderError extends Error {
     public readonly statusCode = 503,
     public readonly providerResponse?: any
   ) {
-    super(message);
+    super(sanitizePalmPayUserMessage(message));
     this.name = 'PalmPayProviderError';
   }
 }
