@@ -22,15 +22,34 @@ export const getFlutterwaveConfig = (): FlutterwaveConfig => ({
   environment: process.env.FLW_ENVIRONMENT?.trim() || 'sandbox',
 });
 
-/** Countries/currencies where Flutterwave MoMo deposit + withdraw is enabled. */
+/**
+ * Countries/currencies where Flutterwave MoMo deposit + withdraw is enabled.
+ * Aligned with Flutterwave MoMo docs (ZAR not supported).
+ */
 export const FLUTTERWAVE_MOMO_MARKETS: Record<string, string> = {
   KE: 'KES',
   GH: 'GHS',
   UG: 'UGX',
   TZ: 'TZS',
+  RW: 'RWF',
+  ZM: 'ZMW',
+  CM: 'XAF',
+  CI: 'XOF',
+  SN: 'XOF',
+  BF: 'XOF',
+  ET: 'ETB',
 };
+
+/** Ethiopia is documented for MoMo transfers; v3 direct charge type is not published. */
+export const FLUTTERWAVE_MOMO_DEPOSIT_UNSUPPORTED = new Set(['ET']);
 
 export const isFlutterwaveMomoSupported = (countryCode: string, currency: string): boolean => {
   const expected = FLUTTERWAVE_MOMO_MARKETS[countryCode?.toUpperCase()];
   return Boolean(expected && expected === currency?.toUpperCase());
+};
+
+export const isFlutterwaveMomoDepositSupported = (countryCode: string, currency: string): boolean => {
+  const cc = countryCode?.toUpperCase();
+  if (!cc || FLUTTERWAVE_MOMO_DEPOSIT_UNSUPPORTED.has(cc)) return false;
+  return isFlutterwaveMomoSupported(cc, currency);
 };

@@ -14,6 +14,11 @@ const USD_GHS = Number(process.env.USD_GHS_RATE || 11.36);
 const USD_ZAR = Number(process.env.USD_ZAR_RATE || 15.97);
 const USD_TZS = Number(process.env.USD_TZS_RATE || 2642);
 const USD_UGX = Number(process.env.USD_UGX_RATE || 3717);
+const USD_RWF = Number(process.env.USD_RWF_RATE || 1440);
+const USD_ZMW = Number(process.env.USD_ZMW_RATE || 27.1);
+const USD_XAF = Number(process.env.USD_XAF_RATE || 600);
+const USD_XOF = Number(process.env.USD_XOF_RATE || 600);
+const USD_ETB = Number(process.env.USD_ETB_RATE || 135);
 const USD_BWP = Number(process.env.USD_BWP_RATE || 13.69);
 const USD_EUR = Number(process.env.USD_EUR_RATE || 0.861);
 const USD_GBP = Number(process.env.USD_GBP_RATE || 0.74);
@@ -29,6 +34,11 @@ const pairs: Array<{ from: string; to: string; rate: number }> = [
   { from: 'NGN', to: 'ZAR', rate: USD_ZAR / USD_NGN },
   { from: 'NGN', to: 'TZS', rate: USD_TZS / USD_NGN },
   { from: 'NGN', to: 'UGX', rate: USD_UGX / USD_NGN },
+  { from: 'NGN', to: 'RWF', rate: USD_RWF / USD_NGN },
+  { from: 'NGN', to: 'ZMW', rate: USD_ZMW / USD_NGN },
+  { from: 'NGN', to: 'XAF', rate: USD_XAF / USD_NGN },
+  { from: 'NGN', to: 'XOF', rate: USD_XOF / USD_NGN },
+  { from: 'NGN', to: 'ETB', rate: USD_ETB / USD_NGN },
   { from: 'NGN', to: 'BWP', rate: USD_BWP / USD_NGN },
   { from: 'NGN', to: 'CAD', rate: USD_CAD / USD_NGN },
   { from: 'NGN', to: 'AUD', rate: USD_AUD / USD_NGN },
@@ -41,6 +51,11 @@ const pairs: Array<{ from: string; to: string; rate: number }> = [
   { from: 'USD', to: 'ZAR', rate: USD_ZAR },
   { from: 'USD', to: 'TZS', rate: USD_TZS },
   { from: 'USD', to: 'UGX', rate: USD_UGX },
+  { from: 'USD', to: 'RWF', rate: USD_RWF },
+  { from: 'USD', to: 'ZMW', rate: USD_ZMW },
+  { from: 'USD', to: 'XAF', rate: USD_XAF },
+  { from: 'USD', to: 'XOF', rate: USD_XOF },
+  { from: 'USD', to: 'ETB', rate: USD_ETB },
   { from: 'USD', to: 'BWP', rate: USD_BWP },
   { from: 'USD', to: 'CAD', rate: USD_CAD },
   { from: 'USD', to: 'AUD', rate: USD_AUD },
@@ -59,6 +74,11 @@ const pairs: Array<{ from: string; to: string; rate: number }> = [
   { from: 'ZAR', to: 'NGN', rate: USD_NGN / USD_ZAR },
   { from: 'TZS', to: 'NGN', rate: USD_NGN / USD_TZS },
   { from: 'UGX', to: 'NGN', rate: USD_NGN / USD_UGX },
+  { from: 'RWF', to: 'NGN', rate: USD_NGN / USD_RWF },
+  { from: 'ZMW', to: 'NGN', rate: USD_NGN / USD_ZMW },
+  { from: 'XAF', to: 'NGN', rate: USD_NGN / USD_XAF },
+  { from: 'XOF', to: 'NGN', rate: USD_NGN / USD_XOF },
+  { from: 'ETB', to: 'NGN', rate: USD_NGN / USD_ETB },
   { from: 'BWP', to: 'NGN', rate: USD_NGN / USD_BWP },
 
   { from: 'KES', to: 'USD', rate: 1 / USD_KES },
@@ -66,6 +86,11 @@ const pairs: Array<{ from: string; to: string; rate: number }> = [
   { from: 'ZAR', to: 'USD', rate: 1 / USD_ZAR },
   { from: 'TZS', to: 'USD', rate: 1 / USD_TZS },
   { from: 'UGX', to: 'USD', rate: 1 / USD_UGX },
+  { from: 'RWF', to: 'USD', rate: 1 / USD_RWF },
+  { from: 'ZMW', to: 'USD', rate: 1 / USD_ZMW },
+  { from: 'XAF', to: 'USD', rate: 1 / USD_XAF },
+  { from: 'XOF', to: 'USD', rate: 1 / USD_XOF },
+  { from: 'ETB', to: 'USD', rate: 1 / USD_ETB },
   { from: 'BWP', to: 'USD', rate: 1 / USD_BWP },
 
   { from: 'USDT', to: 'NGN', rate: USD_NGN },

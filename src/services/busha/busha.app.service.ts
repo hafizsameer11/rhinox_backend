@@ -153,7 +153,7 @@ function normalizePositiveAmount(value: any, expectedCurrency?: string): string 
   if (value != null && typeof value === 'object') {
     const cur = String(value.currency || '').toUpperCase();
     const expected = String(expectedCurrency || '').toUpperCase();
-    const fiat = ['NGN', 'USD', 'KES', 'GHS', 'UGX', 'TZS', 'ZAR', 'EUR', 'GBP'];
+    const fiat = ['NGN', 'USD', 'KES', 'GHS', 'UGX', 'TZS', 'RWF', 'ZMW', 'XAF', 'XOF', 'ETB', 'EUR', 'GBP'];
     if (cur && fiat.includes(cur) && cur !== expected) {
       return null;
     }

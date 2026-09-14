@@ -40,9 +40,10 @@ export class FlutterwaveDepositService {
       payload.redirect_url = input.redirectUrl;
     }
 
-    // Ghana docs sometimes require country
-    if (input.countryCode.toUpperCase() === 'GH') {
-      payload.country = 'GH';
+    // Ghana + Francophone MoMo require country on the charge payload
+    const cc = input.countryCode.toUpperCase();
+    if (cc === 'GH' || chargeType === 'mobile_money_franco') {
+      payload.country = cc;
     }
 
     const response = await this.client.post<any>(

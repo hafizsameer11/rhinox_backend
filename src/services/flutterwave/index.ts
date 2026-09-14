@@ -1,4 +1,4 @@
-export { getFlutterwaveConfig, isFlutterwaveMomoSupported, FLUTTERWAVE_MOMO_MARKETS } from './flutterwave.config.js';
+export { getFlutterwaveConfig, isFlutterwaveMomoSupported, isFlutterwaveMomoDepositSupported, FLUTTERWAVE_MOMO_MARKETS } from './flutterwave.config.js';
 export { FlutterwaveClient, FlutterwaveProviderError } from './flutterwave.client.js';
 export { FlutterwaveDepositService } from './flutterwave.deposit.service.js';
 export { FlutterwavePayoutService } from './flutterwave.payout.service.js';

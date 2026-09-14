@@ -10,12 +10,13 @@ import {
   FlutterwaveDepositService,
   FlutterwaveWebhookService,
   isFlutterwaveMomoSupported,
+  isFlutterwaveMomoDepositSupported,
 } from '../../services/flutterwave/index.js';
 
 /**
  * Deposit Service
  * Handles fiat wallet deposits via bank transfer (NG/PalmPay) and
- * mobile money (KE/GH/UG/TZ via Flutterwave).
+ * mobile money (Flutterwave MoMo markets) .
  */
 export class DepositService {
   private walletService: WalletService;
@@ -113,7 +114,7 @@ export class DepositService {
       return this.initiatePalmPayBankDeposit(parsedUserId, data.amount);
     }
 
-    if (channel === 'mobile_money' && isFlutterwaveMomoSupported(countryCode, currency)) {
+    if (channel === 'mobile_money' && isFlutterwaveMomoDepositSupported(countryCode, currency)) {
       return this.initiateFlutterwaveMomoDeposit(parsedUserId, {
         amount: data.amount,
         currency,
@@ -123,8 +124,14 @@ export class DepositService {
       });
     }
 
+    if (channel === 'mobile_money' && isFlutterwaveMomoSupported(countryCode, currency)) {
+      throw new Error(
+        'Mobile money deposits are not available for this country yet. Withdrawals may still be supported.'
+      );
+    }
+
     throw new Error(
-      'Unsupported deposit method. Use NGN bank transfer (Nigeria) or mobile money for KE/GH/UG/TZ.'
+      'Unsupported deposit method. Use NGN bank transfer (Nigeria) or Flutterwave mobile money where supported.'
     );
   }
 

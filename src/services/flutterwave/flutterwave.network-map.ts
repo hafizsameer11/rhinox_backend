@@ -7,13 +7,22 @@ export type FlutterwaveChargeType =
   | 'mpesa'
   | 'mobile_money_ghana'
   | 'mobile_money_uganda'
-  | 'mobile_money_tanzania';
+  | 'mobile_money_tanzania'
+  | 'mobile_money_rwanda'
+  | 'mobile_money_zambia'
+  | 'mobile_money_franco';
 
 const CHARGE_TYPE_BY_COUNTRY: Record<string, FlutterwaveChargeType> = {
   KE: 'mpesa',
   GH: 'mobile_money_ghana',
   UG: 'mobile_money_uganda',
   TZ: 'mobile_money_tanzania',
+  RW: 'mobile_money_rwanda',
+  ZM: 'mobile_money_zambia',
+  CM: 'mobile_money_franco',
+  CI: 'mobile_money_franco',
+  SN: 'mobile_money_franco',
+  BF: 'mobile_money_franco',
 };
 
 /** Normalize provider codes from DB/seed to Flutterwave charge `network` values. */
@@ -44,6 +53,41 @@ const CHARGE_NETWORK: Record<string, Record<string, string>> = {
     VODACOM: 'VODACOM',
     MPESA: 'VODACOM',
   },
+  RW: {
+    MTN: 'MTN',
+    MPS: 'MPS',
+    AIRTEL: 'MPS',
+  },
+  ZM: {
+    MTN: 'MTN',
+    AIRTEL: 'AIRTEL',
+    ZAMTEL: 'ZAMTEL',
+    MPS: 'MTN',
+  },
+  CM: {
+    MTN: 'MTN',
+    ORANGE: 'ORANGEMONEY',
+    ORANGEMONEY: 'ORANGEMONEY',
+  },
+  CI: {
+    MTN: 'MTN',
+    ORANGE: 'ORANGEMONEY',
+    ORANGEMONEY: 'ORANGEMONEY',
+    MOOV: 'MOOV',
+    WAVE: 'WAVE',
+  },
+  SN: {
+    ORANGE: 'ORANGEMONEY',
+    ORANGEMONEY: 'ORANGEMONEY',
+    WAVE: 'WAVE',
+    FREEMONEY: 'FREEMONEY',
+    FREE: 'FREEMONEY',
+  },
+  BF: {
+    ORANGE: 'ORANGEMONEY',
+    ORANGEMONEY: 'ORANGEMONEY',
+    MOBICASH: 'MOBICASH',
+  },
 };
 
 /** Transfer payout `account_bank` codes. */
@@ -73,6 +117,45 @@ const TRANSFER_BANK: Record<string, Record<string, string>> = {
     VODACOM: 'VODACOM',
     MPESA: 'VODACOM',
   },
+  RW: {
+    MTN: 'MTN',
+    MPS: 'MPS',
+    AIRTEL: 'MPS',
+  },
+  ZM: {
+    MTN: 'MTN',
+    AIRTEL: 'AIRTEL',
+    ZAMTEL: 'ZAMTEL',
+    MPS: 'MPS',
+  },
+  CM: {
+    MTN: 'MTN',
+    ORANGE: 'ORANGEMONEY',
+    ORANGEMONEY: 'ORANGEMONEY',
+  },
+  CI: {
+    MTN: 'MTN',
+    ORANGE: 'ORANGE',
+    ORANGEMONEY: 'ORANGE',
+    MOOV: 'MOOV',
+    WAVE: 'WAVE',
+  },
+  SN: {
+    ORANGE: 'ORANGEMONEY',
+    ORANGEMONEY: 'ORANGEMONEY',
+    WAVE: 'WAVE',
+    FREEMONEY: 'FREEMONEY',
+    FREE: 'FREEMONEY',
+  },
+  BF: {
+    ORANGE: 'ORANGEMONEY',
+    ORANGEMONEY: 'ORANGEMONEY',
+    MOBICASH: 'MOBICASH',
+  },
+  ET: {
+    AMOLE: 'AMOLEMONEY',
+    AMOLEMONEY: 'AMOLEMONEY',
+  },
 };
 
 export const getFlutterwaveChargeType = (countryCode: string): FlutterwaveChargeType => {
@@ -90,8 +173,12 @@ export const getFlutterwaveChargeNetwork = (countryCode: string, providerCode: s
   if (country === 'KE' && (code === 'MPESA' || code === 'MPS')) {
     return undefined;
   }
+  // Rwanda often works without network; still map when provided
+  if (country === 'RW' && !CHARGE_NETWORK.RW?.[code]) {
+    return undefined;
+  }
   const network = CHARGE_NETWORK[country]?.[code];
-  if (!network && country !== 'KE') {
+  if (!network && country !== 'KE' && country !== 'RW') {
     throw new Error(`Unsupported mobile money network ${providerCode} for ${countryCode}`);
   }
   return network;

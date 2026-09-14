@@ -50,6 +50,12 @@ export async function initializeUserWallets(userId: string | number): Promise<Wa
       });
 
       if (existingWallet) {
+        if (!existingWallet.isActive) {
+          await prisma.wallet.update({
+            where: { id: existingWallet.id },
+            data: { isActive: true },
+          });
+        }
         fiatSkipped++;
         continue;
       }
@@ -66,6 +72,12 @@ export async function initializeUserWallets(userId: string | number): Promise<Wa
       console.error(`Failed to create fiat wallet ${currency.code} for user ${userIdNum}:`, message);
     }
   }
+
+  // Hide unsupported ZAR wallets (no PalmPay / Flutterwave MoMo rail)
+  await prisma.wallet.updateMany({
+    where: { userId: userIdNum, currency: 'ZAR', isActive: true },
+    data: { isActive: false },
+  });
 
   let cryptoInitialized = false;
   let cryptoError: string | undefined;

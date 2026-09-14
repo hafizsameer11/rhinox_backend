@@ -25,9 +25,9 @@ const countries = [
     flag: 'ghana-c.png',
   },
   {
-    name: 'South Africa',
-    code: 'ZA',
-    flag: 'south-africa.png',
+    name: 'Uganda',
+    code: 'UG',
+    flag: 'uganda.png',
   },
   {
     name: 'Tanzania',
@@ -35,9 +35,45 @@ const countries = [
     flag: 'tanzania.png',
   },
   {
-    name: 'Uganda',
-    code: 'UG',
-    flag: 'uganda.png',
+    name: 'Rwanda',
+    code: 'RW',
+    flag: null,
+  },
+  {
+    name: 'Zambia',
+    code: 'ZM',
+    flag: null,
+  },
+  {
+    name: 'Cameroon',
+    code: 'CM',
+    flag: null,
+  },
+  {
+    name: "Côte d'Ivoire",
+    code: 'CI',
+    flag: null,
+  },
+  {
+    name: 'Senegal',
+    code: 'SN',
+    flag: null,
+  },
+  {
+    name: 'Burkina Faso',
+    code: 'BF',
+    flag: null,
+  },
+  {
+    name: 'Ethiopia',
+    code: 'ET',
+    flag: null,
+  },
+  // Retained for historical users / flags — not in supported MoMo wallet set
+  {
+    name: 'South Africa',
+    code: 'ZA',
+    flag: 'south-africa.png',
   },
   {
     name: 'Botswana',
@@ -143,13 +179,13 @@ const currencies = [
     exchangeRate: 0.08,
   },
   {
-    code: 'ZAR',
-    name: 'South African Rand',
-    symbol: 'R',
-    countryCode: 'ZA',
+    code: 'UGX',
+    name: 'Ugandan Shilling',
+    symbol: 'USh',
+    countryCode: 'UG',
     type: 'fiat',
-    flag: 'south-africa.png',
-    exchangeRate: 0.055,
+    flag: 'uganda.png',
+    exchangeRate: 0.00027,
   },
   {
     code: 'TZS',
@@ -161,13 +197,60 @@ const currencies = [
     exchangeRate: 0.0004,
   },
   {
-    code: 'UGX',
-    name: 'Ugandan Shilling',
-    symbol: 'USh',
-    countryCode: 'UG',
+    code: 'RWF',
+    name: 'Rwandan Franc',
+    symbol: 'FRw',
+    countryCode: 'RW',
     type: 'fiat',
-    flag: 'uganda.png',
-    exchangeRate: 0.00027,
+    flag: null,
+    exchangeRate: 0.0007,
+  },
+  {
+    code: 'ZMW',
+    name: 'Zambian Kwacha',
+    symbol: 'ZK',
+    countryCode: 'ZM',
+    type: 'fiat',
+    flag: null,
+    exchangeRate: 0.037,
+  },
+  {
+    code: 'XAF',
+    name: 'Central African CFA Franc',
+    symbol: 'FCFA',
+    countryCode: 'CM',
+    type: 'fiat',
+    flag: null,
+    exchangeRate: 0.0017,
+  },
+  {
+    code: 'XOF',
+    name: 'West African CFA Franc',
+    symbol: 'CFA',
+    countryCode: 'CI',
+    type: 'fiat',
+    flag: null,
+    exchangeRate: 0.0017,
+  },
+  {
+    code: 'ETB',
+    name: 'Ethiopian Birr',
+    symbol: 'Br',
+    countryCode: 'ET',
+    type: 'fiat',
+    flag: null,
+    exchangeRate: 0.0074,
+  },
+  {
+    // No MoMo/PalmPay rail — keep row but inactive so wallets are not created
+    code: 'ZAR',
+    name: 'South African Rand',
+    symbol: 'R',
+    countryCode: 'ZA',
+    type: 'fiat',
+    flag: 'south-africa.png',
+    exchangeRate: 0.055,
+    isActive: false,
   },
   {
     code: 'USD',
@@ -281,6 +364,7 @@ async function main() {
           type: currency.type,
           flag: currency.flag,
           exchangeRate: currency.exchangeRate,
+          isActive: (currency as any).isActive !== false,
         },
       });
     } else {
@@ -293,6 +377,7 @@ async function main() {
           type: currency.type,
           flag: currency.flag,
           exchangeRate: currency.exchangeRate,
+          isActive: (currency as any).isActive !== false,
         },
       });
     }
@@ -507,33 +592,62 @@ async function main() {
   }
   console.log(`✅ Seeded ${bankAccounts.length} bank accounts`);
 
-  // Seed Mobile Money Providers (Flutterwave-aligned for KE/GH/UG/TZ)
+  // Seed Mobile Money Providers (Flutterwave MoMo markets)
   console.log('📱 Seeding mobile money providers...');
   const mobileMoneyProviders = [
-    // Kenya — Flutterwave: M-Pesa (MPS), Airtel (MPX)
+    // Kenya
     { name: 'M-Pesa', code: 'MPESA', countryCode: 'KE', currency: 'KES', logoUrl: null, isActive: true },
     { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'KE', currency: 'KES', logoUrl: null, isActive: true },
 
-    // Ghana — Flutterwave: MTN, Vodafone/Telecel, AirtelTigo
+    // Ghana
     { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'GH', currency: 'GHS', logoUrl: null, isActive: true },
     { name: 'Telecel Cash', code: 'VODAFONE', countryCode: 'GH', currency: 'GHS', logoUrl: null, isActive: true },
     { name: 'AirtelTigo Money', code: 'AIRTELTIGO', countryCode: 'GH', currency: 'GHS', logoUrl: null, isActive: true },
 
-    // Tanzania — Flutterwave: Airtel, Tigo, Halopesa, Vodacom
+    // Tanzania
     { name: 'Vodacom M-Pesa', code: 'VODACOM', countryCode: 'TZ', currency: 'TZS', logoUrl: null, isActive: true },
     { name: 'Tigo Pesa', code: 'TIGO', countryCode: 'TZ', currency: 'TZS', logoUrl: null, isActive: true },
     { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'TZ', currency: 'TZS', logoUrl: null, isActive: true },
     { name: 'HaloPesa', code: 'HALOPESA', countryCode: 'TZ', currency: 'TZS', logoUrl: null, isActive: true },
 
-    // Uganda — Flutterwave: MTN, Airtel
+    // Uganda
     { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'UG', currency: 'UGX', logoUrl: null, isActive: true },
     { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'UG', currency: 'UGX', logoUrl: null, isActive: true },
 
-    // Nigeria — no Flutterwave MoMo; keep inactive for historical rows
+    // Rwanda
+    { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'RW', currency: 'RWF', logoUrl: null, isActive: true },
+    { name: 'Airtel Money', code: 'MPS', countryCode: 'RW', currency: 'RWF', logoUrl: null, isActive: true },
+
+    // Zambia
+    { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'ZM', currency: 'ZMW', logoUrl: null, isActive: true },
+    { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'ZM', currency: 'ZMW', logoUrl: null, isActive: true },
+    { name: 'Zamtel Kwacha', code: 'ZAMTEL', countryCode: 'ZM', currency: 'ZMW', logoUrl: null, isActive: true },
+
+    // Cameroon (XAF)
+    { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'CM', currency: 'XAF', logoUrl: null, isActive: true },
+    { name: 'Orange Money', code: 'ORANGEMONEY', countryCode: 'CM', currency: 'XAF', logoUrl: null, isActive: true },
+
+    // Côte d'Ivoire (XOF)
+    { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'CI', currency: 'XOF', logoUrl: null, isActive: true },
+    { name: 'Orange Money', code: 'ORANGEMONEY', countryCode: 'CI', currency: 'XOF', logoUrl: null, isActive: true },
+    { name: 'Moov Money', code: 'MOOV', countryCode: 'CI', currency: 'XOF', logoUrl: null, isActive: true },
+    { name: 'Wave', code: 'WAVE', countryCode: 'CI', currency: 'XOF', logoUrl: null, isActive: true },
+
+    // Senegal (XOF)
+    { name: 'Orange Money', code: 'ORANGEMONEY', countryCode: 'SN', currency: 'XOF', logoUrl: null, isActive: true },
+    { name: 'Wave', code: 'WAVE', countryCode: 'SN', currency: 'XOF', logoUrl: null, isActive: true },
+    { name: 'Free Money', code: 'FREEMONEY', countryCode: 'SN', currency: 'XOF', logoUrl: null, isActive: true },
+
+    // Burkina Faso (XOF)
+    { name: 'Orange Money', code: 'ORANGEMONEY', countryCode: 'BF', currency: 'XOF', logoUrl: null, isActive: true },
+    { name: 'Moov / Mobicash', code: 'MOBICASH', countryCode: 'BF', currency: 'XOF', logoUrl: null, isActive: true },
+
+    // Ethiopia (transfer / Amole — deposit charge type not in v3 docs)
+    { name: 'Amole Money', code: 'AMOLEMONEY', countryCode: 'ET', currency: 'ETB', logoUrl: null, isActive: true },
+
+    // Nigeria / South Africa — inactive (no Flutterwave MoMo)
     { name: 'MTN MoMo', code: 'MTN', countryCode: 'NG', currency: 'NGN', logoUrl: null, isActive: false },
     { name: 'Airtel Money', code: 'AIRTEL', countryCode: 'NG', currency: 'NGN', logoUrl: null, isActive: false },
-
-    // South Africa — not on Flutterwave MoMo; inactive
     { name: 'MTN Mobile Money', code: 'MTN', countryCode: 'ZA', currency: 'ZAR', logoUrl: null, isActive: false },
     { name: 'Vodacom M-Pesa', code: 'VODACOM', countryCode: 'ZA', currency: 'ZAR', logoUrl: null, isActive: false },
   ];
@@ -564,7 +678,7 @@ async function main() {
   }
   console.log(`✅ Seeded ${mobileMoneyProviders.length} mobile money providers`);
 
-  // Deactivate providers that are no longer Flutterwave-supported MoMo markets
+  // Deactivate providers outside Flutterwave MoMo markets
   await prisma.mobileMoneyProvider.updateMany({
     where: {
       OR: [
@@ -577,6 +691,16 @@ async function main() {
     data: { isActive: false },
   });
 
+  // Deactivate ZAR currency + wallets (unsupported rail)
+  await prisma.currency.updateMany({
+    where: { code: 'ZAR' },
+    data: { isActive: false },
+  });
+  await prisma.wallet.updateMany({
+    where: { currency: 'ZAR' },
+    data: { isActive: false },
+  });
+
   // Seed Exchange Rates (NGN as base currency)
   console.log('💱 Seeding exchange rates...');
   // Mid-market-ish USD crosses (Sep 2026). Seed upserts so re-seed refreshes stale DB rates.
@@ -586,6 +710,11 @@ async function main() {
   const USD_ZAR = 15.97;
   const USD_TZS = 2642;
   const USD_UGX = 3717;
+  const USD_RWF = 1440;
+  const USD_ZMW = 27.1;
+  const USD_XAF = 600;
+  const USD_XOF = 600;
+  const USD_ETB = 135;
   const USD_BWP = 13.69;
   const USD_EUR = 0.861;
   const USD_GBP = 0.74;
@@ -602,6 +731,11 @@ async function main() {
     { from: 'NGN', to: 'ZAR', rate: USD_ZAR / USD_NGN },
     { from: 'NGN', to: 'TZS', rate: USD_TZS / USD_NGN },
     { from: 'NGN', to: 'UGX', rate: USD_UGX / USD_NGN },
+    { from: 'NGN', to: 'RWF', rate: USD_RWF / USD_NGN },
+    { from: 'NGN', to: 'ZMW', rate: USD_ZMW / USD_NGN },
+    { from: 'NGN', to: 'XAF', rate: USD_XAF / USD_NGN },
+    { from: 'NGN', to: 'XOF', rate: USD_XOF / USD_NGN },
+    { from: 'NGN', to: 'ETB', rate: USD_ETB / USD_NGN },
     { from: 'NGN', to: 'BWP', rate: USD_BWP / USD_NGN },
     { from: 'NGN', to: 'CAD', rate: USD_CAD / USD_NGN },
     { from: 'NGN', to: 'AUD', rate: USD_AUD / USD_NGN },
@@ -615,6 +749,11 @@ async function main() {
     { from: 'USD', to: 'ZAR', rate: USD_ZAR },
     { from: 'USD', to: 'TZS', rate: USD_TZS },
     { from: 'USD', to: 'UGX', rate: USD_UGX },
+    { from: 'USD', to: 'RWF', rate: USD_RWF },
+    { from: 'USD', to: 'ZMW', rate: USD_ZMW },
+    { from: 'USD', to: 'XAF', rate: USD_XAF },
+    { from: 'USD', to: 'XOF', rate: USD_XOF },
+    { from: 'USD', to: 'ETB', rate: USD_ETB },
     { from: 'USD', to: 'BWP', rate: USD_BWP },
     { from: 'USD', to: 'CAD', rate: USD_CAD },
     { from: 'USD', to: 'AUD', rate: USD_AUD },
@@ -635,6 +774,11 @@ async function main() {
     { from: 'ZAR', to: 'NGN', rate: USD_NGN / USD_ZAR },
     { from: 'TZS', to: 'NGN', rate: USD_NGN / USD_TZS },
     { from: 'UGX', to: 'NGN', rate: USD_NGN / USD_UGX },
+    { from: 'RWF', to: 'NGN', rate: USD_NGN / USD_RWF },
+    { from: 'ZMW', to: 'NGN', rate: USD_NGN / USD_ZMW },
+    { from: 'XAF', to: 'NGN', rate: USD_NGN / USD_XAF },
+    { from: 'XOF', to: 'NGN', rate: USD_NGN / USD_XOF },
+    { from: 'ETB', to: 'NGN', rate: USD_NGN / USD_ETB },
     { from: 'BWP', to: 'NGN', rate: USD_NGN / USD_BWP },
 
     { from: 'KES', to: 'USD', rate: 1 / USD_KES },
@@ -642,6 +786,11 @@ async function main() {
     { from: 'ZAR', to: 'USD', rate: 1 / USD_ZAR },
     { from: 'TZS', to: 'USD', rate: 1 / USD_TZS },
     { from: 'UGX', to: 'USD', rate: 1 / USD_UGX },
+    { from: 'RWF', to: 'USD', rate: 1 / USD_RWF },
+    { from: 'ZMW', to: 'USD', rate: 1 / USD_ZMW },
+    { from: 'XAF', to: 'USD', rate: 1 / USD_XAF },
+    { from: 'XOF', to: 'USD', rate: 1 / USD_XOF },
+    { from: 'ETB', to: 'USD', rate: 1 / USD_ETB },
     { from: 'BWP', to: 'USD', rate: 1 / USD_BWP },
 
     // USDT pegged to USD
