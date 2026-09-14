@@ -52,8 +52,17 @@ export class FlutterwaveDepositService {
       { type: chargeType }
     );
 
+    // GH / Rwanda / Franco MoMo often return success with only meta.authorization.redirect (no data)
     const data = response?.data;
-    if (!data) {
+    const auth = data?.meta?.authorization || response?.meta?.authorization || {};
+    const redirectUrl =
+      auth.redirect ||
+      data?.meta?.authorization?.redirect ||
+      response?.meta?.authorization?.redirect ||
+      data?.redirect ||
+      null;
+
+    if (!data && !redirectUrl) {
       throw new FlutterwaveProviderError(
         response?.message || 'Failed to initiate mobile money charge',
         503,
@@ -61,21 +70,28 @@ export class FlutterwaveDepositService {
       );
     }
 
+    const status = String(data?.status || response?.status || 'pending').toLowerCase();
+    const isPendingAuth =
+      Boolean(redirectUrl) ||
+      status === 'pending' ||
+      String(auth.mode || '').toLowerCase() === 'redirect';
+
     return {
-      status: data.status as string,
-      flwRef: data.flw_ref as string | undefined,
-      txRef: (data.tx_ref || input.txRef) as string,
-      flwId: data.id as number | undefined,
-      amount: data.amount,
-      currency: data.currency,
-      authModel: data.auth_model,
-      processorResponse: data.processor_response,
-      meta: data.meta,
-      redirectUrl: data.meta?.authorization?.redirect || data.redirect || null,
+      status: (data?.status as string) || (isPendingAuth ? 'pending' : String(response?.status || 'pending')),
+      flwRef: data?.flw_ref as string | undefined,
+      txRef: (data?.tx_ref || input.txRef) as string,
+      flwId: data?.id as number | undefined,
+      amount: data?.amount ?? input.amount,
+      currency: data?.currency ?? input.currency.toUpperCase(),
+      authModel: data?.auth_model || auth.mode,
+      processorResponse: data?.processor_response,
+      meta: data?.meta || response?.meta,
+      redirectUrl,
       message:
-        data.processor_response ||
-        response?.message ||
-        'Approve the payment on your mobile money phone',
+        data?.processor_response ||
+        (redirectUrl
+          ? 'Complete authorization to finish your deposit'
+          : response?.message || 'Approve the payment on your mobile money phone'),
       raw: response,
     };
   }

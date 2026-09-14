@@ -455,6 +455,16 @@ app.post('/api/webhooks/flutterwave', async (req: express.Request, res: express.
   }
 });
 
+/** Browser return after MoMo captcha/authorization — deposit is settled by webhook. */
+app.get('/api/webhooks/flutterwave/momo-return', (_req: express.Request, res: express.Response) => {
+  res
+    .status(200)
+    .type('html')
+    .send(
+      `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Payment</title></head><body style="font-family:system-ui;background:#020c19;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:24px;text-align:center"><div><h1 style="font-size:20px;margin:0 0 8px">Authorization submitted</h1><p style="opacity:.8;margin:0">You can return to the Rhinox Pay app. Your deposit will update automatically once confirmed.</p></div></body></html>`
+    );
+});
+
 const bushaAppService = new BushaAppService();
 app.post('/api/webhooks/busha', async (req: express.Request, res: express.Response) => {
   try {

@@ -344,6 +344,12 @@ export class DepositService {
 
     let charge;
     try {
+      // Optional return URL after Flutterwave captcha/authorization (webhook still settles the deposit)
+      const configuredReturn = process.env.FLW_MOMO_REDIRECT_URL?.trim();
+      const baseUrl = (process.env.BASE_URL || '').replace(/\/$/, '');
+      const redirectUrl =
+        configuredReturn ||
+        (baseUrl ? `${baseUrl}/api/webhooks/flutterwave/momo-return` : undefined);
       charge = await this.flutterwaveDepositService.createMobileMoneyCharge({
         txRef: flwTxRef,
         amount,
@@ -353,6 +359,7 @@ export class DepositService {
         phoneNumber,
         email: user.email,
         fullName: [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined,
+        redirectUrl,
       });
     } catch (error: any) {
       await prisma.transaction.update({
@@ -375,6 +382,8 @@ export class DepositService {
     await prisma.transaction.update({
       where: { id: transaction.id },
       data: {
+        // Stay pending until webhook / verify confirms payment
+        status: 'pending',
         metadata: {
           provider: 'flutterwave',
           flwTxRef,
@@ -386,6 +395,7 @@ export class DepositService {
           providerId: provider.id,
           providerCode: provider.code,
           providerName: provider.name,
+          redirectUrl: charge.redirectUrl || null,
           chargeResponse: charge.raw,
         },
       },
@@ -405,14 +415,23 @@ export class DepositService {
       amount: transaction.amount.toString(),
       currency: transaction.currency,
       fee: transaction.fee.toString(),
-      status: transaction.status,
+      status: 'pending',
       provider: 'flutterwave',
       channel: 'mobile_money',
       flwTxRef,
       nextAction: charge.redirectUrl
-        ? { type: 'redirect', url: charge.redirectUrl }
-        : { type: 'payment_instruction', message: charge.message },
-      message: charge.message,
+        ? {
+            type: 'redirect',
+            url: charge.redirectUrl,
+            message: 'Complete payment authorization to finish your deposit',
+          }
+        : {
+            type: 'payment_instruction',
+            message: charge.message || 'Approve the payment on your mobile money phone',
+          },
+      message: charge.redirectUrl
+        ? 'Complete payment authorization to finish your deposit'
+        : charge.message,
       createdAt: transaction.createdAt,
     };
   }
