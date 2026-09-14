@@ -257,10 +257,29 @@ function resolveBuyMinNgn(opts: {
 }
 
 function parseBushaMinNgnError(message: string): number | null {
-  const m = String(message || '').match(/minimum\s+(?:sale|buy)\s+amount\s+is\s+([\d.]+)\s*NGN/i);
+  const m = String(message || '').match(
+    /minimum\s+(?:sale|buy|sell)\s+amount\s+is\s+([\d.]+)\s*NGN/i
+  );
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Bank-transfer sell payouts need enough NGN after fees.
+ * Busha often returns a misleading "recipient not found" when the payout is too small.
+ * Default ₦500 covers typical gateway fees (~₦100–200) plus a usable net credit.
+ */
+function getSellPayoutMinNgn(): number {
+  const fromEnv = Number(process.env.BUSHA_SELL_MIN_NGN);
+  if (Number.isFinite(fromEnv) && fromEnv >= 100) return fromEnv;
+  return 500;
+}
+
+function formatSellCryptoMin(amount: number): string {
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  if (amount >= 1) return String(Number(amount.toFixed(8)));
+  return String(Number(amount.toPrecision(8)));
 }
 
 function formatNgnAmount(amount: number): string {
@@ -1177,28 +1196,34 @@ export class BushaAppService {
 
     const assets = Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code));
 
-    // Sell: raise crypto min if PalmPay payout floor (₦100) requires more crypto
-    const PALMPAY_SELL_MIN_NGN = 100;
+    // Sell: raise crypto min so bank_transfer payout clears fees + NGN floor
+    const sellMinNgn = getSellPayoutMinNgn();
     for (const asset of assets) {
       if (!asset.sellSupported) continue;
       const price = Number(asset.sellPrice || asset.buyPrice);
       const pairCryptoMin = Number(asset.minSellCrypto ?? asset.minSellAmount);
       let effectiveCryptoMin = Number.isFinite(pairCryptoMin) && pairCryptoMin > 0 ? pairCryptoMin : 0;
       if (Number.isFinite(price) && price > 0) {
-        const palmPayCryptoMin = PALMPAY_SELL_MIN_NGN / price;
-        effectiveCryptoMin = Math.max(effectiveCryptoMin, palmPayCryptoMin);
+        const floorCryptoMin = sellMinNgn / price;
+        effectiveCryptoMin = Math.max(effectiveCryptoMin, floorCryptoMin);
       }
       if (effectiveCryptoMin > 0) {
-        const formatted =
-          effectiveCryptoMin >= 1
-            ? String(Number(effectiveCryptoMin.toFixed(8)))
-            : String(Number(effectiveCryptoMin.toPrecision(8)));
+        const formatted = formatSellCryptoMin(effectiveCryptoMin);
         asset.minSellCrypto = formatted;
         asset.minSellAmount = formatted;
         asset.minSellCurrency = asset.code;
         const pairNgn = Number(asset.minSellNgn);
         asset.minSellNgn = String(
-          Math.max(Number.isFinite(pairNgn) ? pairNgn : 0, PALMPAY_SELL_MIN_NGN, effectiveCryptoMin * (price || 0))
+          Math.max(
+            Number.isFinite(pairNgn) ? pairNgn : 0,
+            sellMinNgn,
+            effectiveCryptoMin * (price || 0)
+          )
+        );
+      } else {
+        const pairNgn = Number(asset.minSellNgn);
+        asset.minSellNgn = String(
+          Math.max(Number.isFinite(pairNgn) ? pairNgn : 0, sellMinNgn)
         );
       }
     }
@@ -1303,19 +1328,106 @@ export class BushaAppService {
     if (!limits) return;
     const min = Number(limits.minSellCrypto ?? limits.minSellAmount);
     const max = Number(limits.maxSellCrypto ?? limits.maxSellAmount);
+    const minNgn = Number(limits.minSellNgn);
+    const price = Number(limits.sellPrice || limits.buyPrice);
     const code = toBushaCurrency(sourceCurrency);
     if (Number.isFinite(min) && min > 0 && sourceAmountCrypto + 1e-12 < min) {
-      throw ApiError.badRequest(`Minimum sell is ${min} ${code}`);
+      const ngnHint =
+        Number.isFinite(minNgn) && minNgn > 0
+          ? ` (about ₦${Math.ceil(minNgn).toLocaleString('en-NG')})`
+          : '';
+      throw ApiError.badRequest(`Minimum sell is ${min} ${code}${ngnHint}`);
+    }
+    if (
+      Number.isFinite(minNgn) &&
+      minNgn > 0 &&
+      Number.isFinite(price) &&
+      price > 0 &&
+      sourceAmountCrypto * price + 1e-9 < minNgn
+    ) {
+      const needCrypto = formatSellCryptoMin(minNgn / price);
+      throw ApiError.badRequest(
+        `Minimum sell is about ₦${Math.ceil(minNgn).toLocaleString('en-NG')} (~${needCrypto} ${code})`
+      );
     }
     if (Number.isFinite(max) && max > 0 && sourceAmountCrypto - 1e-12 > max) {
       throw ApiError.badRequest(`Maximum sell is ${max} ${code}`);
     }
   }
 
+  private rawBushaErrorMessage(error: unknown): string {
+    const err = error as any;
+    return String(
+      err?.providerResponse?.error?.message ||
+        err?.providerResponse?.message ||
+        err?.message ||
+        ''
+    );
+  }
+
+  /** Map misleading Busha sell-quote errors (often "recipient not found" on tiny payouts) to a clear min. */
+  private rewriteSellQuoteError(
+    error: unknown,
+    sourceAmountCrypto: number,
+    limits: Awaited<ReturnType<BushaAppService['getPairLimitsForCrypto']>>,
+    sourceCurrency: string
+  ): never {
+    const raw = this.rawBushaErrorMessage(error);
+    const code = toBushaCurrency(sourceCurrency);
+    const parsedMin = parseBushaMinNgnError(raw);
+    if (parsedMin != null) {
+      throw ApiError.badRequest(
+        `Minimum sell is ₦${Math.ceil(parsedMin).toLocaleString('en-NG')} for ${code}`
+      );
+    }
+
+    const price = Number(limits?.sellPrice || limits?.buyPrice);
+    const floor = Math.max(
+      Number(limits?.minSellNgn) || 0,
+      getSellPayoutMinNgn()
+    );
+    const estimated =
+      Number.isFinite(price) && price > 0 ? sourceAmountCrypto * price : null;
+
+    if (
+      this.isRecipientMissingError(error) &&
+      estimated != null &&
+      Number.isFinite(floor) &&
+      floor > 0 &&
+      estimated < floor * 1.5
+    ) {
+      const needCrypto = formatSellCryptoMin(floor / price);
+      throw ApiError.badRequest(
+        `Minimum sell is about ₦${Math.ceil(floor).toLocaleString('en-NG')} (~${needCrypto} ${code}). Small amounts cannot be paid out to bank.`
+      );
+    }
+
+    throw error instanceof BushaProviderError ? error.toApiError() : error;
+  }
+
   async getDepositAddress(userId: number, currency: string, blockchain: string) {
     const customer = await this.assertCustomerTradeReady(userId);
     const bushaCurrency = toBushaCurrency(currency);
-    const network = toBushaNetwork(blockchain, currency);
+
+    // Confirm this asset actually supports on-chain deposit (e.g. DOGS does not on Busha)
+    let preferredNetwork = toBushaNetwork(blockchain, currency);
+    try {
+      const limits = await this.getWithdrawLimits(userId, bushaCurrency);
+      const depositNets = (limits.networks || []).filter((n) => n.deposit !== false);
+      const topLevelDeposit = (limits as any).depositEnabled !== false;
+      if (!topLevelDeposit || depositNets.length === 0) {
+        throw ApiError.badRequest(
+          `On-chain deposit is not available for ${bushaCurrency}. Buy or sell may still be available if listed.`
+        );
+      }
+      const matched = this.matchCurrencyNetwork(depositNets, blockchain, bushaCurrency);
+      preferredNetwork = matched?.bushaNetwork || depositNets[0].bushaNetwork;
+    } catch (error: any) {
+      if (error instanceof ApiError || error?.statusCode === 400) throw error;
+      // If limits lookup fails, continue with address attempt using requested network
+    }
+
+    const network = preferredNetwork;
     const chain = fromBushaNetwork(network);
 
     let addressPayload: any;
@@ -1323,40 +1435,53 @@ export class BushaAppService {
       addressPayload = await this.client.get(`/v1/addresses/${bushaCurrency}`, customer.bushaProfileId, {
         network,
       });
-    } catch {
+    } catch (addressError: any) {
       // Busha receive quote requires an amount; use network min deposit when known
       let quoteAmount = bushaCurrency === 'BTC' ? '0.0001' : bushaCurrency === 'ETH' ? '0.001' : '1';
       try {
         const limits = await this.getWithdrawLimits(userId, bushaCurrency);
-        const net = this.matchCurrencyNetwork(limits.networks as any[], blockchain, bushaCurrency);
+        const net = this.matchCurrencyNetwork(limits.networks as any[], network, bushaCurrency);
         const minDep = Number((net as any)?.minDepositAmount);
         if (Number.isFinite(minDep) && minDep > 0) {
           quoteAmount = String(minDep);
         }
-      } catch {
-        /* keep default */
+        const depositNets = (limits.networks || []).filter((n) => n.deposit !== false);
+        if (!depositNets.length) {
+          throw ApiError.badRequest(
+            `On-chain deposit is not available for ${bushaCurrency}. Buy or sell may still be available if listed.`
+          );
+        }
+      } catch (limitsError: any) {
+        if (limitsError instanceof ApiError || limitsError?.statusCode === 400) throw limitsError;
       }
-      const receive = await this.createReceive(userId, {
-        currency: bushaCurrency,
-        amount: quoteAmount,
-        network,
-      });
-      return {
-        address: receive.cryptoDepositAddress,
-        currency: bushaCurrency,
-        blockchain: chain.blockchain,
-        network,
-        expiresAt: receive.payInExpiresAt,
-        provider: 'busha',
-        virtualAccountId: receive.cryptoDepositAddress,
-        virtualAccountDbId: 0,
-        userWalletId: null,
-        userWalletBlockchain: chain.blockchain,
-        ledger: {
-          accountBalance: '0',
-          availableBalance: '0',
-        },
-      };
+      try {
+        const receive = await this.createReceive(userId, {
+          currency: bushaCurrency,
+          amount: quoteAmount,
+          network,
+        });
+        return {
+          address: receive.cryptoDepositAddress,
+          currency: bushaCurrency,
+          blockchain: chain.blockchain,
+          network,
+          expiresAt: receive.payInExpiresAt,
+          provider: 'busha',
+          virtualAccountId: receive.cryptoDepositAddress,
+          virtualAccountDbId: 0,
+          userWalletId: null,
+          userWalletBlockchain: chain.blockchain,
+          ledger: {
+            accountBalance: '0',
+            availableBalance: '0',
+          },
+        };
+      } catch {
+        throw ApiError.badRequest(
+          addressError?.message ||
+            `Could not open a ${bushaCurrency} deposit wallet. This coin may not support deposits.`
+        );
+      }
     }
 
     const address =
@@ -1365,7 +1490,9 @@ export class BushaAppService {
       (Array.isArray(addressPayload) ? addressPayload[0]?.address : null);
 
     if (!address) {
-      throw ApiError.internal('Could not generate a deposit address');
+      throw ApiError.badRequest(
+        `Could not generate a deposit address for ${bushaCurrency}. This coin may not support deposits.`
+      );
     }
 
     return {
@@ -1636,10 +1763,12 @@ export class BushaAppService {
           priceNum > 0 ? (balNum * priceNum).toFixed(2) : networks[0]?.balanceInUSDT || '0';
         const isUnifiedStable = symbol === 'USDT' || symbol === 'USDC';
         const catalogNets = catalogByCode.get(symbol)?.networks;
+        // Only expose real deposit networks from catalog — never invent ones
+        // (e.g. DOGS is listed by Busha but deposit-unsupported → empty nets).
         const bushaNetworks =
           catalogNets && catalogNets.length > 0
             ? catalogNets.map((n) => n.bushaNetwork)
-            : getBushaNetworksForCurrency(symbol);
+            : [];
 
         const networkRows = bushaNetworks.map((bushaNet) => {
           const chain = fromBushaNetwork(bushaNet);
@@ -1665,6 +1794,7 @@ export class BushaAppService {
           priceInUSDT,
           balanceInUSDT,
           isUnifiedStable,
+          depositSupported: networkRows.length > 0,
           networks: networkRows,
         };
       })
@@ -2029,6 +2159,7 @@ export class BushaAppService {
         err?.providerResponse?.message ||
         ''
     ).toLowerCase();
+    if (msg.includes('sell destination could not be verified')) return true;
     return (
       msg.includes('recipient') &&
       (msg.includes('not found') ||
@@ -2387,10 +2518,13 @@ export class BushaAppService {
         this.buildSellBankTransferQuoteBody(sourceCurrency, sourceAmount, recipientId)
       );
     } catch (firstError) {
-      // Stale cached recipient (often shared/global ID) — recreate under this customer
+      // Only recreate recipient when Busha says the ID is missing — not on min-amount failures
+      if (!this.isRecipientMissingError(firstError)) {
+        this.rewriteSellQuoteError(firstError, amount, pairLimits, sourceCurrency);
+      }
       console.warn(
         '[Busha sell preview] bank_transfer quote failed; recreating settlement recipient',
-        (firstError as any)?.message || firstError
+        this.rawBushaErrorMessage(firstError) || firstError
       );
       await this.persistSellQuoteRecipientId(customer.id, null, customer.providerData);
       const refreshed = await prisma.bushaCustomer.findUnique({ where: { id: customer.id } });
@@ -2405,16 +2539,17 @@ export class BushaAppService {
           this.buildSellBankTransferQuoteBody(sourceCurrency, sourceAmount, recipientId)
         );
       } catch (secondError) {
-        if (this.isRecipientMissingError(secondError) || this.isRecipientMissingError(firstError)) {
-          throw ApiError.badRequest(
-            'Sell destination could not be verified. Please try again in a moment.'
-          );
-        }
-        throw secondError;
+        this.rewriteSellQuoteError(secondError, amount, pairLimits, sourceCurrency);
       }
     }
     const { fees, feeTotal } = this.extractQuoteFees(quote);
     const netNgn = Number(quote?.target_amount || 0);
+    if (Number.isFinite(netNgn) && netNgn > 0 && netNgn + 1e-9 < 100) {
+      const sellFloor = Math.max(Number(pairLimits?.minSellNgn) || 0, getSellPayoutMinNgn());
+      throw ApiError.badRequest(
+        `Sell payout would be only ₦${netNgn.toLocaleString('en-NG')}. Increase the amount (min about ₦${Math.ceil(sellFloor).toLocaleString('en-NG')}).`
+      );
+    }
     return {
       ...quote,
       isEstimate: true,
@@ -2431,6 +2566,7 @@ export class BushaAppService {
         Number.isFinite(netNgn) && feeTotal > 0 ? String(Number((netNgn + feeTotal).toFixed(2))) : null,
       minSellCrypto: pairLimits?.minSellCrypto ?? pairLimits?.minSellAmount ?? null,
       maxSellCrypto: pairLimits?.maxSellCrypto ?? pairLimits?.maxSellAmount ?? null,
+      minSellNgn: pairLimits?.minSellNgn ?? String(getSellPayoutMinNgn()),
       note:
         'Estimated NGN after payout fees. Funds settle to Rhinox PalmPay business account; your wallet is credited after confirmation.',
     };
@@ -2447,8 +2583,11 @@ export class BushaAppService {
     this.assertSellAmountWithinPairLimits(pairLimits, amount, sourceCurrency);
     const preview = await this.previewSell(userId, sourceCurrency, sourceAmount);
     const estimatedNgn = Number(preview.target_amount || preview.netNgn || 0);
-    if (estimatedNgn < 100) {
-      throw ApiError.badRequest('Sell amount is below the NGN 100 minimum');
+    if (estimatedNgn + 1e-9 < 100) {
+      const sellFloor = Math.max(Number(pairLimits?.minSellNgn) || 0, getSellPayoutMinNgn());
+      throw ApiError.badRequest(
+        `Sell amount is below the minimum (about ₦${Math.ceil(sellFloor).toLocaleString('en-NG')})`
+      );
     }
 
     let recipientId: string | null = null;
@@ -2484,19 +2623,25 @@ export class BushaAppService {
           )
         ));
       } catch (err) {
-        if (!this.isRecipientMissingError(err)) throw err;
+        if (!this.isRecipientMissingError(err)) {
+          this.rewriteSellQuoteError(err, amount, pairLimits, sourceCurrency);
+        }
         recipientId = await this.ensureCustomerSettlementRecipient(customer, platform, {
           forceNew: true,
         });
-        ({ quote, transfer } = await this.createQuoteAndTransfer(
-          customer.bushaProfileId,
-          this.buildSellBankTransferQuoteBody(
-            sourceCurrency,
-            sourceAmount,
-            recipientId,
-            network
-          )
-        ));
+        try {
+          ({ quote, transfer } = await this.createQuoteAndTransfer(
+            customer.bushaProfileId,
+            this.buildSellBankTransferQuoteBody(
+              sourceCurrency,
+              sourceAmount,
+              recipientId,
+              network
+            )
+          ));
+        } catch (secondErr) {
+          this.rewriteSellQuoteError(secondErr, amount, pairLimits, sourceCurrency);
+        }
       }
       feeMeta = this.extractQuoteFees(quote);
     } else {
@@ -2720,8 +2865,9 @@ export class BushaAppService {
       currency: code,
       name: remote?.display_name || remote?.name || code,
       withdrawalEnabled: remote?.withdrawal !== false,
+      depositEnabled: remote?.deposit !== false && mapped.some((n) => n.deposit),
       defaultNetwork: remote?.default_network || null,
-      networks: mapped,
+      networks: remote?.deposit === false ? [] : mapped,
     };
   }
 
