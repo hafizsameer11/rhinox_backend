@@ -228,6 +228,7 @@ export class DepositService {
         amount: amountStr,
         currency: 'NGN',
         reference,
+        channel: 'bank_transfer',
         bankName: virtualAccount.bankName || undefined,
         accountNumber: virtualAccount.accountNumber || undefined,
         accountName: virtualAccount.accountName || undefined,
@@ -406,6 +407,9 @@ export class DepositService {
         amount: data.amount,
         currency: data.currency,
         reference,
+        channel: 'mobile_money',
+        providerName: provider.name,
+        phoneNumber,
       });
     }
 

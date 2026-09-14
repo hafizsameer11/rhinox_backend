@@ -14,34 +14,41 @@ export const sendDepositInitiatedEmail = async (
     amount: string;
     currency: string;
     reference: string;
+    channel?: 'bank_transfer' | 'mobile_money';
     bankName?: string;
     accountNumber?: string;
     accountName?: string;
     providerName?: string;
+    phoneNumber?: string;
   }
 ): Promise<void> => {
   const subject = `Deposit Initiated - ${data.amount} ${data.currency}`;
-  
-  const isMobileMoney = !!data.providerName;
-  
-  const message = isMobileMoney ? `
+
+  const isMobileMoney =
+    data.channel === 'mobile_money' || (!!data.providerName && data.channel !== 'bank_transfer');
+
+  const message = isMobileMoney
+    ? `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2 style="color: #333;">Deposit Initiated</h2>
-      <p>Your mobile money deposit request has been initiated. You will receive a mobile money prompt to confirm your payment.</p>
+      <p>Your mobile money deposit request has been initiated. Complete authorization on your phone or the payment page to finish funding your wallet.</p>
       
       <div style="background: #f0f0f0; padding: 20px; margin: 20px 0; border-radius: 5px;">
         <h3>Transaction Details:</h3>
         <p><strong>Amount:</strong> ${data.amount} ${data.currency}</p>
-        <p><strong>Provider:</strong> ${data.providerName}</p>
+        <p><strong>Channel:</strong> Mobile Money</p>
+        ${data.providerName ? `<p><strong>Provider:</strong> ${data.providerName}</p>` : ''}
+        ${data.phoneNumber ? `<p><strong>Mobile Number:</strong> ${data.phoneNumber}</p>` : ''}
         <p><strong>Reference:</strong> ${data.reference}</p>
       </div>
       
       <p style="color: #666; font-size: 12px;">
-        <strong>Important:</strong> You will receive a mobile money prompt to confirm your payment. 
-        Payment will take a few minutes to reflect in your wallet.
+        <strong>Important:</strong> Approve the mobile money prompt or complete authorization if a payment page opens.
+        Your wallet updates automatically after confirmation.
       </p>
     </div>
-  ` : `
+  `
+    : `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2 style="color: #333;">Deposit Initiated</h2>
       <p>Your deposit request has been initiated. Please complete the bank transfer using the details below:</p>
@@ -49,9 +56,9 @@ export const sendDepositInitiatedEmail = async (
       <div style="background: #f0f0f0; padding: 20px; margin: 20px 0; border-radius: 5px;">
         <h3>Transfer Details:</h3>
         <p><strong>Amount:</strong> ${data.amount} ${data.currency}</p>
-        <p><strong>Bank Name:</strong> ${data.bankName}</p>
-        <p><strong>Account Number:</strong> ${data.accountNumber}</p>
-        <p><strong>Account Name:</strong> ${data.accountName}</p>
+        <p><strong>Bank Name:</strong> ${data.bankName || '—'}</p>
+        <p><strong>Account Number:</strong> ${data.accountNumber || '—'}</p>
+        <p><strong>Account Name:</strong> ${data.accountName || '—'}</p>
         <p><strong>Reference:</strong> ${data.reference}</p>
       </div>
       
