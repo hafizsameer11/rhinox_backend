@@ -75,6 +75,15 @@ const authenticateUser = async (
       throw ApiError.unauthorized('Account is deactivated');
     }
 
+    // Enforce short-lived DB sessions (ignore stale year-long rows still on old tokens)
+    const session = await prisma.session.findUnique({
+      where: { token },
+    });
+    if (session && session.expiresAt.getTime() < Date.now()) {
+      await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
+      throw ApiError.unauthorized('Session expired. Please login again.');
+    }
+
     const requestPath = req.originalUrl.split('?')[0];
     const emailVerificationExempt =
       requestPath.includes('/auth/verify-email') ||

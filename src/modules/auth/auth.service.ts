@@ -137,7 +137,7 @@ export class AuthService {
     const sessionData: any = {
       userId: user.id,
       token: tokens.accessToken,
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+      expiresAt: this.getSessionExpiresAt(),
     };
 
     if (ipAddress) {
@@ -394,7 +394,7 @@ export class AuthService {
     const sessionData: any = {
       userId: user.id,
       token: tokens.accessToken,
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      expiresAt: this.getSessionExpiresAt(),
     };
 
     if (ipAddress) sessionData.ipAddress = ipAddress;
@@ -420,14 +420,55 @@ export class AuthService {
   }
 
   /**
-   * Generate JWT access token
-   * Token doesn't expire (or very long expiration)
+   * Session / JWT lifetime — short by default so users must re-login within a few days.
+   * Override with JWT_EXPIRES_IN (e.g. 1d, 2d, 3d) or SESSION_MAX_DAYS (1–3).
+   */
+  private getSessionTtlMs(): number {
+    const daysRaw = process.env.SESSION_MAX_DAYS?.trim();
+    if (daysRaw) {
+      const days = Math.min(3, Math.max(1, parseInt(daysRaw, 10) || 2));
+      return days * 24 * 60 * 60 * 1000;
+    }
+
+    const expiresIn = (process.env.JWT_EXPIRES_IN || '2d').trim().toLowerCase();
+    const match = expiresIn.match(/^(\d+)([dhms])$/);
+    if (!match) {
+      return 2 * 24 * 60 * 60 * 1000;
+    }
+    const amount = parseInt(match[1], 10);
+    const unit = match[2];
+    const multipliers: Record<string, number> = {
+      d: 24 * 60 * 60 * 1000,
+      h: 60 * 60 * 1000,
+      m: 60 * 1000,
+      s: 1000,
+    };
+    return amount * (multipliers[unit] || multipliers.d);
+  }
+
+  private getJwtExpiresIn(): string {
+    if (process.env.JWT_EXPIRES_IN?.trim()) {
+      return process.env.JWT_EXPIRES_IN.trim();
+    }
+    const daysRaw = process.env.SESSION_MAX_DAYS?.trim();
+    if (daysRaw) {
+      const days = Math.min(3, Math.max(1, parseInt(daysRaw, 10) || 2));
+      return `${days}d`;
+    }
+    return '2d';
+  }
+
+  private getSessionExpiresAt(): Date {
+    return new Date(Date.now() + this.getSessionTtlMs());
+  }
+
+  /**
+   * Generate JWT access token (max ~1–3 days by default)
    */
   private generateTokens(userId: string) {
     const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
-    const expiresInValue: string = process.env.JWT_EXPIRES_IN || '365d';
-    
-    // Use type assertion to satisfy TypeScript strict types
+    const expiresInValue = this.getJwtExpiresIn();
+
     const accessToken = jwt.sign(
       { userId },
       jwtSecret,
@@ -656,7 +697,7 @@ export class AuthService {
       data: {
         userId: user.id,
         token: tokens.accessToken,
-        expiresAt: new Date(Date.now() + 3600000), // 1 hour
+        expiresAt: this.getSessionExpiresAt(),
       },
     });
 
