@@ -1021,6 +1021,43 @@ export class AuthController {
   }
 
   /**
+   * Verify PIN for app unlock / sensitive actions
+   */
+  async verifyPIN(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId || (req as any).user?.id;
+      const { pin } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      if (!pin) {
+        return res.status(400).json({
+          success: false,
+          message: 'PIN is required',
+        });
+      }
+
+      const result = await this.service.verifyPIN(userId, pin);
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      const message = error.message || 'Failed to verify PIN';
+      const status = message.includes('Incorrect') ? 401 : 400;
+      return res.status(status).json({
+        success: false,
+        message,
+      });
+    }
+  }
+
+  /**
    * @swagger
    * /api/auth/change-pin:
    *   post:

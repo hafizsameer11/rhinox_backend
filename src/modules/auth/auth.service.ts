@@ -883,6 +883,43 @@ export class AuthService {
   }
 
   /**
+   * Verify transaction / app-lock PIN
+   */
+  async verifyPIN(userId: string | number, pin: string) {
+    const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+      throw new Error('Invalid user ID format');
+    }
+
+    if (!/^\d{5}$/.test(pin)) {
+      throw new Error('PIN must be exactly 5 digits');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: parsedUserId },
+      select: { id: true, pinHash: true },
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (!user.pinHash) {
+      throw new Error('PIN is not set. Please set up your PIN first.');
+    }
+
+    const isValid = await bcrypt.compare(pin, user.pinHash);
+    if (!isValid) {
+      throw new Error('Incorrect PIN');
+    }
+
+    return {
+      verified: true,
+      message: 'PIN verified successfully',
+    };
+  }
+
+  /**
    * Change PIN
    */
   async changePIN(userId: string, oldPin: string, newPin: string) {
