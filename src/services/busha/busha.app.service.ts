@@ -1659,9 +1659,11 @@ export class BushaAppService {
     for (const item of balances) {
       const currency = toBushaCurrency(item.currency);
       const available = item.available?.amount || item.available || '0';
+      const pending = item.pending?.amount || item.pending || '0';
       const total = item.total?.amount || item.total || available;
       balanceByCode.set(currency, {
         available: String(available),
+        pending: String(pending),
         total: String(total),
         name: item.name,
         id: item.id,
@@ -1684,18 +1686,28 @@ export class BushaAppService {
       );
       const total = bal?.total || '0';
       const available = bal?.available || '0';
+      const pending = bal?.pending || '0';
       const unitPrice =
         priceByCode.get(currency) ??
         (currency === 'USDT' || currency === 'USDC' ? 1 : 0);
+      const availableNum = Number(available) || 0;
       const totalNum = Number(total) || 0;
+      const pendingNum = Number(pending) || 0;
+      // Locked = pending deposits (or total−available when pending field missing)
+      const lockedNum = Math.max(pendingNum, totalNum - availableNum);
       const priceStr =
         unitPrice > 0
           ? unitPrice >= 1
             ? unitPrice.toFixed(2)
             : unitPrice.toPrecision(6)
           : '0';
+      // Spendable only — pending/unconfirmed deposits stay in Busha `total` until cleared
       const balanceUsdt =
-        unitPrice > 0 ? (totalNum * unitPrice).toFixed(2) : currency === 'USDT' ? String(total) : '0';
+        unitPrice > 0
+          ? (availableNum * unitPrice).toFixed(2)
+          : currency === 'USDT'
+            ? String(available)
+            : '0';
 
       return {
         id: bal?.id || index,
@@ -1704,8 +1716,10 @@ export class BushaAppService {
         blockchain: chain.blockchain,
         currencyName: meta?.name || this.currencyDisplayName(currency, bal?.name),
         symbol: currency,
-        balance: String(total),
-        lockedBalance: '0',
+        // Primary balance = available (confirmed). Do not show pending in wallet balance.
+        balance: String(available),
+        totalBalance: String(total),
+        lockedBalance: String(lockedNum),
         availableBalance: String(available),
         balanceInUSDT: balanceUsdt,
         priceInUSDT: String(priceStr),
@@ -1750,11 +1764,16 @@ export class BushaAppService {
 
     return Array.from(grouped.entries())
       .map(([symbol, networks]) => {
+        // balance field is available (confirmed); totalBalance keeps Busha total (may include pending)
         const totalBalance = networks
-          .reduce((sum, item) => sum + Number(item.balance || 0), 0)
+          .reduce(
+            (sum, item) =>
+              sum + Number((item as any).totalBalance ?? item.balance ?? 0),
+            0,
+          )
           .toString();
         const totalAvailable = networks
-          .reduce((sum, item) => sum + Number(item.availableBalance || 0), 0)
+          .reduce((sum, item) => sum + Number(item.availableBalance || item.balance || 0), 0)
           .toString();
         const priceInUSDT = String(networks[0]?.priceInUSDT || (symbol === 'USDT' || symbol === 'USDC' ? '1' : '0'));
         const priceNum = Number(priceInUSDT) || 0;
@@ -1778,8 +1797,10 @@ export class BushaAppService {
             currency: symbol,
             blockchain: chain.blockchain,
             blockchainName: catalogNet?.blockchainName || chain.blockchainName,
-            balance: totalBalance,
+            // Show available (confirmed) on network rows — pending must not inflate balance
+            balance: totalAvailable,
             available: totalAvailable,
+            totalBalance,
             depositAddress: null,
             bushaNetwork: bushaNet,
             minDepositAmount: catalogNet?.minDepositAmount || null,

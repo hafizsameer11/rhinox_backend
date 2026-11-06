@@ -17,6 +17,15 @@ const BUSHA_CRYPTO_TX_TYPES = new Set([
  * Business logic for transaction history with chart data and filtering
  */
 export class TransactionHistoryService {
+  /**
+   * Only settled txs belong in Totals / Incoming / Outgoing / charts.
+   * Pending fund deposits and in-flight crypto must not inflate Activity totals.
+   */
+  private countsTowardTotals(status?: string | null): boolean {
+    const s = String(status || '').toLowerCase();
+    return s === 'completed' || s === 'success' || s === 'wallet_credited';
+  }
+
   /** Busha buy/sell post to NGN fiat wallet but must show under crypto history */
   private isCryptoHistoryTx(tx: {
     type?: string | null;
@@ -651,11 +660,14 @@ export class TransactionHistoryService {
         };
       });
 
-    // Calculate summary (total, incoming, outgoing)
+    // Calculate summary (total, incoming, outgoing) — completed only
     let totalIncoming = new Decimal(0);
     let totalOutgoing = new Decimal(0);
+    const settledTransactions = transactions.filter((tx: any) =>
+      this.countsTowardTotals(tx.status),
+    );
 
-    transactions.forEach((tx: any) => {
+    settledTransactions.forEach((tx: any) => {
       const amount = new Decimal(tx.amount);
       const absAmount = amount.abs();
       
@@ -689,9 +701,9 @@ export class TransactionHistoryService {
 
     const total = totalIncoming.minus(totalOutgoing);
 
-    // Generate chart data (using all transactions)
+    // Chart follows settled totals only (pending deposits must not draw the line)
     const chartData = this.generateChartData(
-      transactions.map((tx: any) => ({
+      settledTransactions.map((tx: any) => ({
         createdAt: tx.createdAt,
         amount: new Decimal(tx.amount),
       })),
@@ -746,8 +758,8 @@ export class TransactionHistoryService {
       };
     };
 
-    // Generate summary grouped by transaction type
-    const typeSummary = await this.generateTypeSummary(transactions);
+    // Generate summary grouped by transaction type (settled only)
+    const typeSummary = await this.generateTypeSummary(settledTransactions);
 
     const cryptoNormalized = [
       ...cryptoFromLedger.map((tx: any) => normalizeTransaction(tx)),
@@ -1022,9 +1034,10 @@ export class TransactionHistoryService {
       skip: filters.offset || 0,
     });
 
-    // Calculate summary
+    // Calculate summary — pending deposits must not inflate Fund Incoming
     let totalIncoming = new Decimal(0);
     transactions.forEach((tx: any) => {
+      if (!this.countsTowardTotals(tx.status)) return;
       totalIncoming = totalIncoming.plus(new Decimal(tx.amount).abs());
     });
 
@@ -1253,9 +1266,10 @@ export class TransactionHistoryService {
       skip: filters.offset || 0,
     });
 
-    // Calculate summary
+    // Calculate summary — pending/failed sends must not inflate Outgoing totals
     let totalOutgoing = new Decimal(0);
     transactions.forEach((tx: any) => {
+      if (!this.countsTowardTotals(tx.status)) return;
       totalOutgoing = totalOutgoing.plus(new Decimal(tx.amount).abs());
     });
 
