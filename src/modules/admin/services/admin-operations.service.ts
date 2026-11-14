@@ -293,20 +293,45 @@ export class AdminKycService {
       prisma.kYC.count({ where }),
     ]);
 
+    const userIds = items.map((k) => k.userId);
+    const [bushaCustomers, latestBushaKyc] = await Promise.all([
+      prisma.bushaCustomer.findMany({
+        where: { userId: { in: userIds } },
+        select: { userId: true, status: true, bushaProfileId: true },
+      }),
+      prisma.bushaKycApplication.findMany({
+        where: { userId: { in: userIds } },
+        orderBy: { createdAt: 'desc' },
+        select: { userId: true, status: true, source: true, errorMessage: true, createdAt: true },
+      }),
+    ]);
+    const customerByUser = new Map(bushaCustomers.map((c) => [c.userId, c]));
+    const latestKycByUser = new Map<number, (typeof latestBushaKyc)[number]>();
+    for (const app of latestBushaKyc) {
+      if (!latestKycByUser.has(app.userId)) latestKycByUser.set(app.userId, app);
+    }
+
     return paginatedResponse(
-      items.map((kyc) => ({
-        id: kyc.id,
-        userId: kyc.userId,
-        name: formatUserName(kyc.user),
-        email: kyc.user.email,
-        phone: kyc.user.phone || null,
-        country: kyc.user.country?.code || null,
-        status: kyc.status,
-        tier: kyc.tier,
-        idType: kyc.idType,
-        profilePictureUrl: kyc.user.profilePictureUrl,
-        createdAt: kyc.createdAt,
-      })),
+      items.map((kyc) => {
+        const busha = customerByUser.get(kyc.userId) || null;
+        const bushaKyc = latestKycByUser.get(kyc.userId) || null;
+        return {
+          id: kyc.id,
+          userId: kyc.userId,
+          name: formatUserName(kyc.user),
+          email: kyc.user.email,
+          phone: kyc.user.phone || null,
+          country: kyc.user.country?.code || null,
+          status: kyc.status,
+          tier: kyc.tier,
+          idType: kyc.idType,
+          profilePictureUrl: kyc.user.profilePictureUrl,
+          createdAt: kyc.createdAt,
+          bushaCustomerStatus: busha?.status ?? null,
+          bushaProfileId: busha?.bushaProfileId ?? null,
+          bushaKycStatus: bushaKyc?.status ?? null,
+        };
+      }),
       total,
       query.page,
       query.limit,
@@ -325,9 +350,50 @@ export class AdminKycService {
   }
 
   async getByUserId(userId: number) {
-    const kyc = await prisma.kYC.findUnique({ where: { userId }, include: { user: { include: { country: true } } } });
+    const kyc = await prisma.kYC.findUnique({
+      where: { userId },
+      include: { user: { include: { country: true } } },
+    });
     if (!kyc) throw new Error('KYC record not found');
-    return kyc;
+
+    const [bushaCustomer, bushaKycApps] = await Promise.all([
+      prisma.bushaCustomer.findUnique({
+        where: { userId },
+        select: {
+          id: true,
+          bushaProfileId: true,
+          status: true,
+          email: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      prisma.bushaKycApplication.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          status: true,
+          source: true,
+          attempts: true,
+          errorMessage: true,
+          rhinoxKycId: true,
+          bushaCustomerId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      ...kyc,
+      busha: {
+        customer: bushaCustomer,
+        latestKyc: bushaKycApps[0] || null,
+        applications: bushaKycApps,
+      },
+    };
   }
 
   async approve(userId: number, adminUserId: number) {
