@@ -7,6 +7,34 @@ import { parseOptionalId, parseId } from '../../core/utils/idParser.js';
  */
 export class KYCService {
   /**
+   * After Rhinox KYC + face are ready, queue Busha customer verify.
+   * Fire-and-forget — never fails the local KYC save path.
+   */
+  private async startBushaKycIfReady(userId: number) {
+    try {
+      const { BushaAppService, isBushaEnabled } = await import('../../services/busha/index.js');
+      if (!isBushaEnabled()) return;
+
+      const kyc = await prisma.kYC.findUnique({ where: { userId } });
+      if (
+        !kyc ||
+        !kyc.faceVerificationSuccessful ||
+        !kyc.firstName ||
+        !kyc.lastName ||
+        !kyc.dateOfBirth ||
+        !kyc.idNumber
+      ) {
+        return;
+      }
+      if (String(kyc.status || '') === 'rejected') return;
+
+      await new BushaAppService().startKyc(userId);
+    } catch (error: any) {
+      console.warn('[KYC] Busha start after KYC skipped:', error?.message || error);
+    }
+  }
+
+  /**
    * Submit or update KYC information
    */
   async submitKYC(userId: string, data: {
@@ -57,6 +85,11 @@ export class KYCService {
           status: 'pending', // Reset to pending when updated
         },
       });
+
+      // If face already done (resubmit/update), push to Busha now
+      if (kyc.faceVerificationSuccessful) {
+        void this.startBushaKycIfReady(parsedUserId);
+      }
 
       return {
         id: kyc.id,
@@ -225,13 +258,18 @@ export class KYCService {
       },
     });
 
+    // Face completes the Rhinox KYC pack — submit to Busha automatically
+    if (isSuccessful) {
+      void this.startBushaKycIfReady(parsedUserId);
+    }
+
     return {
       id: updatedKYC.id,
       faceVerificationSuccessful: updatedKYC.faceVerificationSuccessful,
       status: updatedKYC.status,
       verifiedAt: updatedKYC.verifiedAt,
       message: isSuccessful
-        ? 'Face verification saved. Account stays unverified until crypto KYC is approved.'
+        ? 'Face verification saved. Crypto KYC has been submitted for review.'
         : undefined,
     };
   }
