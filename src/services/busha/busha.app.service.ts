@@ -524,12 +524,27 @@ export class BushaAppService {
         },
       });
     } else if (nextStatus === 'rejected') {
+      const rejectionRaw =
+        providerData?.rejection_reason ??
+        providerData?.rejection_reasons ??
+        providerData?.status_reason ??
+        providerData?.reason ??
+        null;
+      const rejectionMessage = Array.isArray(rejectionRaw)
+        ? rejectionRaw.filter(Boolean).join('; ')
+        : rejectionRaw
+          ? String(rejectionRaw)
+          : 'Verification rejected by Busha';
       await prisma.bushaKycApplication.updateMany({
         where: {
           OR: [{ bushaCustomerId: customer.id }, { userId: updated.userId }],
-          status: { in: ['pending', 'processing', 'submitted', 'in_review'] },
+          status: { in: ['pending', 'processing', 'submitted', 'in_review', 'active', 'failed'] },
         },
-        data: { status: 'rejected', bushaCustomerId: customer.id },
+        data: {
+          status: 'rejected',
+          bushaCustomerId: customer.id,
+          errorMessage: rejectionMessage,
+        },
       });
       await prisma.kYC.updateMany({
         where: {

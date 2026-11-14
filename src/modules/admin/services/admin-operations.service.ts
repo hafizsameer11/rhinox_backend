@@ -349,6 +349,57 @@ export class AdminKycService {
     return { pending, verified, rejected, total };
   }
 
+  private extractBushaStatusDetails(
+    customer: {
+      status: string;
+      providerData?: unknown;
+    } | null,
+    latestKyc: { status: string; errorMessage: string | null } | null
+  ) {
+    const data =
+      customer?.providerData &&
+      typeof customer.providerData === 'object' &&
+      !Array.isArray(customer.providerData)
+        ? (customer.providerData as Record<string, any>)
+        : {};
+
+    const rejectionReasonsRaw =
+      data.rejection_reason ??
+      data.rejection_reasons ??
+      data.status_reason ??
+      data.reason ??
+      null;
+    const rejectionReason = Array.isArray(rejectionReasonsRaw)
+      ? rejectionReasonsRaw.filter(Boolean).join('; ')
+      : rejectionReasonsRaw
+        ? String(rejectionReasonsRaw)
+        : latestKyc?.errorMessage || null;
+
+    const status = String(customer?.status || latestKyc?.status || '').toLowerCase();
+    let statusExplanation: string | null = null;
+    if (status === 'inactive') {
+      statusExplanation =
+        'Inactive means Busha has not completed verification yet (customer created / awaiting review).';
+    } else if (status === 'rejected') {
+      statusExplanation = rejectionReason || 'Verification was rejected by Busha.';
+    } else if (status === 'in_review' || status === 'submitted' || status === 'awaiting_review') {
+      statusExplanation = 'Documents submitted and waiting for Busha review.';
+    } else if (status === 'failed') {
+      statusExplanation = rejectionReason || 'Busha KYC submission failed.';
+    } else if (status === 'active') {
+      statusExplanation = 'Busha verification approved. Crypto trading is unlocked.';
+    }
+
+    return {
+      level: data.level != null ? String(data.level) : null,
+      kycStatus: data.kyc_status ? String(data.kyc_status) : null,
+      rejectionReason,
+      statusExplanation,
+      providerStatus: data.status ? String(data.status) : null,
+      updatedAt: data.updated_at ? String(data.updated_at) : null,
+    };
+  }
+
   async getByUserId(userId: number) {
     const kyc = await prisma.kYC.findUnique({
       where: { userId },
@@ -364,6 +415,7 @@ export class AdminKycService {
           bushaProfileId: true,
           status: true,
           email: true,
+          providerData: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -386,12 +438,29 @@ export class AdminKycService {
       }),
     ]);
 
+    const latestKyc = bushaKycApps[0] || null;
+    const statusDetails = this.extractBushaStatusDetails(bushaCustomer, latestKyc);
+
     return {
       ...kyc,
+      // Prefer KYC-submitted names over user profile when present
+      displayFirstName: kyc.firstName || kyc.user.firstName || null,
+      displayLastName: kyc.lastName || kyc.user.lastName || null,
+      displayMiddleName: kyc.middleName || kyc.user.middleName || null,
       busha: {
-        customer: bushaCustomer,
-        latestKyc: bushaKycApps[0] || null,
+        customer: bushaCustomer
+          ? {
+              id: bushaCustomer.id,
+              bushaProfileId: bushaCustomer.bushaProfileId,
+              status: bushaCustomer.status,
+              email: bushaCustomer.email,
+              createdAt: bushaCustomer.createdAt,
+              updatedAt: bushaCustomer.updatedAt,
+            }
+          : null,
+        latestKyc,
         applications: bushaKycApps,
+        ...statusDetails,
       },
     };
   }
