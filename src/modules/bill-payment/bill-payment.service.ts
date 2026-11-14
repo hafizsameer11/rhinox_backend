@@ -33,6 +33,7 @@ import { resolveFlutterwaveBillerLogo } from '../../services/flutterwave/flutter
 import { notifyBillPayment } from '../../core/utils/notification.events.js';
 import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
 import { RewardFulfillmentService } from '../rewards/reward-fulfillment.service.js';
+import { feeConfigService } from '../../services/fees/fee-config.service.js';
 
 /**
  * Bill Payment Service
@@ -83,21 +84,50 @@ export class BillPaymentService {
     };
   }
 
-  private calculateFee(amount: number, currency: string): number {
-    if (currency === 'NGN') {
-      return 0;
+  /**
+   * Resolve bill fee from PlatformFeeConfig (by provider) or provider.feeValue.
+   * NGN defaults to 0 when no admin fee is configured.
+   */
+  private async calculateFee(
+    amount: number,
+    currency: string,
+    providerCode?: string | null
+  ): Promise<number> {
+    const code = providerCode?.trim() || undefined;
+    const configured = await feeConfigService.computeFee(amount, {
+      walletType: 'fiat',
+      serviceType: 'bill_payment',
+      currency,
+      providerCode: code,
+      subType: code,
+    });
+    if (configured.fee > 0) return configured.fee;
+
+    if (code) {
+      const provider = await prisma.billPaymentProvider.findFirst({
+        where: { code, isActive: true },
+        select: { feeType: true, feeValue: true, minFee: true },
+      });
+      if (provider?.feeValue != null && Number(provider.feeValue) > 0) {
+        const value = Number(provider.feeValue);
+        let fee =
+          provider.feeType === 'fixed' ? value : (amount * value) / 100;
+        const min = provider.minFee != null ? Number(provider.minFee) : 0;
+        if (Number.isFinite(min) && min > 0) fee = Math.max(fee, min);
+        return Math.round(fee * 100) / 100;
+      }
     }
+
+    if (currency === 'NGN') return 0;
 
     const feePercent = 0.01;
     const calculatedFee = amount * feePercent;
-
     const minFees: { [key: string]: number } = {
       NGN: 20,
       USD: 0.1,
       KES: 2,
       GHS: 0.5,
     };
-
     const minFee = minFees[currency] || 0.1;
     return Math.max(calculatedFee, minFee);
   }
@@ -834,7 +864,11 @@ export class BillPaymentService {
       : data.amount;
 
     const amount = this.resolvePalmPayAmount(sceneCode, resolvedAmountInput, item);
-    const fee = isRewardFulfillment ? 0 : this.calculateFee(amount.toNumber(), data.currency);
+    const providerFeeCode =
+      beneficiary?.provider?.code || biller?.billerName || biller?.name || String(billerId);
+    const fee = isRewardFulfillment
+      ? 0
+      : await this.calculateFee(amount.toNumber(), data.currency, providerFeeCode);
     const totalAmount = amount.plus(fee);
 
     // Enforce PalmPay biller/item min/max before creating a pending tx
@@ -1078,7 +1112,10 @@ export class BillPaymentService {
       : data.amount;
 
     const amount = this.resolveFlutterwaveAmount(categoryCode, resolvedAmountInput, item);
-    const fee = isRewardFulfillment ? 0 : this.calculateFee(amount.toNumber(), data.currency);
+    const providerFeeCode = billerCode || billerName;
+    const fee = isRewardFulfillment
+      ? 0
+      : await this.calculateFee(amount.toNumber(), data.currency, providerFeeCode);
     const totalAmount = amount.plus(fee);
 
     if (!isRewardFulfillment) {
@@ -1920,6 +1957,33 @@ export class BillPaymentService {
     };
   }
 
+  private async recordBillProfitIfNeeded(
+    userIdNum: number,
+    transaction: any,
+    metadata: any
+  ) {
+    const fee = Number(transaction.fee || 0);
+    if (!Number.isFinite(fee) || fee <= 0) return;
+    const existing = await prisma.platformProfitEntry.findFirst({
+      where: { transactionId: transaction.id, source: 'bill_payment' },
+    });
+    if (existing) return;
+    const charged = Number(transaction.amount || 0) + fee;
+    await feeConfigService.recordProfit({
+      source: 'bill_payment',
+      userId: userIdNum,
+      transactionId: transaction.id,
+      currency: transaction.currency || 'NGN',
+      userChargedAmount: charged,
+      providerCostAmount: Number(transaction.amount || 0),
+      markupProfit: fee,
+      metadata: {
+        providerCode: metadata?.providerCode || metadata?.billerCode || null,
+        categoryCode: metadata?.categoryCode || null,
+      },
+    });
+  }
+
   private notifyBillResult(
     userIdNum: number,
     amount: Decimal,
@@ -1929,6 +1993,7 @@ export class BillPaymentService {
     mappedStatus: string
   ) {
     if (mappedStatus === 'completed') {
+      void this.recordBillProfitIfNeeded(userIdNum, updatedTransaction || transaction, metadata);
       notifyBillPayment(userIdNum, {
         amount: amount.toString(),
         currency: transaction.currency,

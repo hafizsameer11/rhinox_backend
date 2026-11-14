@@ -12,6 +12,7 @@ import {
   isFlutterwaveMomoSupported,
   isFlutterwaveMomoDepositSupported,
 } from '../../services/flutterwave/index.js';
+import { feeConfigService } from '../../services/fees/fee-config.service.js';
 
 /**
  * Deposit Service
@@ -153,7 +154,13 @@ export class DepositService {
 
     const reference = this.generateReference();
     const merchantOrderId = `deposit_${reference.toLowerCase()}`;
-    const fee = 0;
+    const feeResult = await feeConfigService.computeFee(amount, {
+      walletType: 'fiat',
+      serviceType: 'deposit',
+      currency: 'NGN',
+      subType: 'bank_transfer',
+    });
+    const fee = Math.round(feeResult.fee * 100) / 100;
 
     const transaction = await prisma.transaction.create({
       data: {
@@ -171,6 +178,8 @@ export class DepositService {
         metadata: {
           provider: 'palmpay',
           merchantOrderId,
+          feeType: feeResult.feeType,
+          feeValue: feeResult.value,
         },
       },
       include: {
@@ -306,7 +315,14 @@ export class DepositService {
 
     const reference = this.generateReference();
     const flwTxRef = `flw_deposit_${reference.toLowerCase()}`;
-    const fee = 0;
+    const feeResult = await feeConfigService.computeFee(amount, {
+      walletType: 'fiat',
+      serviceType: 'deposit',
+      currency: data.currency,
+      subType: 'mobile_money',
+      providerCode: provider.code,
+    });
+    const fee = Math.round(feeResult.fee * 100) / 100;
     const phoneNumber = String(data.phoneNumber).trim();
 
     const transaction = await prisma.transaction.create({
@@ -331,6 +347,8 @@ export class DepositService {
           providerId: provider.id,
           providerCode: provider.code,
           providerName: provider.name,
+          feeType: feeResult.feeType,
+          feeValue: feeResult.value,
         },
       },
       include: {

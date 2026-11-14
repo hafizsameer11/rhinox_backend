@@ -16,6 +16,7 @@ import {
   type MappedBillStatus,
 } from './flutterwave.bill-status.js';
 import { RewardFulfillmentService } from '../../modules/rewards/reward-fulfillment.service.js';
+import { feeConfigService } from '../fees/fee-config.service.js';
 
 type FlutterwaveWebhookBody = {
   event?: string;
@@ -223,6 +224,20 @@ export class FlutterwaveWebhookService {
         reference: deposit.reference,
         creditedAmount: creditedAmount.toString(),
       });
+
+      const fee = Number(deposit.fee || 0);
+      if (Number.isFinite(fee) && fee > 0) {
+        await feeConfigService.recordProfit({
+          source: 'deposit',
+          userId: deposit.wallet.userId,
+          transactionId: deposit.id,
+          currency: deposit.currency,
+          userChargedAmount: Number(deposit.amount),
+          providerCostAmount: creditedAmount.toNumber(),
+          markupProfit: fee,
+          metadata: { channel: deposit.channel, provider: 'flutterwave' },
+        });
+      }
       return;
     }
 

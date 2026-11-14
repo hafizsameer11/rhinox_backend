@@ -9,6 +9,7 @@ import {
 import { fromPalmPayAmount, mapPalmPayStatus } from './palmpay.utils.js';
 import { PalmPayDepositService } from './palmpay.deposit.service.js';
 import type { PalmPayWebhookPayload } from './palmpay.types.js';
+import { feeConfigService } from '../fees/fee-config.service.js';
 
 export class PalmPayWebhookService {
   private readonly palmPayDepositService = new PalmPayDepositService();
@@ -110,15 +111,16 @@ export class PalmPayWebhookService {
 
       if (mappedStatus === 'completed') {
         const ledgerAmount = Number(virtualAccount.transaction.amount);
+        const feeAmount = Number(virtualAccount.transaction.fee || 0);
         const webhookRaw = Number(payload.amount);
-        let creditedAmount: Decimal;
+        let grossAmount: Decimal;
 
         if (Number.isFinite(ledgerAmount) && ledgerAmount > 0) {
           // App creates the deposit with major-unit amount — credit that, not a missing webhook amount
-          creditedAmount = new Decimal(ledgerAmount);
+          grossAmount = new Decimal(ledgerAmount);
         } else if (Number.isFinite(webhookRaw) && webhookRaw > 0) {
           // PalmPay amounts are typically kobo; if value is huge vs typical NGN, treat as kobo
-          creditedAmount =
+          grossAmount =
             webhookRaw >= 1000 ? fromPalmPayAmount(webhookRaw) : new Decimal(webhookRaw);
         } else {
           console.error(
@@ -128,6 +130,9 @@ export class PalmPayWebhookService {
           );
           return;
         }
+
+        const fee = Number.isFinite(feeAmount) && feeAmount > 0 ? new Decimal(feeAmount) : new Decimal(0);
+        const creditedAmount = Decimal.max(grossAmount.minus(fee), 0);
 
         if (creditedAmount.lte(0)) {
           console.error('[PalmPay webhook] Refusing to complete deposit with zero credit', payload.orderId);
@@ -168,6 +173,19 @@ export class PalmPayWebhookService {
             },
           },
         });
+
+        if (fee.gt(0)) {
+          await feeConfigService.recordProfit({
+            source: 'deposit',
+            userId: virtualAccount.transaction.wallet.userId,
+            transactionId: virtualAccount.transactionId,
+            currency: virtualAccount.transaction.currency,
+            userChargedAmount: grossAmount.toNumber(),
+            providerCostAmount: creditedAmount.toNumber(),
+            markupProfit: fee.toNumber(),
+            metadata: { channel: virtualAccount.transaction.channel },
+          });
+        }
 
         if (virtualAccount.transaction.wallet.user.email) {
           await sendDepositSuccessEmail(virtualAccount.transaction.wallet.user.email, {
@@ -243,6 +261,24 @@ export class PalmPayWebhookService {
     });
 
     if (mappedStatus === 'completed') {
+      const fee = Number(transaction.fee || 0);
+      if (Number.isFinite(fee) && fee > 0) {
+        const existing = await prisma.platformProfitEntry.findFirst({
+          where: { transactionId: transaction.id, source: 'withdrawal' },
+        });
+        if (!existing) {
+          await feeConfigService.recordProfit({
+            source: 'withdrawal',
+            userId: transaction.wallet.userId,
+            transactionId: transaction.id,
+            currency: transaction.currency,
+            userChargedAmount: Number(transaction.amount) + fee,
+            providerCostAmount: Number(transaction.amount),
+            markupProfit: fee,
+            metadata: { channel: transaction.channel },
+          });
+        }
+      }
       notifyWithdrawal(transaction.wallet.userId, {
         amount: transaction.amount.toString(),
         currency: transaction.currency,

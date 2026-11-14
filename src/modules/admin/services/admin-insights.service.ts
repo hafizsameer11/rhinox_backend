@@ -58,19 +58,28 @@ export class AdminAnalyticsService {
     let revenue = 0;
     let cryptoVolume = 0;
     let fiatVolume = 0;
-    const cryptoSet = new Set(['BTC', 'ETH', 'USDT', 'USDC', 'BNB']);
+    let billVolume = 0;
+    const cryptoSet = new Set(['BTC', 'ETH', 'USDT', 'USDC', 'BNB', 'TRX', 'SOL', 'LTC', 'TON', 'XRP']);
+    const billTypes = new Set(['bill_payment', 'airtime', 'data', 'electricity', 'cable_tv', 'internet', 'betting']);
 
     for (const tx of transactions) {
       const amount = Number(tx.amount);
       revenue += amount;
-      if (cryptoSet.has((tx.currency || '').toUpperCase())) cryptoVolume += amount;
-      else fiatVolume += amount;
+      const type = String(tx.type || '').toLowerCase();
+      if (billTypes.has(type)) {
+        billVolume += amount;
+      } else if (cryptoSet.has((tx.currency || '').toUpperCase()) || type.startsWith('crypto_')) {
+        cryptoVolume += amount;
+      } else {
+        fiatVolume += amount;
+      }
     }
 
     return {
       revenue,
       cryptoVolume,
       fiatVolume,
+      billVolume,
       transactionCount: transactions.length,
       mode: query.mode || 'Revenue',
     };

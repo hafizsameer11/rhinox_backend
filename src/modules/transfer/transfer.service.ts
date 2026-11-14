@@ -18,6 +18,7 @@ import {
   notifyTransferSent,
 } from '../../core/utils/notification.events.js';
 import { assertTransactionSecurity } from '../../core/utils/transactionSecurity.js';
+import { feeConfigService } from '../../services/fees/fee-config.service.js';
 import {
   UnifiedStablecoinService,
   getBaseSymbol,
@@ -243,9 +244,26 @@ export class TransferService {
   }
 
   /**
-   * Calculate transfer fee
+   * Calculate transfer / withdrawal fee from PlatformFeeConfig.
+   * Supports flat (fixed) and percentage. Falls back to legacy defaults when unset.
    */
-  private calculateTransferFee(amount: DecimalType, currency: string, channel: string): DecimalType {
+  private async calculateTransferFee(
+    amount: DecimalType,
+    currency: string,
+    channel: string
+  ): Promise<DecimalType> {
+    const isWithdrawal = channel === 'bank_account' || channel === 'mobile_money';
+    const configured = await feeConfigService.computeFee(amount.toNumber(), {
+      walletType: 'fiat',
+      serviceType: isWithdrawal ? 'withdrawal' : 'transfer',
+      currency,
+      subType: channel,
+    });
+    if (configured.fee > 0 || configured.value > 0) {
+      return new Decimal(configured.fee);
+    }
+
+    // Legacy defaults when admin has not configured a fee
     if (channel === 'bank_account' && currency === 'NGN') {
       return new Decimal(0);
     }
@@ -253,11 +271,8 @@ export class TransferService {
       return new Decimal(0);
     }
 
-    // Fee structure: 0.1% or minimum fee
-    const feePercent = 0.001; // 0.1%
+    const feePercent = 0.001;
     const calculatedFee = amount.times(feePercent);
-    
-    // Minimum fees by currency
     const minFees: { [key: string]: number } = {
       NGN: 20,
       KES: 50,
@@ -269,7 +284,6 @@ export class TransferService {
       EUR: 1,
       GBP: 1,
     };
-
     const minFee = new Decimal(minFees[currency] || 1);
     return calculatedFee.greaterThan(minFee) ? calculatedFee : minFee;
   }
@@ -440,7 +454,7 @@ export class TransferService {
     }
 
     const amountDecimal = new Decimal(data.amount);
-    const fee = this.calculateTransferFee(amountDecimal, data.currency, data.channel);
+    const fee = await this.calculateTransferFee(amountDecimal, data.currency, data.channel);
     const totalDeduction = amountDecimal.plus(fee);
 
     if (totalDeduction.greaterThan(availableBalance)) {

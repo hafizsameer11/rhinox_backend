@@ -6,6 +6,7 @@ import {
   type AdminListQuery,
 } from '../../../core/admin/admin-query.helpers.js';
 import { ExchangeService } from '../../exchange/exchange.service.js';
+import { feeConfigService } from '../../../services/fees/fee-config.service.js';
 
 export class AdminExchangeService {
   private exchangeService = new ExchangeService();
@@ -56,6 +57,8 @@ export class AdminExchangeService {
     const where: any = {};
     if (query.walletType) where.walletType = String(query.walletType);
     if (query.serviceType) where.serviceType = String(query.serviceType);
+    if (query.providerCode) where.providerCode = String(query.providerCode);
+    if (query.currency) where.currency = String(query.currency);
 
     const [items, total] = await Promise.all([
       prisma.platformFeeConfig.findMany({
@@ -76,6 +79,10 @@ export class AdminExchangeService {
     subType?: string;
     feeType?: string;
     value: number;
+    currency?: string;
+    providerCode?: string;
+    minFee?: number;
+    maxFee?: number;
   }) {
     return prisma.platformFeeConfig.create({
       data: {
@@ -84,12 +91,32 @@ export class AdminExchangeService {
         subType: data.subType,
         feeType: data.feeType || 'percentage',
         value: data.value,
+        currency: data.currency,
+        providerCode: data.providerCode,
+        minFee: data.minFee,
+        maxFee: data.maxFee,
       },
     });
   }
 
-  async updateFee(id: number, data: Partial<{ value: number; isActive: boolean }>) {
+  async updateFee(
+    id: number,
+    data: Partial<{
+      value: number;
+      isActive: boolean;
+      feeType: string;
+      subType: string | null;
+      currency: string | null;
+      providerCode: string | null;
+      minFee: number | null;
+      maxFee: number | null;
+    }>
+  ) {
     return prisma.platformFeeConfig.update({ where: { id }, data });
+  }
+
+  async listProfits(query: AdminListQuery) {
+    return feeConfigService.listProfits(query);
   }
 }
 

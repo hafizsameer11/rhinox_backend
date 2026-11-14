@@ -18,6 +18,7 @@ import {
   BUSHA_DEPOSIT_CATALOG_FALLBACK,
   shouldPreferStableNetworkDefaults,
 } from './busha.networks.js';
+import { feeConfigService } from '../fees/fee-config.service.js';
 
 const SUCCESS_STATUSES = new Set([
   'completed',
@@ -116,7 +117,7 @@ async function getOrCreateConfig() {
 
   if (shouldSwitchToDashboard) {
     return prisma.bushaConfig.update({
-      where: { id: 1 },
+    where: { id: 1 },
       data: {
         sellPayoutMode: 'dashboard_bank',
         payoutBankCode: existing.payoutBankCode || defaults.payoutBankCode,
@@ -396,20 +397,20 @@ export class BushaAppService {
 
   async getStatus(userId: number) {
     try {
-      const platform = await getOrCreateConfig();
-      const enabled = isBushaEnabled() && platform.isActive;
+    const platform = await getOrCreateConfig();
+    const enabled = isBushaEnabled() && platform.isActive;
       let [user, kyc, customer, latestKycApp] = await Promise.all([
-        prisma.user.findUnique({
-          where: { id: userId },
-          include: { country: true },
-        }),
-        prisma.kYC.findUnique({ where: { userId } }),
-        prisma.bushaCustomer.findUnique({ where: { userId } }),
-        prisma.bushaKycApplication.findFirst({
-          where: { userId },
-          orderBy: { createdAt: 'desc' },
-        }),
-      ]);
+      prisma.user.findUnique({
+        where: { id: userId },
+        include: { country: true },
+      }),
+      prisma.kYC.findUnique({ where: { userId } }),
+      prisma.bushaCustomer.findUnique({ where: { userId } }),
+      prisma.bushaKycApplication.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
       // Live-check Busha when local customer is not active yet (approval may land on their side first)
       if (enabled && customer?.bushaProfileId && customer.status !== 'active') {
@@ -420,16 +421,16 @@ export class BushaAppService {
         });
       }
 
-      const rhinoxKycReady = Boolean(
+    const rhinoxKycReady = Boolean(
         kyc &&
           ['pending', 'submitted', 'under_review', 'verified'].includes(String(kyc.status || '')) &&
           kyc.faceVerificationSuccessful &&
-          kyc.firstName &&
-          kyc.lastName &&
-          kyc.dateOfBirth &&
-          kyc.idNumber
-      );
-      const canTrade = enabled && customer?.status === 'active';
+        kyc.firstName &&
+        kyc.lastName &&
+        kyc.dateOfBirth &&
+        kyc.idNumber
+    );
+    const canTrade = enabled && customer?.status === 'active';
       // Settings "Verified" must wait for Busha customer.active — not local face/admin alone
       const displayRhinoxKycStatus =
         customer?.status === 'active'
@@ -444,20 +445,20 @@ export class BushaAppService {
                 ? 'under_review'
                 : kyc?.status || 'not_started';
 
-      return {
-        isActive: enabled,
-        provider: 'busha',
-        environment: isBushaEnabled() ? getBushaConfig().environment : null,
-        rhinoxKycReady,
+    return {
+      isActive: enabled,
+      provider: 'busha',
+      environment: isBushaEnabled() ? getBushaConfig().environment : null,
+      rhinoxKycReady,
         rhinoxKycStatus: displayRhinoxKycStatus,
-        bushaStatus: customer?.status || 'missing',
-        bushaProfileId: customer?.bushaProfileId || null,
-        kycApplicationStatus: latestKycApp?.status || null,
-        kycError: latestKycApp?.errorMessage || null,
-        needsKyc: enabled && !canTrade,
-        canTrade,
-        countryCode: user?.country?.code || 'NG',
-      };
+      bushaStatus: customer?.status || 'missing',
+      bushaProfileId: customer?.bushaProfileId || null,
+      kycApplicationStatus: latestKycApp?.status || null,
+      kycError: latestKycApp?.errorMessage || null,
+      needsKyc: enabled && !canTrade,
+      canTrade,
+      countryCode: user?.country?.code || 'NG',
+    };
     } catch (error: any) {
       // Never 500 the wallet crypto tab — return a safe "needs activation" payload.
       console.error('[Busha] getStatus failed:', error?.message || error);
@@ -967,6 +968,12 @@ export class BushaAppService {
    * - Sell: minSellAmount / maxSellAmount in crypto (user sells crypto)
    */
   async listTradeAssets(userId: number) {
+    const assets = await this.listTradeAssetsInternal(userId);
+    // Do not expose raw provider prices to the app
+    return assets.map(({ providerBuyPrice: _pb, providerSellPrice: _ps, ...rest }) => rest);
+  }
+
+  private async listTradeAssetsInternal(userId: number) {
     await this.assertPlatformActive();
     const customer = await prisma.bushaCustomer.findUnique({ where: { userId } });
     if (!customer?.bushaProfileId) {
@@ -1003,6 +1010,9 @@ export class BushaAppService {
         sellSupported: boolean;
         buyPrice: string | null;
         sellPrice: string | null;
+        /** Raw Busha prices before admin markup (internal quoting) */
+        providerBuyPrice?: string | null;
+        providerSellPrice?: string | null;
         /** Raw Busha min buy (may be crypto or NGN) */
         minBuyAmount: string | null;
         minBuyCurrency: string | null;
@@ -1196,6 +1206,41 @@ export class BushaAppService {
 
     const assets = Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code));
 
+    // Bake admin % markup into displayed rates (not shown as a separate fee line)
+    const markupByCode = new Map<string, { buy: number; sell: number }>();
+    await Promise.all(
+      assets.map(async (asset) => {
+        const [buy, sell] = await Promise.all([
+          feeConfigService.getMarkupPercent('buy', asset.code),
+          feeConfigService.getMarkupPercent('sell', asset.code),
+        ]);
+        markupByCode.set(asset.code, { buy, sell });
+      })
+    );
+
+    for (const asset of assets) {
+      const markup = markupByCode.get(asset.code) || { buy: 0, sell: 0 };
+      const rawBuy = Number(asset.buyPrice);
+      const rawSell = Number(asset.sellPrice);
+      asset.providerBuyPrice = asset.buyPrice;
+      asset.providerSellPrice = asset.sellPrice;
+      if (Number.isFinite(rawBuy) && rawBuy > 0 && markup.buy > 0) {
+        asset.buyPrice = String(this.markupBuyPrice(rawBuy, markup.buy));
+      }
+      if (Number.isFinite(rawSell) && rawSell > 0 && markup.sell > 0) {
+        asset.sellPrice = String(this.markupSellPrice(rawSell, markup.sell));
+      }
+      // User must pay enough NGN so the Busha-bound amount still clears the pair min
+      const minBuy = Number(asset.minBuyNgn);
+      if (Number.isFinite(minBuy) && minBuy > 0 && markup.buy > 0) {
+        asset.minBuyNgn = String(this.roundNgn(minBuy * (1 + markup.buy / 100)));
+      }
+      const maxBuy = Number(asset.maxBuyNgn);
+      if (Number.isFinite(maxBuy) && maxBuy > 0 && markup.buy > 0) {
+        asset.maxBuyNgn = String(this.roundNgn(maxBuy * (1 + markup.buy / 100)));
+      }
+    }
+
     // Sell: raise crypto min so bank_transfer payout clears fees + NGN floor
     const sellMinNgn = getSellPayoutMinNgn();
     for (const asset of assets) {
@@ -1239,45 +1284,72 @@ export class BushaAppService {
     const customer = await this.assertCustomerTradeReady(userId);
     const code = toBushaCurrency(targetCurrency);
     const limits = await this.getPairLimitsForCrypto(userId, code);
-    const pairMinNgn = Number(limits?.minBuyNgn);
-    const price = Number(limits?.buyPrice || limits?.sellPrice);
+    const markupPercent = await feeConfigService.getMarkupPercent('buy', code);
+    const pairMinNgn = Number(limits?.minBuyNgn); // already user-facing (markup baked in)
+    const providerPrice = Number(limits?.providerBuyPrice || limits?.buyPrice || limits?.sellPrice);
+    const displayPrice = Number(limits?.buyPrice || limits?.sellPrice);
     let minCrypto = limits?.minBuyAmount ? String(limits.minBuyAmount) : null;
 
-    if ((!minCrypto || Number(minCrypto) <= 0) && Number.isFinite(price) && price > 0 && pairMinNgn > 0) {
-      minCrypto = String(pairMinNgn / price);
+    if (
+      (!minCrypto || Number(minCrypto) <= 0) &&
+      Number.isFinite(providerPrice) &&
+      providerPrice > 0 &&
+      Number.isFinite(pairMinNgn) &&
+      pairMinNgn > 0
+    ) {
+      const providerFloor =
+        markupPercent > 0 ? pairMinNgn / (1 + markupPercent / 100) : pairMinNgn;
+      minCrypto = String(providerFloor / providerPrice);
     }
 
     let liveMin =
       Number.isFinite(pairMinNgn) && pairMinNgn > 0 ? pairMinNgn : null;
-    let feeTotal = 0;
 
     if (minCrypto && Number(minCrypto) > 0) {
+      const providerSeed =
+        Number.isFinite(pairMinNgn) && pairMinNgn > 0 && markupPercent > 0
+          ? this.roundNgn(pairMinNgn / (1 + markupPercent / 100))
+          : Number.isFinite(pairMinNgn)
+            ? pairMinNgn
+            : null;
       const probed = await this.probeBuyMinSourceNgn(
         customer.bushaProfileId,
         code,
         minCrypto,
-        Number.isFinite(pairMinNgn) ? pairMinNgn : null
+        providerSeed
       );
       if (probed != null) {
-        liveMin = probed;
+        liveMin =
+          markupPercent > 0
+            ? this.roundNgn(probed * (1 + markupPercent / 100))
+            : probed;
       }
     } else if (Number.isFinite(pairMinNgn) && pairMinNgn > 0) {
-      // No crypto min — still learn fees from a quote at the pair floor
+      const providerSeed =
+        markupPercent > 0 ? this.roundNgn(pairMinNgn / (1 + markupPercent / 100)) : pairMinNgn;
       try {
         const q = await this.createQuote(customer.bushaProfileId, {
           source_currency: 'NGN',
           target_currency: code,
-          source_amount: formatNgnAmount(pairMinNgn),
+          source_amount: formatNgnAmount(providerSeed),
           ...this.quoteBuyPayIn(),
         });
-        feeTotal = this.extractQuoteFees(q).feeTotal;
-        if (feeTotal > 0) {
-          liveMin = Math.ceil((pairMinNgn + feeTotal) * 100 - Number.EPSILON) / 100;
+        const bushaFees = this.extractQuoteFees(q).feeTotal;
+        if (bushaFees > 0) {
+          const providerLive = Math.ceil((providerSeed + bushaFees) * 100 - Number.EPSILON) / 100;
+          liveMin =
+            markupPercent > 0
+              ? this.roundNgn(providerLive * (1 + markupPercent / 100))
+              : providerLive;
         }
       } catch (error: any) {
         const required = parseBushaMinNgnError(error?.message || '');
         if (required != null) {
-          liveMin = Math.ceil(required * 100 - Number.EPSILON) / 100;
+          const providerLive = Math.ceil(required * 100 - Number.EPSILON) / 100;
+          liveMin =
+            markupPercent > 0
+              ? this.roundNgn(providerLive * (1 + markupPercent / 100))
+              : providerLive;
         }
       }
     }
@@ -1288,14 +1360,15 @@ export class BushaAppService {
       maxBuyNgn: limits?.maxBuyNgn ?? null,
       minBuyAmount: minCrypto || limits?.minBuyAmount || null,
       minBuyCurrency: code,
-      buyPrice: limits?.buyPrice ?? null,
-      feeTotal,
+      buyPrice: Number.isFinite(displayPrice) ? String(displayPrice) : limits?.buyPrice ?? null,
+      // Markup is in the rate — never surface as a separate fee
+      feeTotal: 0,
     };
   }
 
   /** Look up Busha pair limits for one crypto vs NGN. */
   private async getPairLimitsForCrypto(userId: number, cryptoCode: string) {
-    const assets = await this.listTradeAssets(userId);
+    const assets = await this.listTradeAssetsInternal(userId);
     const code = toBushaCurrency(cryptoCode);
     return assets.find((a) => a.code === code) || null;
   }
@@ -1455,27 +1528,27 @@ export class BushaAppService {
         if (limitsError instanceof ApiError || limitsError?.statusCode === 400) throw limitsError;
       }
       try {
-        const receive = await this.createReceive(userId, {
-          currency: bushaCurrency,
+      const receive = await this.createReceive(userId, {
+        currency: bushaCurrency,
           amount: quoteAmount,
-          network,
-        });
-        return {
-          address: receive.cryptoDepositAddress,
-          currency: bushaCurrency,
-          blockchain: chain.blockchain,
-          network,
-          expiresAt: receive.payInExpiresAt,
-          provider: 'busha',
-          virtualAccountId: receive.cryptoDepositAddress,
-          virtualAccountDbId: 0,
-          userWalletId: null,
-          userWalletBlockchain: chain.blockchain,
-          ledger: {
-            accountBalance: '0',
-            availableBalance: '0',
-          },
-        };
+        network,
+      });
+      return {
+        address: receive.cryptoDepositAddress,
+        currency: bushaCurrency,
+        blockchain: chain.blockchain,
+        network,
+        expiresAt: receive.payInExpiresAt,
+        provider: 'busha',
+        virtualAccountId: receive.cryptoDepositAddress,
+        virtualAccountDbId: 0,
+        userWalletId: null,
+        userWalletBlockchain: chain.blockchain,
+        ledger: {
+          accountBalance: '0',
+          availableBalance: '0',
+        },
+      };
       } catch {
         throw ApiError.badRequest(
           addressError?.message ||
@@ -1793,7 +1866,7 @@ export class BushaAppService {
           const chain = fromBushaNetwork(bushaNet);
           const catalogNet = catalogNets?.find((n) => n.bushaNetwork === bushaNet);
           return {
-            virtualAccountId: 0,
+        virtualAccountId: 0,
             currency: symbol,
             blockchain: chain.blockchain,
             blockchainName: catalogNet?.blockchainName || chain.blockchainName,
@@ -1801,7 +1874,7 @@ export class BushaAppService {
             balance: totalAvailable,
             available: totalAvailable,
             totalBalance,
-            depositAddress: null,
+        depositAddress: null,
             bushaNetwork: bushaNet,
             minDepositAmount: catalogNet?.minDepositAmount || null,
           };
@@ -2107,7 +2180,7 @@ export class BushaAppService {
     return {
       source_currency: toBushaCurrency(sourceCurrency),
       target_currency: 'NGN',
-      source_amount: String(sourceAmount),
+        source_amount: String(sourceAmount),
       pay_in: { type: 'balance' },
       pay_out: { type: 'bank_transfer', recipient_id: recipientId },
       ...(network ? { network: toBushaNetwork(network, sourceCurrency) } : {}),
@@ -2136,6 +2209,73 @@ export class BushaAppService {
       return sum + (Number.isFinite(n) ? n : 0);
     }, 0);
     return { fees, feeTotal };
+  }
+
+  /** Round NGN to kobo. */
+  private roundNgn(value: number): number {
+    return Math.round(value * 100) / 100;
+  }
+
+  /** User-facing buy rate = Busha buy × (1 + markup%). */
+  private markupBuyPrice(bushaPrice: number, markupPercent: number): number {
+    if (!Number.isFinite(bushaPrice) || bushaPrice <= 0) return bushaPrice;
+    if (!Number.isFinite(markupPercent) || markupPercent <= 0) return bushaPrice;
+    return this.roundNgn(bushaPrice * (1 + markupPercent / 100));
+  }
+
+  /** User-facing sell rate = Busha sell × (1 − markup%). */
+  private markupSellPrice(bushaPrice: number, markupPercent: number): number {
+    if (!Number.isFinite(bushaPrice) || bushaPrice <= 0) return bushaPrice;
+    if (!Number.isFinite(markupPercent) || markupPercent <= 0) return bushaPrice;
+    return this.roundNgn(bushaPrice * (1 - markupPercent / 100));
+  }
+
+  /** NGN sent to Busha when user pays `userPay` with buy markup. */
+  private providerBuyCostFromUserPay(userPay: number, markupPercent: number): number {
+    if (!Number.isFinite(userPay) || userPay <= 0) return 0;
+    if (!Number.isFinite(markupPercent) || markupPercent <= 0) return this.roundNgn(userPay);
+    return this.roundNgn(userPay / (1 + markupPercent / 100));
+  }
+
+  /** NGN credited to user when Busha pays out `providerNgn` with sell markup. */
+  private userSellCreditFromProvider(providerNgn: number, markupPercent: number): number {
+    if (!Number.isFinite(providerNgn) || providerNgn <= 0) return 0;
+    if (!Number.isFinite(markupPercent) || markupPercent <= 0) return this.roundNgn(providerNgn);
+    return this.roundNgn(providerNgn * (1 - markupPercent / 100));
+  }
+
+  private async recordBushaProfitOnce(opts: {
+    source: 'busha_buy' | 'busha_sell';
+    userId: number;
+    transactionId?: number | null;
+    bushaTradeLogId: number;
+    userChargedAmount: number;
+    providerCostAmount: number;
+    markupPercent: number;
+    cryptoCode?: string | null;
+    providerQuoteId?: string | null;
+    metadata?: Record<string, unknown>;
+  }) {
+    const profit = this.roundNgn(opts.userChargedAmount - opts.providerCostAmount);
+    if (profit <= 0 && opts.markupPercent <= 0) return null;
+    const existing = await prisma.platformProfitEntry.findFirst({
+      where: { bushaTradeLogId: opts.bushaTradeLogId, source: opts.source },
+    });
+    if (existing) return existing;
+    return feeConfigService.recordProfit({
+      source: opts.source,
+      userId: opts.userId,
+      transactionId: opts.transactionId ?? null,
+      bushaTradeLogId: opts.bushaTradeLogId,
+      currency: 'NGN',
+      userChargedAmount: opts.userChargedAmount,
+      providerCostAmount: opts.providerCostAmount,
+      markupProfit: Math.max(profit, 0),
+      markupPercentApplied: opts.markupPercent,
+      cryptoCode: opts.cryptoCode ?? null,
+      providerQuoteId: opts.providerQuoteId ?? null,
+      metadata: (opts.metadata as any) ?? null,
+    });
   }
 
   private readSellQuoteRecipientId(providerData: unknown): string | null {
@@ -2328,6 +2468,10 @@ export class BushaAppService {
       throw ApiError.badRequest('Enter a valid NGN amount');
     }
     const pairLimits = await this.getPairLimitsForCrypto(userId, targetCurrency);
+    const markupPercent = await feeConfigService.getMarkupPercent('buy', targetCurrency);
+    const providerCost = this.providerBuyCostFromUserPay(amount, markupPercent);
+
+    // Pair minBuyNgn is already user-facing (markup baked in listTradeAssets)
     let effectiveMin = Number(pairLimits?.minBuyNgn);
     if (pairLimits?.minBuyAmount) {
       const probed = await this.probeBuyMinSourceNgn(
@@ -2336,7 +2480,9 @@ export class BushaAppService {
         pairLimits.minBuyAmount
       );
       if (probed != null) {
-        effectiveMin = Math.max(Number.isFinite(effectiveMin) ? effectiveMin : 0, probed);
+        const userFacingProbe =
+          markupPercent > 0 ? this.roundNgn(probed * (1 + markupPercent / 100)) : probed;
+        effectiveMin = Math.max(Number.isFinite(effectiveMin) ? effectiveMin : 0, userFacingProbe);
       }
     }
     if (Number.isFinite(effectiveMin) && effectiveMin > 0 && amount + 1e-9 < effectiveMin) {
@@ -2352,24 +2498,28 @@ export class BushaAppService {
       targetCurrency
     );
 
+    const providerBuyPrice = Number(
+      pairLimits?.providerBuyPrice || pairLimits?.buyPrice
+    );
     const quote = await this.createBuyQuote({
       profileId: customer.bushaProfileId,
       targetCurrency,
-      sourceAmountNgn: amount,
-      buyPriceNgn: pairLimits?.buyPrice ? Number(pairLimits.buyPrice) : null,
+      sourceAmountNgn: providerCost,
+      buyPriceNgn: Number.isFinite(providerBuyPrice) && providerBuyPrice > 0 ? providerBuyPrice : null,
       minCryptoAmount: pairLimits?.minBuyAmount || null,
     });
-    const { fees, feeTotal } = this.extractQuoteFees(quote);
+    // Markup is baked into the rate / youPay — do not expose as a separate fee line
     return {
       ...quote,
+      source_amount: formatNgnAmount(amount),
       isEstimate: true,
-      youPayNgn: quote?.source_amount ?? formatNgnAmount(amount),
+      youPayNgn: formatNgnAmount(amount),
       youReceive: quote?.target_amount ?? null,
-      feeTotal,
-      fees,
+      feeTotal: 0,
+      fees: [],
       minBuyNgn: Number.isFinite(effectiveMin) && effectiveMin > 0 ? String(effectiveMin) : pairLimits?.minBuyNgn ?? null,
       maxBuyNgn: pairLimits?.maxBuyNgn ?? null,
-      note: 'Estimated crypto you receive. Fees (if any) are shown separately.',
+      note: 'Estimated crypto you receive. Platform rate includes any markup.',
     };
   }
 
@@ -2381,6 +2531,9 @@ export class BushaAppService {
     }
 
     const pairLimits = await this.getPairLimitsForCrypto(userId, targetCurrency);
+    const markupPercent = await feeConfigService.getMarkupPercent('buy', targetCurrency);
+    const plannedProviderCost = this.providerBuyCostFromUserPay(amount, markupPercent);
+
     let effectiveMin = Number(pairLimits?.minBuyNgn);
     if (pairLimits?.minBuyAmount) {
       const probed = await this.probeBuyMinSourceNgn(
@@ -2389,7 +2542,9 @@ export class BushaAppService {
         pairLimits.minBuyAmount
       );
       if (probed != null) {
-        effectiveMin = Math.max(Number.isFinite(effectiveMin) ? effectiveMin : 0, probed);
+        const userFacingProbe =
+          markupPercent > 0 ? this.roundNgn(probed * (1 + markupPercent / 100)) : probed;
+        effectiveMin = Math.max(Number.isFinite(effectiveMin) ? effectiveMin : 0, userFacingProbe);
       }
     }
     if (Number.isFinite(effectiveMin) && effectiveMin > 0 && amount + 1e-9 < effectiveMin) {
@@ -2405,17 +2560,22 @@ export class BushaAppService {
       targetCurrency
     );
 
-    // Quote first so fees/rounding are known before debiting
+    const providerBuyPrice = Number(pairLimits?.providerBuyPrice || pairLimits?.buyPrice);
+    // Quote Busha for the provider amount; debit the full user amount (markup = profit)
     const quote = await this.createBuyQuote({
       profileId: customer.bushaProfileId,
       targetCurrency,
-      sourceAmountNgn: amount,
-      buyPriceNgn: pairLimits?.buyPrice ? Number(pairLimits.buyPrice) : null,
+      sourceAmountNgn: plannedProviderCost,
+      buyPriceNgn: Number.isFinite(providerBuyPrice) && providerBuyPrice > 0 ? providerBuyPrice : null,
       minCryptoAmount: pairLimits?.minBuyAmount || null,
     });
-    const payAmount = Number(quote?.source_amount);
-    const debitAmount =
-      Number.isFinite(payAmount) && payAmount > 0 ? Math.round(payAmount * 100) / 100 : amount;
+    const quoteSource = Number(quote?.source_amount);
+    const providerCost =
+      Number.isFinite(quoteSource) && quoteSource > 0
+        ? this.roundNgn(quoteSource)
+        : plannedProviderCost;
+    const debitAmount = this.roundNgn(amount);
+    const markupProfit = this.roundNgn(debitAmount - providerCost);
 
     const ngnWallet = await prisma.wallet.findUnique({
       where: { userId_currency: { userId, currency: 'NGN' } },
@@ -2436,7 +2596,14 @@ export class BushaAppService {
         reference,
         description: `Buy ${toBushaCurrency(targetCurrency)}`,
         channel: 'busha',
-        metadata: { provider: 'busha', targetCurrency: toBushaCurrency(targetCurrency) },
+        metadata: {
+          provider: 'busha',
+          targetCurrency: toBushaCurrency(targetCurrency),
+          markupPercent,
+          providerCostNgn: providerCost,
+          markupProfit,
+          userChargedNgn: debitAmount,
+        },
       },
     });
 
@@ -2469,7 +2636,14 @@ export class BushaAppService {
           payInAccountName: details.account_name || null,
           payInExpiresAt: transfer.pay_in?.expires_at ? new Date(transfer.pay_in.expires_at) : null,
           fiatTransactionId: fiatTx.id,
-          providerResponse: { quote, transfer },
+          providerResponse: {
+            quote,
+            transfer,
+            markupPercent,
+            providerCostNgn: providerCost,
+            userChargedNgn: debitAmount,
+            markupProfit,
+          },
         },
       });
 
@@ -2480,9 +2654,10 @@ export class BushaAppService {
       }
 
       const palmpayBankCode = resolvePalmpayBankCode(details.bank_code, details.bank_name);
+      // Fund Busha with the exact provider quote amount — surplus stays as platform profit
       const payout = await this.palmPayPayout.initiatePayout({
         orderId: reference.slice(0, 32),
-        amount: debitAmount,
+        amount: providerCost,
         accountNumber: details.account_number,
         accountName: details.account_name || 'Crypto',
         bankCode: palmpayBankCode,
@@ -2563,33 +2738,33 @@ export class BushaAppService {
         this.rewriteSellQuoteError(secondError, amount, pairLimits, sourceCurrency);
       }
     }
-    const { fees, feeTotal } = this.extractQuoteFees(quote);
-    const netNgn = Number(quote?.target_amount || 0);
-    if (Number.isFinite(netNgn) && netNgn > 0 && netNgn + 1e-9 < 100) {
+    const markupPercent = await feeConfigService.getMarkupPercent('sell', sourceCurrency);
+    const providerNetNgn = Number(quote?.target_amount || 0);
+    if (Number.isFinite(providerNetNgn) && providerNetNgn > 0 && providerNetNgn + 1e-9 < 100) {
       const sellFloor = Math.max(Number(pairLimits?.minSellNgn) || 0, getSellPayoutMinNgn());
       throw ApiError.badRequest(
-        `Sell payout would be only ₦${netNgn.toLocaleString('en-NG')}. Increase the amount (min about ₦${Math.ceil(sellFloor).toLocaleString('en-NG')}).`
+        `Sell payout would be only ₦${providerNetNgn.toLocaleString('en-NG')}. Increase the amount (min about ₦${Math.ceil(sellFloor).toLocaleString('en-NG')}).`
       );
     }
+    const youReceive = this.userSellCreditFromProvider(providerNetNgn, markupPercent);
     return {
       ...quote,
+      target_amount: Number.isFinite(youReceive) ? String(youReceive) : quote?.target_amount,
       isEstimate: true,
       payoutType: 'bank_transfer',
       youSell: String(sourceAmount),
       youSellCurrency: toBushaCurrency(sourceCurrency),
-      netNgn: quote?.target_amount ?? null,
-      feeTotal,
-      fees,
-      /** Net NGN after bank_transfer fees (matches execute payout target). */
-      youReceiveNgn: quote?.target_amount ?? null,
-      /** Gross before fees when fees are listed separately */
-      grossNgnEstimate:
-        Number.isFinite(netNgn) && feeTotal > 0 ? String(Number((netNgn + feeTotal).toFixed(2))) : null,
+      netNgn: Number.isFinite(youReceive) ? String(youReceive) : null,
+      // Markup baked into rate / youReceive — hide separate fee line
+      feeTotal: 0,
+      fees: [],
+      youReceiveNgn: Number.isFinite(youReceive) ? String(youReceive) : null,
+      grossNgnEstimate: null,
       minSellCrypto: pairLimits?.minSellCrypto ?? pairLimits?.minSellAmount ?? null,
       maxSellCrypto: pairLimits?.maxSellCrypto ?? pairLimits?.maxSellAmount ?? null,
       minSellNgn: pairLimits?.minSellNgn ?? String(getSellPayoutMinNgn()),
       note:
-        'Estimated NGN after payout fees. Funds settle to Rhinox PalmPay business account; your wallet is credited after confirmation.',
+        'Estimated NGN credited to your wallet. Platform rate includes any markup. Funds settle after confirmation.',
     };
   }
 
@@ -2710,13 +2885,19 @@ export class BushaAppService {
     });
     if (!ngnWallet) throw ApiError.badRequest('NGN wallet not found');
 
-    const creditAmount = Number(transfer.target_amount || quote.target_amount || estimatedNgn);
+    const markupPercent = await feeConfigService.getMarkupPercent('sell', sourceCurrency);
+    const providerPayoutNgn = this.roundNgn(
+      Number(transfer.target_amount || quote.target_amount || estimatedNgn)
+    );
+    const userCreditNgn = this.userSellCreditFromProvider(providerPayoutNgn, markupPercent);
+    const markupProfit = this.roundNgn(providerPayoutNgn - userCreditNgn);
+
     const fiatTx = await prisma.transaction.create({
       data: {
         walletId: ngnWallet.id,
         type: 'crypto_sell',
         status: 'pending',
-        amount: creditAmount,
+        amount: userCreditNgn,
         currency: 'NGN',
         reference: `busha_sell_tx_${randomUUID().slice(0, 12)}`,
         description: `Sell ${toBushaCurrency(sourceCurrency)}`,
@@ -2729,9 +2910,13 @@ export class BushaAppService {
           settlementAccountName: platform.payoutAccountName || null,
           palmpayOrderId,
           vaAmount,
-          fees: feeMeta.fees,
-          feeTotal: feeMeta.feeTotal,
-          netNgn: transfer.target_amount || quote.target_amount,
+          fees: [],
+          feeTotal: 0,
+          netNgn: userCreditNgn,
+          markupPercent,
+          providerPayoutNgn,
+          userCreditNgn,
+          markupProfit,
         },
       },
     });
@@ -2745,7 +2930,7 @@ export class BushaAppService {
         sourceCurrency: toBushaCurrency(sourceCurrency),
         targetCurrency: 'NGN',
         sourceAmount: String(sourceAmount),
-        targetAmount: String(transfer.target_amount || quote.target_amount || ''),
+        targetAmount: String(userCreditNgn),
         network: network ? toBushaNetwork(network, sourceCurrency) : null,
         bushaQuoteId: quote.id,
         bushaTransferId: transfer.id,
@@ -2759,8 +2944,10 @@ export class BushaAppService {
           transfer,
           preview,
           vaAmount,
-          fees: feeMeta.fees,
-          feeTotal: feeMeta.feeTotal,
+          markupPercent,
+          providerPayoutNgn,
+          userCreditNgn,
+          markupProfit,
         },
       },
     });
@@ -3071,6 +3258,28 @@ export class BushaAppService {
             ...(settledTarget ? { targetAmount: settledTarget } : {}),
           },
         });
+        const fiatTx = await prisma.transaction.findUnique({
+          where: { id: trade.fiatTransactionId },
+        });
+        const meta = (fiatTx?.metadata as Record<string, any>) || {};
+        const tradeMeta = (trade.providerResponse as Record<string, any>) || {};
+        const userCharged = Number(meta.userChargedNgn ?? tradeMeta.userChargedNgn ?? fiatTx?.amount ?? 0);
+        const providerCost = Number(meta.providerCostNgn ?? tradeMeta.providerCostNgn ?? 0);
+        const markupPercent = Number(meta.markupPercent ?? tradeMeta.markupPercent ?? 0);
+        if (userCharged > 0 && providerCost >= 0) {
+          await this.recordBushaProfitOnce({
+            source: 'busha_buy',
+            userId: trade.userId,
+            transactionId: trade.fiatTransactionId,
+            bushaTradeLogId: trade.id,
+            userChargedAmount: userCharged,
+            providerCostAmount: providerCost,
+            markupPercent: Number.isFinite(markupPercent) ? markupPercent : 0,
+            cryptoCode: trade.targetCurrency,
+            providerQuoteId: trade.bushaQuoteId,
+            metadata: { side: 'buy' },
+          });
+        }
       } else {
         await prisma.bushaTradeLog.update({ where: { id: trade.id }, data: { status: 'completed' } });
       }
@@ -3275,13 +3484,29 @@ export class BushaAppService {
   private async creditSell(tradeId: number, amount: string | number) {
     const trade = await prisma.bushaTradeLog.findUnique({ where: { id: tradeId } });
     if (!trade?.fiatTransactionId) return;
-    const creditAmount = Number(amount);
-    if (!Number.isFinite(creditAmount) || creditAmount <= 0) return;
 
     const tx = await prisma.transaction.findUnique({ where: { id: trade.fiatTransactionId } });
     if (!tx) return;
 
     const meta = (tx.metadata as Record<string, any>) || {};
+    const tradeMeta = (trade.providerResponse as Record<string, any>) || {};
+    const providerPayoutNgn = this.roundNgn(
+      Number(
+        meta.providerPayoutNgn ??
+          tradeMeta.providerPayoutNgn ??
+          amount ??
+          trade.targetAmount ??
+          0
+      )
+    );
+    const markupPercent = Number(meta.markupPercent ?? tradeMeta.markupPercent ?? 0);
+    const plannedCredit = Number(meta.userCreditNgn ?? tradeMeta.userCreditNgn ?? tx.amount);
+    const creditAmount =
+      Number.isFinite(plannedCredit) && plannedCredit > 0
+        ? this.roundNgn(plannedCredit)
+        : this.userSellCreditFromProvider(providerPayoutNgn, markupPercent);
+    if (!Number.isFinite(creditAmount) || creditAmount <= 0) return;
+
     // Idempotent: only skip when we already credited NGN to the wallet
     if (meta.ngnCredited === true || trade.status === 'wallet_credited') {
       if (tx.status !== 'completed') {
@@ -3293,7 +3518,7 @@ export class BushaAppService {
       if (trade.status !== 'wallet_credited') {
         await prisma.bushaTradeLog.update({
           where: { id: tradeId },
-          data: { status: 'wallet_credited', targetAmount: String(amount) },
+          data: { status: 'wallet_credited', targetAmount: String(creditAmount) },
         });
       }
       return;
@@ -3315,12 +3540,29 @@ export class BushaAppService {
           ngnCredited: true,
           creditedAt: new Date().toISOString(),
           creditAmount,
+          providerPayoutNgn,
+          markupPercent,
+          markupProfit: this.roundNgn(providerPayoutNgn - creditAmount),
         },
       },
     });
     await prisma.bushaTradeLog.update({
       where: { id: tradeId },
-      data: { status: 'wallet_credited', targetAmount: String(amount) },
+      data: { status: 'wallet_credited', targetAmount: String(creditAmount) },
+    });
+
+    await this.recordBushaProfitOnce({
+      source: 'busha_sell',
+      userId: trade.userId,
+      transactionId: tx.id,
+      bushaTradeLogId: tradeId,
+      // For sell: "user charged" = what they forgo; provider cost = what we keep after credit
+      userChargedAmount: providerPayoutNgn,
+      providerCostAmount: creditAmount,
+      markupPercent: Number.isFinite(markupPercent) ? markupPercent : 0,
+      cryptoCode: trade.sourceCurrency,
+      providerQuoteId: trade.bushaQuoteId,
+      metadata: { side: 'sell', providerPayoutNgn, userCreditNgn: creditAmount },
     });
   }
 

@@ -12,6 +12,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, string[]> = {
     'wallets.read',
     'exchange.read',
     'exchange.write',
+    'profits.read',
     'p2p.read',
     'p2p.write',
     'master_wallet.read',

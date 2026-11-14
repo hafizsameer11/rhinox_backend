@@ -62,12 +62,13 @@ export class AdminModule implements IModule {
     this.router.get('/wallets/overview', auth, perm('wallets.read'), c.walletsOverview);
     this.router.get('/wallets/users', auth, perm('wallets.read'), c.walletsUsers);
 
-    // Exchange / Fees
+    // Exchange / Fees / Profits
     this.router.get('/exchange/rates', auth, perm('exchange.read'), c.listRates);
     this.router.post('/exchange/rates', auth, perm('exchange.write'), c.setRate);
     this.router.get('/fees', auth, perm('exchange.read'), c.listFees);
     this.router.post('/fees', auth, perm('exchange.write'), c.createFee);
     this.router.patch('/fees/:id', auth, perm('exchange.write'), c.updateFee);
+    this.router.get('/profits', auth, perm('profits.read'), c.listProfits);
 
     // P2P
     this.router.get('/p2p/stats', auth, perm('p2p.read'), c.p2pStats);

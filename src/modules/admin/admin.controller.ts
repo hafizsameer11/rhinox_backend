@@ -294,6 +294,11 @@ export class AdminController {
     return res.json({ success: true, data });
   };
 
+  listProfits = async (req: AdminRequest, res: Response) => {
+    const data = await this.exchangeService.listProfits(parseAdminListQuery(req));
+    return res.json({ success: true, data });
+  };
+
   p2pStats = async (req: AdminRequest, res: Response) => {
     const data = await this.p2pService.getStats(parseAdminListQuery(req));
     return res.json({ success: true, data });
