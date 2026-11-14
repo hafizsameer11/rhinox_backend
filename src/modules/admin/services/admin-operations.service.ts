@@ -226,6 +226,75 @@ export class AdminTransactionsService {
 
     const recipientInfo = metadata.recipientInfo || null;
 
+    // Enrich conversion pair details from sibling debit/credit row when missing
+    let enrichedMetadata = { ...metadata };
+    if (
+      (tx.channel === 'conversion' || String(tx.reference || '').toUpperCase().startsWith('CONV')) &&
+      metadata.conversionReference
+    ) {
+      const sibling = await prisma.transaction.findFirst({
+        where: {
+          id: { not: tx.id },
+          OR: [
+            { reference: `${metadata.conversionReference}-CREDIT` },
+            { reference: `${metadata.conversionReference}-DEBIT` },
+            {
+              reference: {
+                startsWith: String(metadata.conversionReference),
+              },
+            },
+          ],
+        },
+        select: {
+          id: true,
+          reference: true,
+          amount: true,
+          currency: true,
+          fee: true,
+          type: true,
+          metadata: true,
+        },
+      });
+      if (sibling) {
+        const siblingMeta = (sibling.metadata as Record<string, any>) || {};
+        const isThisDebit =
+          String(tx.reference || '').toUpperCase().endsWith('-DEBIT') || tx.type === 'withdrawal';
+        enrichedMetadata = {
+          ...enrichedMetadata,
+          fromCurrency:
+            enrichedMetadata.fromCurrency ||
+            (isThisDebit ? tx.currency : sibling.currency) ||
+            siblingMeta.fromCurrency,
+          toCurrency:
+            enrichedMetadata.toCurrency ||
+            (isThisDebit ? sibling.currency : tx.currency) ||
+            siblingMeta.toCurrency,
+          fromAmount:
+            enrichedMetadata.fromAmount ||
+            (isThisDebit ? Number(tx.amount) : Number(sibling.amount)) ||
+            siblingMeta.fromAmount,
+          toAmount:
+            enrichedMetadata.toAmount ||
+            (isThisDebit ? Number(sibling.amount) : Number(tx.amount)) ||
+            siblingMeta.toAmount,
+          receivedAmount:
+            enrichedMetadata.receivedAmount ||
+            siblingMeta.receivedAmount ||
+            (isThisDebit
+              ? Number(sibling.amount) - Number(sibling.fee || 0)
+              : Number(tx.amount) - Number(tx.fee || 0)),
+          exchangeRate:
+            enrichedMetadata.exchangeRate ||
+            siblingMeta.exchangeRate ||
+            null,
+          fee:
+            enrichedMetadata.fee ??
+            siblingMeta.fee ??
+            (isThisDebit ? Number(sibling.fee || 0) : Number(tx.fee || 0)),
+        };
+      }
+    }
+
     return {
       id: tx.id,
       reference: tx.reference,
@@ -238,7 +307,7 @@ export class AdminTransactionsService {
       channel: tx.channel,
       paymentMethod: tx.paymentMethod,
       description: tx.description,
-      metadata: tx.metadata,
+      metadata: enrichedMetadata,
       recipientInfo,
       senderInfo,
       bankAccount: tx.bankAccount
