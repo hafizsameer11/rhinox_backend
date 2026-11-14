@@ -228,71 +228,96 @@ export class AdminTransactionsService {
 
     // Enrich conversion pair details from sibling debit/credit row when missing
     let enrichedMetadata = { ...metadata };
-    if (
-      (tx.channel === 'conversion' || String(tx.reference || '').toUpperCase().startsWith('CONV')) &&
-      metadata.conversionReference
-    ) {
-      const sibling = await prisma.transaction.findFirst({
-        where: {
-          id: { not: tx.id },
-          OR: [
-            { reference: `${metadata.conversionReference}-CREDIT` },
-            { reference: `${metadata.conversionReference}-DEBIT` },
-            {
-              reference: {
-                startsWith: String(metadata.conversionReference),
-              },
+    const isConversionChannel =
+      tx.channel === 'conversion' ||
+      String(tx.reference || '').toUpperCase().startsWith('CONV') ||
+      Boolean(metadata.conversionReference);
+    if (isConversionChannel) {
+      const conversionRef = String(
+        metadata.conversionReference ||
+          String(tx.reference || '').replace(/-(CREDIT|DEBIT)$/i, '')
+      ).trim();
+      const sibling = conversionRef
+        ? await prisma.transaction.findFirst({
+            where: {
+              id: { not: tx.id },
+              OR: [
+                { reference: `${conversionRef}-CREDIT` },
+                { reference: `${conversionRef}-DEBIT` },
+                { reference: { startsWith: conversionRef } },
+              ],
             },
-          ],
-        },
-        select: {
-          id: true,
-          reference: true,
-          amount: true,
-          currency: true,
-          fee: true,
-          type: true,
-          metadata: true,
-        },
-      });
-      if (sibling) {
-        const siblingMeta = (sibling.metadata as Record<string, any>) || {};
-        const isThisDebit =
-          String(tx.reference || '').toUpperCase().endsWith('-DEBIT') || tx.type === 'withdrawal';
-        enrichedMetadata = {
-          ...enrichedMetadata,
-          fromCurrency:
-            enrichedMetadata.fromCurrency ||
-            (isThisDebit ? tx.currency : sibling.currency) ||
-            siblingMeta.fromCurrency,
-          toCurrency:
-            enrichedMetadata.toCurrency ||
-            (isThisDebit ? sibling.currency : tx.currency) ||
-            siblingMeta.toCurrency,
-          fromAmount:
-            enrichedMetadata.fromAmount ||
-            (isThisDebit ? Number(tx.amount) : Number(sibling.amount)) ||
-            siblingMeta.fromAmount,
-          toAmount:
-            enrichedMetadata.toAmount ||
-            (isThisDebit ? Number(sibling.amount) : Number(tx.amount)) ||
-            siblingMeta.toAmount,
-          receivedAmount:
-            enrichedMetadata.receivedAmount ||
-            siblingMeta.receivedAmount ||
-            (isThisDebit
-              ? Number(sibling.amount) - Number(sibling.fee || 0)
-              : Number(tx.amount) - Number(tx.fee || 0)),
-          exchangeRate:
-            enrichedMetadata.exchangeRate ||
-            siblingMeta.exchangeRate ||
-            null,
-          fee:
-            enrichedMetadata.fee ??
-            siblingMeta.fee ??
-            (isThisDebit ? Number(sibling.fee || 0) : Number(tx.fee || 0)),
-        };
-      }
+            select: {
+              id: true,
+              reference: true,
+              amount: true,
+              currency: true,
+              fee: true,
+              type: true,
+              metadata: true,
+            },
+          })
+        : null;
+      const siblingMeta = ((sibling?.metadata as Record<string, any>) || {}) as Record<string, any>;
+      const isThisDebit =
+        String(tx.reference || '').toUpperCase().endsWith('-DEBIT') || tx.type === 'withdrawal';
+      const fromAmount =
+        enrichedMetadata.fromAmount ??
+        siblingMeta.fromAmount ??
+        (isThisDebit ? Number(tx.amount) : sibling ? Number(sibling.amount) : null);
+      const toAmount =
+        enrichedMetadata.toAmount ??
+        siblingMeta.toAmount ??
+        (isThisDebit
+          ? sibling
+            ? Number(sibling.amount)
+            : null
+          : Number(tx.amount));
+      const rawRate =
+        enrichedMetadata.exchangeRate ??
+        siblingMeta.exchangeRate ??
+        metadata.rate ??
+        siblingMeta.rate ??
+        null;
+      const numericFrom = fromAmount != null ? Number(fromAmount) : NaN;
+      const numericTo = toAmount != null ? Number(toAmount) : NaN;
+      const computedRate =
+        rawRate != null && rawRate !== ''
+          ? Number(rawRate)
+          : Number.isFinite(numericFrom) &&
+              Number.isFinite(numericTo) &&
+              numericFrom > 0
+            ? numericTo / numericFrom
+            : null;
+
+      enrichedMetadata = {
+        ...enrichedMetadata,
+        conversionReference: conversionRef || enrichedMetadata.conversionReference,
+        fromCurrency:
+          enrichedMetadata.fromCurrency ||
+          siblingMeta.fromCurrency ||
+          (isThisDebit ? tx.currency : sibling?.currency) ||
+          null,
+        toCurrency:
+          enrichedMetadata.toCurrency ||
+          siblingMeta.toCurrency ||
+          (isThisDebit ? sibling?.currency : tx.currency) ||
+          null,
+        fromAmount: fromAmount != null ? Number(fromAmount) : null,
+        toAmount: toAmount != null ? Number(toAmount) : null,
+        receivedAmount:
+          enrichedMetadata.receivedAmount ??
+          siblingMeta.receivedAmount ??
+          (sibling && isThisDebit
+            ? Number(sibling.amount) - Number(sibling.fee || 0)
+            : Number(tx.amount) - Number(tx.fee || 0)),
+        exchangeRate:
+          computedRate != null && Number.isFinite(computedRate) ? computedRate : null,
+        fee:
+          enrichedMetadata.fee ??
+          siblingMeta.fee ??
+          (isThisDebit ? Number(sibling?.fee || 0) : Number(tx.fee || 0)),
+      };
     }
 
     return {
