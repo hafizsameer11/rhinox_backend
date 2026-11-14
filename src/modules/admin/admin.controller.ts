@@ -8,6 +8,7 @@ import { AdminTransactionsService, AdminKycService, AdminWalletsService } from '
 import { AdminExchangeService, AdminP2PService } from './services/admin-market.service.js';
 import { AdminMasterWalletService, AdminAnalyticsService, AdminRewardsService } from './services/admin-insights.service.js';
 import { AdminSupportService, AdminNotificationsService, AdminStaffService } from './services/admin-platform.service.js';
+import { AdminBushaService } from './services/admin-busha.service.js';
 
 export class AdminController {
   private authService = new AdminAuthService();
@@ -24,6 +25,7 @@ export class AdminController {
   private supportService = new AdminSupportService();
   private notificationsService = new AdminNotificationsService();
   private staffService = new AdminStaffService();
+  private bushaService = new AdminBushaService();
 
   private async audit(req: AdminRequest, action: string, resource: string, resourceId?: string | number, metadata?: Record<string, unknown>) {
     if (!req.adminId) return;
@@ -520,6 +522,35 @@ export class AdminController {
 
   staffActivity = async (req: AdminRequest, res: Response) => {
     const data = await this.staffService.getActivity(Number(req.params.id), parseAdminListQuery(req));
+    return res.json({ success: true, data });
+  };
+
+  listBushaTrades = async (req: AdminRequest, res: Response) => {
+    const data = await this.bushaService.listTrades(parseAdminListQuery(req));
+    return res.json({ success: true, data });
+  };
+
+  getBushaTrade = async (req: AdminRequest, res: Response) => {
+    try {
+      const data = await this.bushaService.getTradeById(Number(req.params.id));
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(404).json({ success: false, message: error.message });
+    }
+  };
+
+  listBushaCustomers = async (req: AdminRequest, res: Response) => {
+    const data = await this.bushaService.listCustomers(parseAdminListQuery(req));
+    return res.json({ success: true, data });
+  };
+
+  listBushaKyc = async (req: AdminRequest, res: Response) => {
+    const data = await this.bushaService.listKycApplications(parseAdminListQuery(req));
+    return res.json({ success: true, data });
+  };
+
+  getBushaConfig = async (_req: AdminRequest, res: Response) => {
+    const data = await this.bushaService.getConfig();
     return res.json({ success: true, data });
   };
 }

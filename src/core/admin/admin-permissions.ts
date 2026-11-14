@@ -24,6 +24,8 @@ const ROLE_PERMISSIONS: Record<AdminRole, string[]> = {
     'notifications.write',
     'staff.read',
     'staff.write',
+    'busha.read',
+    'busha.write',
   ],
   AGENT: [
     'dashboard.read',
@@ -32,6 +34,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, string[]> = {
     'support.read',
     'support.write',
     'transactions.read',
+    'busha.read',
   ],
   SUPPORT: [
     'dashboard.read',

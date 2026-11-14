@@ -14,21 +14,47 @@ export class AdminTransactionsService {
     const map: Record<string, string> = {
       Send: 'transfer',
       Fund: 'deposit',
-      Convert: 'transfer',
       Withdraw: 'withdrawal',
-      P2P: 'p2p',
       'Bill Payments': 'bill_payment',
     };
     return action ? map[action] : undefined;
+  }
+
+  private mapBillSubtypeToChannel(value?: string) {
+    if (!value) return undefined;
+    const map: Record<string, string> = {
+      'Airtime Recharge': 'airtime',
+      Airtime: 'airtime',
+      'Data Recharge': 'data',
+      'Cable TV': 'cable_tv',
+      'Cable tv': 'cable_tv',
+      Electricity: 'electricity',
+      Betting: 'betting',
+      'Internet subscription': 'internet',
+      Internet: 'internet',
+      airtime: 'airtime',
+      data: 'data',
+      cable_tv: 'cable_tv',
+      electricity: 'electricity',
+      betting: 'betting',
+      internet: 'internet',
+    };
+    const key = String(value).trim();
+    if (!key || key === 'Buy' || key.startsWith('All')) return undefined;
+    return map[key] || key.replace(/\s+/g, '_').toLowerCase();
   }
 
   private buildWhere(query: AdminListQuery) {
     const where: any = { ...buildDateFilter(query.from, query.to) };
 
     const action = query.action ? String(query.action) : undefined;
-    const mappedType = action && action !== 'All' ? this.mapActionToType(action) : undefined;
-    if (mappedType) where.type = mappedType;
-    else if (query.type && query.type !== 'All') where.type = String(query.type);
+    if (action === 'Convert') {
+      where.type = { in: ['crypto_buy', 'crypto_sell'] };
+    } else {
+      const mappedType = action && action !== 'All' ? this.mapActionToType(action) : undefined;
+      if (mappedType) where.type = mappedType;
+      else if (query.type && query.type !== 'All') where.type = String(query.type);
+    }
 
     if (query.assetType === 'Fiat') where.currency = { notIn: CRYPTO_CURRENCIES };
     if (query.assetType === 'Crypto') where.currency = { in: CRYPTO_CURRENCIES };
@@ -39,11 +65,27 @@ export class AdminTransactionsService {
     if (query.status && query.status !== 'All Status') {
       where.status = String(query.status).toLowerCase();
     }
+
     const channel = query.channel ? String(query.channel) : '';
-    const ignoredChannels = ['Tx Type', 'Route', 'All Routes', 'All types'];
-    if (channel && !ignoredChannels.includes(channel)) {
-      where.channel = { contains: channel.replace(/\s+/g, '_').toLowerCase() };
+    const buySell = query.buySell ? String(query.buySell) : '';
+    const ignoredChannels = ['Tx Type', 'Route', 'All Routes', 'All types', 'Buy'];
+    const billChannel =
+      this.mapBillSubtypeToChannel(channel) || this.mapBillSubtypeToChannel(buySell);
+
+    if (where.type === 'bill_payment' && billChannel) {
+      where.channel = billChannel;
+    } else if (channel && !ignoredChannels.includes(channel) && !billChannel) {
+      const normalized = channel.replace(/\s+/g, '_').toLowerCase();
+      // Rhinox internal transfers
+      if (normalized.includes('rhinox') || normalized === 'rhinox_id') {
+        where.channel = { in: ['rhionx_user', 'rhinox_user'] };
+      } else {
+        where.channel = { contains: normalized };
+      }
+    } else if (billChannel && where.type !== 'bill_payment') {
+      where.channel = billChannel;
     }
+
     if (query.search) {
       where.OR = [
         { reference: { contains: query.search } },

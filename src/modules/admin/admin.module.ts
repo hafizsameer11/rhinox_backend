@@ -118,5 +118,12 @@ export class AdminModule implements IModule {
     this.router.patch('/staff/:id', auth, perm('staff.write'), c.updateStaff);
     this.router.delete('/staff/:id', auth, perm('staff.write'), c.deleteStaff);
     this.router.get('/staff/:id/activity', auth, perm('staff.read'), c.staffActivity);
+
+    // Busha
+    this.router.get('/busha/trades', auth, perm('busha.read'), c.listBushaTrades);
+    this.router.get('/busha/trades/:id', auth, perm('busha.read'), c.getBushaTrade);
+    this.router.get('/busha/customers', auth, perm('busha.read'), c.listBushaCustomers);
+    this.router.get('/busha/kyc', auth, perm('busha.read'), c.listBushaKyc);
+    this.router.get('/busha/config', auth, perm('busha.read'), c.getBushaConfig);
   }
 }
